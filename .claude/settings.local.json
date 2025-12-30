@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell:*)",
+      "Bash(unzip:*)",
+      "Bash(npm init:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run tauri:*)",
+      "Bash(timeout 180 npm run tauri:*)",
+      "Bash(timeout 120 npm run tauri dev)",
+      "Bash(timeout 60 npm run tauri dev)",
+      "Bash(timeout 30 npm run tauri:*)"
+    ]
+  }
+}
