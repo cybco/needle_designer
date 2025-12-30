@@ -100,7 +100,7 @@ interface NdpFile {
 
 ### Phase 1A: Core Designer (MVP) - IN PROGRESS
 - [x] Project setup (Tauri + React + TypeScript)
-- [ ] Basic pattern editor with grid canvas
+- [x] Basic pattern editor with grid canvas
 - [ ] Drawing tools (pencil, fill, eraser)
 - [ ] Color palette management
 - [ ] Image import with color reduction

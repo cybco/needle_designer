@@ -9,7 +9,12 @@
       "Bash(timeout 180 npm run tauri:*)",
       "Bash(timeout 120 npm run tauri dev)",
       "Bash(timeout 60 npm run tauri dev)",
-      "Bash(timeout 30 npm run tauri:*)"
+      "Bash(timeout 30 npm run tauri:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(npm run tauri:build:*)",
+      "Bash(npm run:*)",
+      "Bash(cargo check:*)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

@@ -527,7 +527,7 @@ interface MachineJob {
 #### Phase 1A: Core Designer (MVP)
 **Scope:**
 - [x] Project setup (Tauri + React + TypeScript)
-- [ ] Basic pattern editor with grid canvas
+- [x] Basic pattern editor with grid canvas
 - [ ] Drawing tools (pencil, fill, eraser)
 - [ ] Color palette management
 - [ ] Image import with color reduction
