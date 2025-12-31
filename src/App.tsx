@@ -3,6 +3,7 @@ import { PatternCanvas } from './components/PatternCanvas';
 import { ColorPalette } from './components/ColorPalette';
 import { Toolbar } from './components/Toolbar';
 import { LayerPanel } from './components/LayerPanel';
+import { ProgressTrackingPanel } from './components/ProgressTrackingPanel';
 import { NewProjectDialog } from './components/NewProjectDialog';
 import { ImportImageDialog } from './components/ImportImageDialog';
 import { TextEditorDialog } from './components/TextEditorDialog';
@@ -11,6 +12,9 @@ import { DeleteLayerDialog } from './components/DeleteLayerDialog';
 import { ExportPdfDialog } from './components/ExportPdfDialog';
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog';
 import { ColorMatchDialog } from './components/ColorMatchDialog';
+import { SymbolAssignmentDialog } from './components/SymbolAssignmentDialog';
+import { OverlayImageDialog } from './components/OverlayImageDialog';
+import { ToggleSwitch } from './components/ToggleSwitch';
 import { usePatternStore, Pattern, RulerUnit, Stitch } from './stores/patternStore';
 import { loadBundledFonts } from './data/bundledFonts';
 import { invoke } from '@tauri-apps/api/core';
@@ -19,6 +23,21 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { exit } from '@tauri-apps/plugin-process';
 
 // NDP file format for Tauri
+interface NdpOverlayImage {
+  id: string;
+  name: string;
+  data_url: string;
+  opacity: number;
+  visible: boolean;
+  locked: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  natural_width: number;
+  natural_height: number;
+}
+
 interface NdpFile {
   version: string;
   metadata: {
@@ -55,6 +74,11 @@ interface NdpFile {
       completed: boolean;
     }>;
   }>;
+  overlays?: NdpOverlayImage[];
+  zoom?: number;
+  is_progress_mode?: boolean;
+  progress_shading_color?: [number, number, number];
+  progress_shading_opacity?: number;
 }
 
 const RECENT_FILES_KEY = 'needlepoint-recent-files';
@@ -66,6 +90,8 @@ interface Preferences {
   historySize: number;
   rulerUnit: RulerUnit;
   confirmLayerDelete: boolean; // Show confirmation when deleting layers
+  showSymbols: boolean; // Show symbols on color swatches
+  showCenterMarker: boolean; // Show green X at canvas center
 }
 
 const DEFAULT_PREFERENCES: Preferences = {
@@ -73,13 +99,14 @@ const DEFAULT_PREFERENCES: Preferences = {
   historySize: 50,
   rulerUnit: 'inches',
   confirmLayerDelete: true,
+  showSymbols: true,
+  showCenterMarker: true,
 };
 
 function App() {
   const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showFileMenu, setShowFileMenu] = useState(false);
-  const [showImportMenu, setShowImportMenu] = useState(false);
   const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [showPreferencesMenu, setShowPreferencesMenu] = useState(false);
   const [showRecentMenu, setShowRecentMenu] = useState(false);
@@ -103,6 +130,26 @@ function App() {
   // Text tool state
   const [showTextEditor, setShowTextEditor] = useState(false);
   const [showFontBrowser, setShowFontBrowser] = useState(false);
+
+  // Helper to close all menus
+  const closeAllMenus = useCallback(() => {
+    setShowFileMenu(false);
+    setShowToolsMenu(false);
+    setShowPreferencesMenu(false);
+    setShowRecentMenu(false);
+  }, []);
+
+  // Helper to toggle a menu (closes others first, then opens clicked one)
+  const toggleMenu = useCallback((menuSetter: React.Dispatch<React.SetStateAction<boolean>>, currentValue: boolean) => {
+    if (currentValue) {
+      // If this menu is already open, just close it
+      menuSetter(false);
+    } else {
+      // Close all menus first, then open this one
+      closeAllMenus();
+      menuSetter(true);
+    }
+  }, [closeAllMenus]);
   const [selectedFont, setSelectedFont] = useState('Roboto');
   const [selectedFontWeight, setSelectedFontWeight] = useState(400);
 
@@ -115,6 +162,12 @@ function App() {
 
   // Color match dialog state
   const [showColorMatchDialog, setShowColorMatchDialog] = useState(false);
+
+  // Symbol assignment dialog state
+  const [showSymbolDialog, setShowSymbolDialog] = useState(false);
+
+  // Overlay image dialog state
+  const [showOverlayDialog, setShowOverlayDialog] = useState(false);
 
   // Unsaved changes dialog state
   const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = useState(false);
@@ -129,8 +182,10 @@ function App() {
     history,
     selectedColorId,
     selection,
+    overlayImages,
     setTool,
     setZoom,
+    setPanOffset,
     loadPattern,
     setCurrentFilePath,
     markSaved,
@@ -141,11 +196,32 @@ function App() {
     importAsLayer,
     removeLayer,
     clearSelection,
+    setOverlayImages,
+    isProgressMode,
+    toggleProgressMode,
+    setProgressMode,
+    progressShadingColor,
+    progressShadingOpacity,
+    setProgressShadingColor,
+    setProgressShadingOpacity,
   } = usePatternStore();
 
   // Load bundled fonts on app startup
   useEffect(() => {
     loadBundledFonts();
+  }, []);
+
+  // Show window after React has mounted (prevents white flash on startup)
+  useEffect(() => {
+    const showWindow = async () => {
+      try {
+        const appWindow = getCurrentWindow();
+        await appWindow.show();
+      } catch (error) {
+        console.error('Failed to show window:', error);
+      }
+    };
+    showWindow();
   }, []);
 
   // Handle window close with unsaved changes check
@@ -252,21 +328,16 @@ function App() {
             setTool('ellipse');
           }
           break;
-        case 'm':
-          if (!e.ctrlKey && !e.metaKey && pattern) {
-            setShowColorMatchDialog(true);
-          }
-          break;
         case ' ':
           e.preventDefault();
           setTool('pan');
           break;
         case '+':
         case '=':
-          setZoom(zoom + 0.25);
+          setZoom(zoom + 0.1);
           break;
         case '-':
-          setZoom(zoom - 0.25);
+          setZoom(zoom - 0.1);
           break;
         case '0':
           setZoom(1);
@@ -344,8 +415,26 @@ function App() {
           completed: s.completed,
         })),
       })),
+      overlays: overlayImages.length > 0 ? overlayImages.map((o) => ({
+        id: o.id,
+        name: o.name,
+        data_url: o.dataUrl,
+        opacity: o.opacity,
+        visible: o.visible,
+        locked: o.locked,
+        x: o.x,
+        y: o.y,
+        width: o.width,
+        height: o.height,
+        natural_width: o.naturalWidth,
+        natural_height: o.naturalHeight,
+      })) : undefined,
+      zoom,
+      is_progress_mode: isProgressMode,
+      progress_shading_color: progressShadingColor,
+      progress_shading_opacity: progressShadingOpacity,
     };
-  }, []);
+  }, [overlayImages, zoom, isProgressMode, progressShadingColor, progressShadingOpacity]);
 
   // Convert NDP file to pattern
   const ndpToPattern = useCallback((ndp: NdpFile): Pattern => {
@@ -385,6 +474,46 @@ function App() {
       const ndpFile = await invoke<NdpFile>('open_project', { path: filePath });
       const loadedPattern = ndpToPattern(ndpFile);
       loadPattern(loadedPattern, filePath);
+
+      // Load overlays if present
+      if (ndpFile.overlays && ndpFile.overlays.length > 0) {
+        const loadedOverlays = ndpFile.overlays.map((o) => ({
+          id: o.id,
+          name: o.name,
+          dataUrl: o.data_url,
+          opacity: o.opacity,
+          visible: o.visible,
+          locked: o.locked,
+          x: o.x,
+          y: o.y,
+          width: o.width,
+          height: o.height,
+          naturalWidth: o.natural_width,
+          naturalHeight: o.natural_height,
+        }));
+        setOverlayImages(loadedOverlays);
+      } else {
+        setOverlayImages([]);
+      }
+
+      // Restore zoom level
+      if (ndpFile.zoom !== undefined && ndpFile.zoom !== null) {
+        setZoom(ndpFile.zoom);
+      }
+
+      // Restore progress tracking settings
+      if (ndpFile.is_progress_mode === true) {
+        setProgressMode(true);
+      } else {
+        setProgressMode(false);
+      }
+      if (ndpFile.progress_shading_color && Array.isArray(ndpFile.progress_shading_color)) {
+        setProgressShadingColor(ndpFile.progress_shading_color);
+      }
+      if (typeof ndpFile.progress_shading_opacity === 'number') {
+        setProgressShadingOpacity(ndpFile.progress_shading_opacity);
+      }
+
       addToRecentFiles(filePath);
     } catch (error) {
       console.error('Failed to open:', error);
@@ -396,7 +525,7 @@ function App() {
         return updated;
       });
     }
-  }, [ndpToPattern, loadPattern, addToRecentFiles]);
+  }, [ndpToPattern, loadPattern, addToRecentFiles, setOverlayImages, setZoom, setProgressMode, setProgressShadingColor, setProgressShadingOpacity]);
 
   // Save project
   const handleSave = useCallback(async () => {
@@ -466,12 +595,52 @@ function App() {
       const loadedPattern = ndpToPattern(ndpFile);
 
       loadPattern(loadedPattern, result as string);
+
+      // Load overlays if present
+      if (ndpFile.overlays && ndpFile.overlays.length > 0) {
+        const loadedOverlays = ndpFile.overlays.map((o) => ({
+          id: o.id,
+          name: o.name,
+          dataUrl: o.data_url,
+          opacity: o.opacity,
+          visible: o.visible,
+          locked: o.locked,
+          x: o.x,
+          y: o.y,
+          width: o.width,
+          height: o.height,
+          naturalWidth: o.natural_width,
+          naturalHeight: o.natural_height,
+        }));
+        setOverlayImages(loadedOverlays);
+      } else {
+        setOverlayImages([]);
+      }
+
+      // Restore zoom level
+      if (ndpFile.zoom !== undefined && ndpFile.zoom !== null) {
+        setZoom(ndpFile.zoom);
+      }
+
+      // Restore progress tracking settings
+      if (ndpFile.is_progress_mode === true) {
+        setProgressMode(true);
+      } else {
+        setProgressMode(false);
+      }
+      if (ndpFile.progress_shading_color && Array.isArray(ndpFile.progress_shading_color)) {
+        setProgressShadingColor(ndpFile.progress_shading_color);
+      }
+      if (typeof ndpFile.progress_shading_opacity === 'number') {
+        setProgressShadingOpacity(ndpFile.progress_shading_opacity);
+      }
+
       addToRecentFiles(result as string);
     } catch (error) {
       console.error('Failed to open:', error);
       alert(`Failed to open project: ${error}`);
     }
-  }, [ndpToPattern, loadPattern, addToRecentFiles]);
+  }, [ndpToPattern, loadPattern, addToRecentFiles, setOverlayImages, setZoom, setProgressMode, setProgressShadingColor, setProgressShadingOpacity]);
 
   // Save preferences to localStorage
   const updatePreferences = useCallback((newPrefs: Partial<Preferences>) => {
@@ -541,6 +710,38 @@ function App() {
       }
     }
   }, []);
+
+  // Move to center - pan the view so the center marker is in the middle of the viewport
+  const handleMoveToCenter = useCallback(() => {
+    if (!pattern) return;
+
+    // Constants from PatternCanvas
+    const CELL_SIZE = 20;
+    const RULER_SIZE = 24;
+
+    // Estimate the canvas viewport dimensions
+    // Layout: toolbar (48px) + canvas area + right panel (256px)
+    // Canvas area includes left ruler (24px) + main canvas + right ruler (24px)
+    const canvasWidth = window.innerWidth - 48 - 256 - RULER_SIZE * 2;
+    const canvasHeight = window.innerHeight - 40 - 28 - RULER_SIZE; // header, status bar, top ruler
+
+    // Calculate the center cell position in the pattern
+    const centerCellX = Math.floor(pattern.canvas.width / 2);
+    const centerCellY = Math.floor(pattern.canvas.height / 2);
+
+    // Calculate the cell size at current zoom
+    const cellSize = CELL_SIZE * zoom;
+
+    // Calculate the position of the center of the center cell in pattern coordinates
+    const patternCenterX = (centerCellX + 0.5) * cellSize;
+    const patternCenterY = (centerCellY + 0.5) * cellSize;
+
+    // Calculate the pan offset to center this point in the viewport
+    const newPanX = canvasWidth / 2 - patternCenterX;
+    const newPanY = canvasHeight / 2 - patternCenterY;
+
+    setPanOffset({ x: newPanX, y: newPanY });
+  }, [pattern, zoom, setPanOffset]);
 
   // Sync history size with store when preferences change
   useEffect(() => {
@@ -639,23 +840,25 @@ function App() {
       <header className="bg-gray-800 text-white px-4 py-2 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-6">
           <h1 className="text-lg font-semibold">NeedlePoint Designer</h1>
-          <nav className="flex gap-4 text-sm">
+          <nav className="flex gap-4 text-sm relative z-50">
+            {/* Global backdrop to close menus when clicking outside */}
+            {(showFileMenu || showToolsMenu || showPreferencesMenu) && (
+              <div
+                className="fixed inset-0 z-40"
+                onClick={closeAllMenus}
+              />
+            )}
+
             {/* File Menu */}
             <div className="relative">
               <button
-                onClick={() => setShowFileMenu(!showFileMenu)}
-                className="hover:text-blue-300 transition-colors"
+                onClick={() => toggleMenu(setShowFileMenu, showFileMenu)}
+                className="hover:text-blue-300 transition-colors relative z-50"
               >
                 File
               </button>
               {showFileMenu && (
-                <>
-                  {/* Backdrop to close menu when clicking outside */}
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setShowFileMenu(false)}
-                  />
-                  <div className="absolute top-full left-0 mt-1 bg-gray-700 rounded shadow-lg py-1 min-w-40 z-50">
+                <div className="absolute top-full left-0 mt-1 bg-gray-700 rounded shadow-lg py-1 min-w-40 z-50">
                   <button
                     onClick={() => { setShowNewProjectDialog(true); setShowFileMenu(false); }}
                     className="w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors"
@@ -741,83 +944,80 @@ function App() {
                     Exit <span className="text-gray-400 text-xs float-right">Alt+F4</span>
                   </button>
                 </div>
-                </>
-              )}
-            </div>
-
-            {/* Import Menu */}
-            <div className="relative">
-              <button
-                onClick={() => setShowImportMenu(!showImportMenu)}
-                className="hover:text-blue-300 transition-colors"
-              >
-                Import
-              </button>
-              {showImportMenu && (
-                <>
-                  {/* Backdrop to close menu when clicking outside */}
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setShowImportMenu(false)}
-                  />
-                  <div className="absolute top-full left-0 mt-1 bg-gray-700 rounded shadow-lg py-1 min-w-40 z-50">
-                    <button
-                      onClick={() => { setShowImportDialog(true); setShowImportMenu(false); }}
-                      className="w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors"
-                    >
-                      Import Image
-                    </button>
-                  </div>
-                </>
               )}
             </div>
 
             {/* Tools Menu */}
             <div className="relative">
               <button
-                onClick={() => setShowToolsMenu(!showToolsMenu)}
-                className="hover:text-blue-300 transition-colors"
+                onClick={() => toggleMenu(setShowToolsMenu, showToolsMenu)}
+                className="hover:text-blue-300 transition-colors relative z-50"
               >
                 Tools
               </button>
               {showToolsMenu && (
-                <>
-                  {/* Backdrop to close menu when clicking outside */}
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setShowToolsMenu(false)}
-                  />
-                  <div className="absolute top-full left-0 mt-1 bg-gray-700 rounded shadow-lg py-1 min-w-40 z-50">
+                <div className="absolute top-full left-0 mt-1 bg-gray-700 rounded shadow-lg py-1 min-w-48 z-50">
+                    <button
+                      onClick={() => { toggleProgressMode(); setShowToolsMenu(false); }}
+                      disabled={!pattern}
+                      className={`w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors ${!pattern ? 'opacity-50 cursor-not-allowed' : ''} ${isProgressMode ? 'bg-green-700' : ''}`}
+                    >
+                      {isProgressMode ? 'Exit Progress Tracking' : 'Progress Tracking'}
+                    </button>
+                    <div className="border-t border-gray-600 my-1" />
+                    <button
+                      onClick={() => { setShowImportDialog(true); setShowToolsMenu(false); }}
+                      disabled={!pattern}
+                      className={`w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors ${!pattern ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      Convert Image
+                    </button>
+                    <button
+                      onClick={() => { setShowOverlayDialog(true); setShowToolsMenu(false); }}
+                      disabled={!pattern}
+                      className={`w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors ${!pattern ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      Overlay Image
+                    </button>
+                    <div className="border-t border-gray-600 my-1" />
                     <button
                       onClick={() => { setShowColorMatchDialog(true); setShowToolsMenu(false); }}
                       disabled={!pattern}
                       className={`w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors ${!pattern ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
-                      Color Matching <span className="text-gray-400 text-xs float-right">M</span>
+                      Color Matching
                     </button>
-                  </div>
-                </>
+                    <button
+                      onClick={() => { setShowSymbolDialog(true); setShowToolsMenu(false); }}
+                      disabled={!pattern}
+                      className={`w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors ${!pattern ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      Symbol Assignment
+                    </button>
+                    <div className="border-t border-gray-600 my-1" />
+                    <button
+                      onClick={() => { handleMoveToCenter(); setShowToolsMenu(false); }}
+                      disabled={!pattern}
+                      className={`w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors ${!pattern ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      Move to Center
+                    </button>
+                </div>
               )}
             </div>
 
             {/* Preferences Menu */}
             <div className="relative">
               <button
-                onClick={() => setShowPreferencesMenu(!showPreferencesMenu)}
-                className="hover:text-blue-300 transition-colors"
+                onClick={() => toggleMenu(setShowPreferencesMenu, showPreferencesMenu)}
+                className="hover:text-blue-300 transition-colors relative z-50"
               >
                 Preferences
               </button>
               {showPreferencesMenu && (
-                <>
-                  {/* Backdrop to close menu when clicking outside */}
-                  <div
-                    className="fixed inset-0 z-40"
-                    onClick={() => setShowPreferencesMenu(false)}
-                  />
-                  <div className="absolute top-full left-0 mt-1 bg-gray-700 rounded shadow-lg py-1 min-w-[200px] z-50">
+                <div className="absolute top-full left-0 mt-1 bg-gray-700 rounded shadow-lg py-1 min-w-[280px] z-50">
                     <div className="px-4 py-2">
-                      <label className="block text-xs text-gray-400 mb-1">Auto-save</label>
+                      <label className="block text-xs text-gray-400 mb-1">Auto-Save</label>
                       <select
                         value={preferences.autoSaveMinutes ?? 'none'}
                         onChange={(e) => {
@@ -873,21 +1073,28 @@ function App() {
                         <option value="squares">Squares</option>
                       </select>
                     </div>
-                    <div className="px-4 py-2 border-t border-gray-600">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={preferences.confirmLayerDelete}
-                          onChange={(e) => {
-                            updatePreferences({ confirmLayerDelete: e.target.checked });
-                          }}
-                          className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                        />
-                        <span className="text-sm text-white">Confirm layer delete</span>
-                      </label>
+                    <div className="px-4 py-3 border-t border-gray-600">
+                      <ToggleSwitch
+                        checked={preferences.confirmLayerDelete}
+                        onChange={(checked) => updatePreferences({ confirmLayerDelete: checked })}
+                        label="Confirm Layer Delete"
+                      />
                     </div>
-                  </div>
-                </>
+                    <div className="px-4 py-3 border-t border-gray-600">
+                      <ToggleSwitch
+                        checked={preferences.showSymbols}
+                        onChange={(checked) => updatePreferences({ showSymbols: checked })}
+                        label="Show Symbols"
+                      />
+                    </div>
+                    <div className="px-4 py-3 border-t border-gray-600">
+                      <ToggleSwitch
+                        checked={preferences.showCenterMarker}
+                        onChange={(checked) => updatePreferences({ showCenterMarker: checked })}
+                        label="Show Center Marker"
+                      />
+                    </div>
+                </div>
               )}
             </div>
           </nav>
@@ -909,17 +1116,23 @@ function App() {
       <main className="flex-1 flex overflow-hidden">
         {pattern ? (
           <>
-            {/* Left Toolbar */}
-            <Toolbar onTextToolClick={() => setShowTextEditor(true)} />
+            {/* Left Toolbar - hidden in progress mode */}
+            {!isProgressMode && (
+              <Toolbar onTextToolClick={() => setShowTextEditor(true)} />
+            )}
 
             {/* Canvas Area */}
-            <PatternCanvas />
+            <PatternCanvas showSymbols={preferences.showSymbols} showCenterMarker={preferences.showCenterMarker} />
 
-            {/* Right Panel - Layers and Colors */}
-            <div className="flex flex-col border-l border-gray-300">
-              <LayerPanel />
-              <ColorPalette />
-            </div>
+            {/* Right Panel - either Progress Tracking or Layers/Colors */}
+            {isProgressMode ? (
+              <ProgressTrackingPanel />
+            ) : (
+              <div className="flex flex-col border-l border-gray-300">
+                <LayerPanel />
+                <ColorPalette showSymbols={preferences.showSymbols} />
+              </div>
+            )}
           </>
         ) : (
           /* Welcome Screen */
@@ -976,11 +1189,15 @@ function App() {
       </main>
 
       {/* Status Bar */}
-      <footer className="bg-gray-200 px-4 py-1 text-sm text-gray-600 flex justify-between shrink-0">
+      <footer className={`px-4 py-1 text-sm flex justify-between shrink-0 ${isProgressMode ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-600'}`}>
         <div className="flex gap-4">
-          <span>
-            Tool: {activeTool.charAt(0).toUpperCase() + activeTool.slice(1)}
-          </span>
+          {isProgressMode ? (
+            <span className="font-medium">Progress Tracking Mode - Click stitches to mark complete</span>
+          ) : (
+            <span>
+              Tool: {activeTool.charAt(0).toUpperCase() + activeTool.slice(1)}
+            </span>
+          )}
           {pattern && (
             <>
               <span>|</span>
@@ -1074,6 +1291,18 @@ function App() {
       <ColorMatchDialog
         isOpen={showColorMatchDialog}
         onClose={() => setShowColorMatchDialog(false)}
+      />
+
+      {/* Symbol Assignment Dialog */}
+      <SymbolAssignmentDialog
+        isOpen={showSymbolDialog}
+        onClose={() => setShowSymbolDialog(false)}
+      />
+
+      {/* Overlay Image Dialog */}
+      <OverlayImageDialog
+        isOpen={showOverlayDialog}
+        onClose={() => setShowOverlayDialog(false)}
       />
     </div>
   );

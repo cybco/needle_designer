@@ -7,7 +7,11 @@ import {
   getThreadLibraries
 } from '../data/threadLibrary';
 
-export function ColorPalette() {
+interface ColorPaletteProps {
+  showSymbols?: boolean;
+}
+
+export function ColorPalette({ showSymbols = true }: ColorPaletteProps) {
   const { pattern, selectedColorId, selectColor, addColor } = usePatternStore();
   const [showThreadLibrary, setShowThreadLibrary] = useState(false);
   const [selectedBrand, setSelectedBrand] = useState<ThreadBrand>('DMC');
@@ -87,23 +91,38 @@ export function ColorPalette() {
 
       <div className="flex-1 overflow-y-auto p-2">
         <div className="grid grid-cols-4 gap-1">
-          {pattern.colorPalette.map((color) => (
-            <button
-              key={color.id}
-              onClick={() => selectColor(color.id)}
-              className={`
-                w-10 h-10 rounded border-2 transition-all
-                ${selectedColorId === color.id
-                  ? 'border-blue-500 ring-2 ring-blue-200 scale-110'
-                  : 'border-gray-300 hover:border-gray-400'
-                }
-              `}
-              style={{
-                backgroundColor: `rgb(${color.rgb[0]}, ${color.rgb[1]}, ${color.rgb[2]})`,
-              }}
-              title={color.name}
-            />
-          ))}
+          {pattern.colorPalette.map((color) => {
+            // Calculate contrast color for symbol
+            const luminance = (0.299 * color.rgb[0] + 0.587 * color.rgb[1] + 0.114 * color.rgb[2]) / 255;
+            const symbolColor = luminance > 0.5 ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.9)';
+
+            return (
+              <button
+                key={color.id}
+                onClick={() => selectColor(color.id)}
+                className={`
+                  w-10 h-10 rounded border-2 transition-all relative
+                  ${selectedColorId === color.id
+                    ? 'border-blue-500 ring-2 ring-blue-200 scale-110'
+                    : 'border-gray-300 hover:border-gray-400'
+                  }
+                `}
+                style={{
+                  backgroundColor: `rgb(${color.rgb[0]}, ${color.rgb[1]}, ${color.rgb[2]})`,
+                }}
+                title={`${color.name}${color.symbol ? ` (${color.symbol})` : ''}`}
+              >
+                {showSymbols && color.symbol && (
+                  <span
+                    className="absolute inset-0 flex items-center justify-center text-sm font-bold"
+                    style={{ color: symbolColor }}
+                  >
+                    {color.symbol}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -203,6 +222,11 @@ export function ColorPalette() {
                     {color.threadBrand} {color.threadCode}
                   </p>
                 )}
+                {color.symbol && (
+                  <p className="text-xs text-gray-500">
+                    Symbol: {color.symbol}
+                  </p>
+                )}
               </div>
             );
           })()}
@@ -214,6 +238,7 @@ export function ColorPalette() {
         isOpen={showThreadLibrary}
         onClose={() => setShowThreadLibrary(false)}
         initialBrand={selectedBrand}
+        showSymbols={showSymbols}
       />
     </div>
   );

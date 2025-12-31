@@ -121,10 +121,32 @@ The WorkBii Vision Plotter system requires specialized software to:
 - **High-Contrast Mode:** Accessibility-friendly symbols
 
 ### 3.4 Progress Tracking
-- **Stitch Marking:** Mark individual stitches as complete
-- **Section Completion:** Track progress by color or region
-- **Statistics:** Percentage complete, estimated time remaining
-- **Save/Resume:** Persist progress across sessions
+
+#### 3.4.1 Progress Mode
+- **Entry:** Tools > Progress Tracking menu item to enter progress mode
+- **Canvas Mode:** Non-editable except for progress tracking (click to mark complete)
+- **UI Changes in Progress Mode:**
+  - Hide overlay images
+  - Hide left sidebar (tools/layers)
+  - Right sidebar shows progress tracking information only
+
+#### 3.4.2 Stitch Marking
+- **Click to Complete:** Click/tap on stitches to toggle completion status
+- **Visual Indicator:** Completed stitches shown as greyed out
+- **Bulk Selection:** (Future) Select region to mark multiple stitches
+
+#### 3.4.3 Progress Statistics (Right Sidebar)
+- **Total Progress:** Overall percentage complete
+- **Total Stitch Count:** X of Y stitches complete
+- **Progress by Color:** For each color in palette:
+  - Color swatch and name
+  - Stitch count (X of Y complete)
+  - Percentage complete
+  - Progress bar visualization
+
+#### 3.4.4 Persistence
+- **Save/Resume:** Progress persists in .ndp file across sessions
+- **Data Model:** `Stitch.completed: boolean` tracks completion state
 
 ### 3.5 Export Options
 
@@ -528,20 +550,20 @@ interface MachineJob {
 **Scope:**
 - [x] Project setup (Tauri + React + TypeScript)
 - [x] Basic pattern editor with grid canvas
-- [ ] Drawing tools (pencil, fill, eraser)
-- [ ] Color palette management
-- [ ] Image import with color reduction
-- [ ] Basic thread library (DMC)
-- [ ] PDF pattern export
-- [ ] Save/load projects (.ndp format)
+- [x ] Drawing tools (pencil, fill, eraser)
+- [ x] Color palette management
+- [ ]x Image import with color reduction
+- [ x] Basic thread library (DMC)
+- [ x] PDF pattern export
+- [ x] Save/load projects (.ndp format)
 
 #### Phase 2A: Advanced Design Features
 **Scope:**
-- [ ] Full drawing tool suite (line, shapes, selection)
-- [ ] Layer support
-- [ ] Advanced color matching algorithms
-- [ ] Multiple thread libraries (Anchor, Kreinik, etc.)
-- [ ] Symbol assignment and customization
+- [ x] Full drawing tool suite (line, shapes, selection)
+- [ x] Layer support
+- [ x] Advanced color matching algorithms
+- [ x] Multiple thread libraries (Anchor, Kreinik, etc.)
+- [x ] Symbol assignment and customization
 - [ ] Progress tracking
 - [ ] Multiple export formats (PNG, SVG, spreadsheet)
 

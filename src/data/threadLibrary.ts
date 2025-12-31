@@ -4,6 +4,7 @@
 import { dmcThreads, ThreadColor as DMCThreadColor } from './dmcThreads';
 import { anchorThreads, AnchorThreadColor } from './anchorThreads';
 import { kreinikThreads, KreinikThreadColor, KreinikType } from './kreinikThreads';
+import { PATTERN_SYMBOLS } from '../utils/symbolAssignment';
 
 // Thread brands available in the application
 export type ThreadBrand = 'DMC' | 'Anchor' | 'Kreinik';
@@ -15,6 +16,7 @@ export interface UnifiedThreadColor {
   rgb: [number, number, number];
   brand: ThreadBrand;
   category?: string; // Optional category/type info
+  symbol: string; // Unique symbol for this thread
 }
 
 // Thread library metadata
@@ -49,35 +51,43 @@ export function getThreadLibraries(): ThreadLibraryInfo[] {
   ];
 }
 
-// Convert DMC thread to unified format
-function dmcToUnified(thread: DMCThreadColor): UnifiedThreadColor {
+// Get symbol for a thread based on its index
+function getSymbolForIndex(index: number): string {
+  return PATTERN_SYMBOLS.all[index % PATTERN_SYMBOLS.all.length];
+}
+
+// Convert DMC thread to unified format (with symbol)
+function dmcToUnified(thread: DMCThreadColor, index: number): UnifiedThreadColor {
   return {
     code: thread.code,
     name: thread.name,
     rgb: thread.rgb,
     brand: 'DMC',
     category: thread.category,
+    symbol: getSymbolForIndex(index),
   };
 }
 
-// Convert Anchor thread to unified format
-function anchorToUnified(thread: AnchorThreadColor): UnifiedThreadColor {
+// Convert Anchor thread to unified format (with symbol)
+function anchorToUnified(thread: AnchorThreadColor, index: number): UnifiedThreadColor {
   return {
     code: thread.code,
     name: thread.name,
     rgb: thread.rgb,
     brand: 'Anchor',
+    symbol: getSymbolForIndex(index),
   };
 }
 
-// Convert Kreinik thread to unified format
-function kreinikToUnified(thread: KreinikThreadColor): UnifiedThreadColor {
+// Convert Kreinik thread to unified format (with symbol)
+function kreinikToUnified(thread: KreinikThreadColor, index: number): UnifiedThreadColor {
   return {
     code: thread.code,
     name: thread.name,
     rgb: thread.rgb,
     brand: 'Kreinik',
     category: thread.type,
+    symbol: getSymbolForIndex(index),
   };
 }
 
@@ -85,11 +95,11 @@ function kreinikToUnified(thread: KreinikThreadColor): UnifiedThreadColor {
 export function getThreadsByBrand(brand: ThreadBrand): UnifiedThreadColor[] {
   switch (brand) {
     case 'DMC':
-      return dmcThreads.map(dmcToUnified);
+      return dmcThreads.map((t, i) => dmcToUnified(t, i));
     case 'Anchor':
-      return anchorThreads.map(anchorToUnified);
+      return anchorThreads.map((t, i) => anchorToUnified(t, i));
     case 'Kreinik':
-      return kreinikThreads.map(kreinikToUnified);
+      return kreinikThreads.map((t, i) => kreinikToUnified(t, i));
     default:
       return [];
   }
@@ -97,11 +107,20 @@ export function getThreadsByBrand(brand: ThreadBrand): UnifiedThreadColor[] {
 
 // Get all threads from all libraries
 export function getAllThreads(): UnifiedThreadColor[] {
-  return [
-    ...dmcThreads.map(dmcToUnified),
-    ...anchorThreads.map(anchorToUnified),
-    ...kreinikThreads.map(kreinikToUnified),
-  ];
+  let index = 0;
+  const result: UnifiedThreadColor[] = [];
+
+  for (const t of dmcThreads) {
+    result.push(dmcToUnified(t, index++));
+  }
+  for (const t of anchorThreads) {
+    result.push(anchorToUnified(t, index++));
+  }
+  for (const t of kreinikThreads) {
+    result.push(kreinikToUnified(t, index++));
+  }
+
+  return result;
 }
 
 // Get threads for multiple brands

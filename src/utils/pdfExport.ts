@@ -1,4 +1,5 @@
 import { Pattern, Stitch } from '../stores/patternStore';
+import { PATTERN_SYMBOLS } from './symbolAssignment';
 
 // PDF export settings
 const PAGE_MARGIN = 20; // mm
@@ -10,29 +11,8 @@ const FONT_SIZE_INFO = 10;
 const FONT_SIZE_LEGEND = 8;
 const FONT_SIZE_GRID = 6;
 
-// Symbols for different colors (used when printing in B&W)
-const SYMBOLS = [
-  '\u25A0', // Black square
-  '\u25CF', // Black circle
-  '\u25B2', // Black triangle
-  '\u25C6', // Black diamond
-  '\u2605', // Star
-  '\u2665', // Heart
-  '\u2660', // Spade
-  '\u2663', // Club
-  '\u25CB', // White circle
-  '\u25A1', // White square
-  '\u25B3', // White triangle
-  '\u25C7', // White diamond
-  '\u2606', // White star
-  '+',
-  'X',
-  '/',
-  '\\',
-  '-',
-  '|',
-  'O',
-];
+// Fallback symbols if color has no assigned symbol
+const FALLBACK_SYMBOLS = PATTERN_SYMBOLS.all;
 
 interface ExportOptions {
   includeColorLegend: boolean;
@@ -111,10 +91,17 @@ export async function exportPatternToPdf(
   const stitchCounts = countStitchesByColor(stitches);
   const grid = createStitchGrid(pattern);
 
-  // Create color to symbol mapping
+  // Create color to symbol mapping - use assigned symbols or fallback to sequential
   const colorSymbols = new Map<string, string>();
-  pattern.colorPalette.forEach((color, index) => {
-    colorSymbols.set(color.id, SYMBOLS[index % SYMBOLS.length]);
+  let fallbackIndex = 0;
+  pattern.colorPalette.forEach((color) => {
+    if (color.symbol) {
+      colorSymbols.set(color.id, color.symbol);
+    } else {
+      // Use fallback symbol if none assigned
+      colorSymbols.set(color.id, FALLBACK_SYMBOLS[fallbackIndex % FALLBACK_SYMBOLS.length]);
+      fallbackIndex++;
+    }
   });
 
   // Calculate page dimensions

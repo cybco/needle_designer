@@ -8,6 +8,7 @@
     "shell:allow-open",
     "dialog:default",
     "fs:default",
-    "process:default"
+    "process:default",
+    "window-state:default"
   ]
 }

@@ -6,6 +6,8 @@ export function LayerPanel() {
     pattern,
     activeLayerId,
     selection,
+    overlayImages,
+    selectedOverlayId,
     setActiveLayer,
     addLayer,
     removeLayer,
@@ -16,6 +18,13 @@ export function LayerPanel() {
     mergeLayers,
     duplicateLayer,
     selectLayerForTransform,
+    selectOverlay,
+    deselectOverlay,
+    toggleOverlayVisibility,
+    toggleOverlayLock,
+    updateOverlayOpacity,
+    removeOverlayImage,
+    reorderOverlay,
   } = usePatternStore();
 
   const [editingLayerId, setEditingLayerId] = useState<string | null>(null);
@@ -49,6 +58,14 @@ export function LayerPanel() {
     setActiveLayer(layerId);
     // Also select for transform (shows selection box if layer has stitches)
     selectLayerForTransform(layerId);
+    // Deselect overlay when clicking on a layer
+    if (selectedOverlayId) {
+      deselectOverlay();
+    }
+  };
+
+  const handleOverlayClick = (overlayId: string) => {
+    selectOverlay(overlayId);
   };
 
   const handleMergeDown = (layerId: string) => {
@@ -75,6 +92,127 @@ export function LayerPanel() {
           +
         </button>
       </div>
+
+      {/* Overlay Images Section */}
+      {overlayImages.length > 0 && (
+        <div className="border-b border-gray-300 bg-amber-50">
+          <div className="px-2 py-1 text-[10px] font-medium text-amber-700 border-b border-amber-200">
+            Overlays ({overlayImages.length})
+          </div>
+          {/* Render overlays in reverse order (top overlay first) */}
+          {[...overlayImages].reverse().map((overlay, reversedIndex) => {
+            const isSelected = selectedOverlayId === overlay.id;
+            const realIndex = overlayImages.length - 1 - reversedIndex;
+            const canMoveUp = realIndex < overlayImages.length - 1;
+            const canMoveDown = realIndex > 0;
+
+            return (
+              <div key={overlay.id} className="border-b border-amber-100 last:border-b-0">
+                <div
+                  onClick={() => handleOverlayClick(overlay.id)}
+                  className={`flex items-center gap-1 p-1.5 cursor-pointer hover:bg-amber-100 ${
+                    isSelected ? 'bg-amber-100 ring-1 ring-amber-400' : ''
+                  }`}
+                >
+                  {/* Visibility Toggle */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleOverlayVisibility(overlay.id);
+                    }}
+                    className={`w-5 h-5 flex items-center justify-center text-xs ${
+                      overlay.visible ? 'text-gray-700' : 'text-gray-300'
+                    }`}
+                    title={overlay.visible ? 'Hide Overlay' : 'Show Overlay'}
+                  >
+                    {overlay.visible ? '👁' : '👁‍🗨'}
+                  </button>
+
+                  {/* Lock Toggle */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleOverlayLock(overlay.id);
+                    }}
+                    className={`w-5 h-5 flex items-center justify-center text-xs ${
+                      overlay.locked ? 'text-red-500' : 'text-gray-300'
+                    }`}
+                    title={overlay.locked ? 'Unlock Overlay' : 'Lock Overlay'}
+                  >
+                    {overlay.locked ? '🔒' : '🔓'}
+                  </button>
+
+                  {/* Overlay Icon */}
+                  <span className="w-5 h-5 flex items-center justify-center text-xs">🖼</span>
+
+                  {/* Name */}
+                  <span className="flex-1 text-xs font-medium text-amber-800 truncate" title={overlay.name}>
+                    {overlay.name}
+                  </span>
+
+                  {/* Reorder buttons */}
+                  <div className="flex items-center gap-0.5">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        reorderOverlay(overlay.id, 'up');
+                      }}
+                      disabled={!canMoveUp}
+                      className={`w-4 h-4 flex items-center justify-center text-[10px] ${
+                        canMoveUp ? 'text-gray-500 hover:text-gray-700' : 'text-gray-200'
+                      }`}
+                      title="Move Up"
+                    >
+                      ▲
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        reorderOverlay(overlay.id, 'down');
+                      }}
+                      disabled={!canMoveDown}
+                      className={`w-4 h-4 flex items-center justify-center text-[10px] ${
+                        canMoveDown ? 'text-gray-500 hover:text-gray-700' : 'text-gray-200'
+                      }`}
+                      title="Move Down"
+                    >
+                      ▼
+                    </button>
+                  </div>
+
+                  {/* Delete */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeOverlayImage(overlay.id);
+                    }}
+                    className="w-5 h-5 flex items-center justify-center text-xs text-red-500 hover:text-red-700"
+                    title="Remove Overlay"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Opacity Slider (always visible) */}
+                <div className="px-2 pb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-gray-500 w-12">Opacity</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={overlay.opacity}
+                      onChange={(e) => updateOverlayOpacity(overlay.id, parseInt(e.target.value, 10))}
+                      className="flex-1 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                    />
+                    <span className="text-[10px] text-gray-600 w-8 text-right">{overlay.opacity}%</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Layer List */}
       <div className="flex-1 overflow-y-auto">

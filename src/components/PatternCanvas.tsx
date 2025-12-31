@@ -1,11 +1,16 @@
-import { useRef, useEffect, useCallback, useState } from 'react';
-import { usePatternStore, ResizeHandle } from '../stores/patternStore';
+import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
+import { usePatternStore, ResizeHandle, Color } from '../stores/patternStore';
 
 const CELL_SIZE = 20; // Base cell size in pixels
 const RULER_SIZE = 24; // Width/height of rulers in pixels
 const HANDLE_SIZE = 8; // Size of resize handles in pixels
 
-export function PatternCanvas() {
+interface PatternCanvasProps {
+  showSymbols?: boolean;
+  showCenterMarker?: boolean;
+}
+
+export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: PatternCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const topRulerRef = useRef<HTMLCanvasElement>(null);
@@ -28,6 +33,8 @@ export function PatternCanvas() {
     gridDivisions,
     rulerUnit,
     selection,
+    overlayImages,
+    selectedOverlayId,
     setStitch,
     removeStitch,
     fillArea,
@@ -45,7 +52,64 @@ export function PatternCanvas() {
     updateResize,
     endResize,
     commitFloatingSelection,
+    selectOverlay,
+    deselectOverlay,
+    updateOverlayPosition,
+    updateOverlaySize,
+    isProgressMode,
+    toggleStitchCompleted,
+    progressShadingColor: storeShadingColor,
+    progressShadingOpacity: storeShadingOpacity,
   } = usePatternStore();
+
+  // Ensure shading values have defaults
+  const progressShadingColor = storeShadingColor ?? [128, 128, 128] as [number, number, number];
+  const progressShadingOpacity = storeShadingOpacity ?? 70;
+
+  // Overlay drag/resize state
+  const [overlayDragState, setOverlayDragState] = useState<{
+    isDragging: boolean;
+    isResizing: boolean;
+    resizeHandle: ResizeHandle | null;
+    startX: number;
+    startY: number;
+    startOverlayX: number;
+    startOverlayY: number;
+    startOverlayWidth: number;
+    startOverlayHeight: number;
+  } | null>(null);
+
+  // Load overlay images - store loaded HTMLImageElements keyed by overlay ID
+  const [overlayImageElements, setOverlayImageElements] = useState<Record<string, HTMLImageElement>>({});
+
+  useEffect(() => {
+    const loadedImages: Record<string, HTMLImageElement> = {};
+    let loadCount = 0;
+    const totalToLoad = overlayImages.length;
+
+    if (totalToLoad === 0) {
+      setOverlayImageElements({});
+      return;
+    }
+
+    overlayImages.forEach((overlay) => {
+      const img = new Image();
+      img.onload = () => {
+        loadedImages[overlay.id] = img;
+        loadCount++;
+        if (loadCount === totalToLoad) {
+          setOverlayImageElements({ ...loadedImages });
+        }
+      };
+      img.onerror = () => {
+        loadCount++;
+        if (loadCount === totalToLoad) {
+          setOverlayImageElements({ ...loadedImages });
+        }
+      };
+      img.src = overlay.dataUrl;
+    });
+  }, [overlayImages]);
 
   // Get color by ID
   const getColor = useCallback((colorId: string): [number, number, number] | null => {
@@ -53,6 +117,18 @@ export function PatternCanvas() {
     const color = pattern.colorPalette.find(c => c.id === colorId);
     return color?.rgb ?? null;
   }, [pattern]);
+
+  // Get full color object by ID (includes symbol)
+  const getColorObject = useCallback((colorId: string): Color | null => {
+    if (!pattern) return null;
+    return pattern.colorPalette.find(c => c.id === colorId) ?? null;
+  }, [pattern]);
+
+  // Calculate contrast color for symbol text
+  const getContrastColor = useCallback((rgb: [number, number, number]): string => {
+    const luminance = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
+    return luminance > 0.5 ? 'rgba(0,0,0,0.8)' : 'rgba(255,255,255,0.9)';
+  }, []);
 
   // Get resize handle at canvas position
   const getResizeHandleAt = useCallback((canvasX: number, canvasY: number): ResizeHandle | null => {
@@ -107,6 +183,83 @@ export function PatternCanvas() {
     return canvasX >= left && canvasX <= right && canvasY >= top && canvasY <= bottom;
   }, [selection, zoom, panOffset]);
 
+  // Get the currently selected overlay
+  const selectedOverlay = useMemo(() => {
+    return overlayImages.find(o => o.id === selectedOverlayId) || null;
+  }, [overlayImages, selectedOverlayId]);
+
+  // Check if a point is on an overlay resize handle (only if not locked)
+  const getOverlayResizeHandle = useCallback((canvasX: number, canvasY: number): ResizeHandle | null => {
+    if (!selectedOverlay || selectedOverlay.locked) return null;
+
+    const cellSize = CELL_SIZE * zoom;
+    const ox = selectedOverlay.x * cellSize + panOffset.x;
+    const oy = selectedOverlay.y * cellSize + panOffset.y;
+    const ow = selectedOverlay.width * cellSize;
+    const oh = selectedOverlay.height * cellSize;
+
+    const handlePositions: { handle: ResizeHandle; x: number; y: number }[] = [
+      { handle: 'nw', x: ox, y: oy },
+      { handle: 'n', x: ox + ow / 2, y: oy },
+      { handle: 'ne', x: ox + ow, y: oy },
+      { handle: 'e', x: ox + ow, y: oy + oh / 2 },
+      { handle: 'se', x: ox + ow, y: oy + oh },
+      { handle: 's', x: ox + ow / 2, y: oy + oh },
+      { handle: 'sw', x: ox, y: oy + oh },
+      { handle: 'w', x: ox, y: oy + oh / 2 },
+    ];
+
+    for (const pos of handlePositions) {
+      if (
+        canvasX >= pos.x - HANDLE_SIZE &&
+        canvasX <= pos.x + HANDLE_SIZE &&
+        canvasY >= pos.y - HANDLE_SIZE &&
+        canvasY <= pos.y + HANDLE_SIZE
+      ) {
+        return pos.handle;
+      }
+    }
+
+    return null;
+  }, [selectedOverlay, zoom, panOffset]);
+
+  // Check if a point is inside any overlay (returns overlay id or null)
+  // Checks from top to bottom (reverse order) to get the topmost overlay
+  // Skips locked and hidden overlays
+  const getOverlayAtPoint = useCallback((canvasX: number, canvasY: number): string | null => {
+    const cellSize = CELL_SIZE * zoom;
+
+    // Check overlays from top to bottom (reverse order)
+    for (let i = overlayImages.length - 1; i >= 0; i--) {
+      const overlay = overlayImages[i];
+      if (!overlay.visible || overlay.locked) continue;
+
+      const ox = overlay.x * cellSize + panOffset.x;
+      const oy = overlay.y * cellSize + panOffset.y;
+      const ow = overlay.width * cellSize;
+      const oh = overlay.height * cellSize;
+
+      if (canvasX >= ox && canvasX <= ox + ow && canvasY >= oy && canvasY <= oy + oh) {
+        return overlay.id;
+      }
+    }
+
+    return null;
+  }, [overlayImages, zoom, panOffset]);
+
+  // Check if a point is inside the selected overlay (only if not locked)
+  const isPointInSelectedOverlay = useCallback((canvasX: number, canvasY: number): boolean => {
+    if (!selectedOverlay?.visible || selectedOverlay?.locked) return false;
+
+    const cellSize = CELL_SIZE * zoom;
+    const ox = selectedOverlay.x * cellSize + panOffset.x;
+    const oy = selectedOverlay.y * cellSize + panOffset.y;
+    const ow = selectedOverlay.width * cellSize;
+    const oh = selectedOverlay.height * cellSize;
+
+    return canvasX >= ox && canvasX <= ox + ow && canvasY >= oy && canvasY <= oy + oh;
+  }, [selectedOverlay, zoom, panOffset]);
+
   // Convert canvas coordinates to grid cell
   const canvasToCell = useCallback((canvasX: number, canvasY: number): { x: number; y: number } | null => {
     if (!pattern) return null;
@@ -148,15 +301,60 @@ export function PatternCanvas() {
       if (!layer.visible) continue;
 
       for (const stitch of layer.stitches) {
-        const rgb = getColor(stitch.colorId);
-        if (rgb) {
-          ctx.fillStyle = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+        const colorObj = getColorObject(stitch.colorId);
+        if (colorObj) {
+          const rgb = colorObj.rgb;
+          // In progress mode, grey out completed stitches
+          const isCompleted = isProgressMode && stitch.completed;
+
+          // Draw the stitch background
+          if (isCompleted) {
+            // Blend stitch color with shading color based on opacity
+            const blendFactor = progressShadingOpacity / 100;
+            const blendedR = Math.round(rgb[0] * (1 - blendFactor) + progressShadingColor[0] * blendFactor);
+            const blendedG = Math.round(rgb[1] * (1 - blendFactor) + progressShadingColor[1] * blendFactor);
+            const blendedB = Math.round(rgb[2] * (1 - blendFactor) + progressShadingColor[2] * blendFactor);
+            ctx.fillStyle = `rgb(${blendedR}, ${blendedG}, ${blendedB})`;
+          } else {
+            ctx.fillStyle = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+          }
           ctx.fillRect(
             stitch.x * cellSize,
             stitch.y * cellSize,
             cellSize,
             cellSize
           );
+
+          // Draw symbol if enabled and cell is large enough
+          if (showSymbols && colorObj.symbol && cellSize >= 12) {
+            const fontSize = Math.max(8, Math.min(cellSize * 0.7, 16));
+            ctx.font = `bold ${fontSize}px sans-serif`;
+            if (isCompleted) {
+              // Calculate blended background color
+              const blendFactor = progressShadingOpacity / 100;
+              const blendedRgb: [number, number, number] = [
+                Math.round(rgb[0] * (1 - blendFactor) + progressShadingColor[0] * blendFactor),
+                Math.round(rgb[1] * (1 - blendFactor) + progressShadingColor[1] * blendFactor),
+                Math.round(rgb[2] * (1 - blendFactor) + progressShadingColor[2] * blendFactor),
+              ];
+              // Get contrast color and blend it with shading color too
+              const baseContrastColor = getContrastColor(blendedRgb);
+              const contrastRgb = baseContrastColor === '#ffffff' ? [255, 255, 255] : [0, 0, 0];
+              const shadedSymbolR = Math.round(contrastRgb[0] * (1 - blendFactor) + progressShadingColor[0] * blendFactor);
+              const shadedSymbolG = Math.round(contrastRgb[1] * (1 - blendFactor) + progressShadingColor[1] * blendFactor);
+              const shadedSymbolB = Math.round(contrastRgb[2] * (1 - blendFactor) + progressShadingColor[2] * blendFactor);
+              ctx.fillStyle = `rgb(${shadedSymbolR}, ${shadedSymbolG}, ${shadedSymbolB})`;
+            } else {
+              ctx.fillStyle = getContrastColor(rgb);
+            }
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(
+              colorObj.symbol,
+              stitch.x * cellSize + cellSize / 2,
+              stitch.y * cellSize + cellSize / 2
+            );
+          }
         }
       }
     }
@@ -189,10 +387,97 @@ export function PatternCanvas() {
       }
     }
 
+    // Draw all overlay images on top (for tracing) - hide in progress mode
+    if (!isProgressMode) {
+    for (const overlay of overlayImages) {
+      if (!overlay.visible) continue;
+
+      const imgElement = overlayImageElements[overlay.id];
+      if (!imgElement || !imgElement.complete) continue;
+
+      ctx.save();
+      ctx.globalAlpha = overlay.opacity / 100;
+
+      // Draw at specified position and size
+      const drawX = overlay.x * cellSize;
+      const drawY = overlay.y * cellSize;
+      const drawWidth = overlay.width * cellSize;
+      const drawHeight = overlay.height * cellSize;
+
+      ctx.drawImage(imgElement, drawX, drawY, drawWidth, drawHeight);
+      ctx.restore();
+
+      // Draw selection handles if this overlay is selected
+      if (overlay.id === selectedOverlayId) {
+        ctx.strokeStyle = '#f59e0b'; // Amber color
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.strokeRect(drawX, drawY, drawWidth, drawHeight);
+        ctx.setLineDash([]);
+
+        // Draw resize handles
+        const handles = [
+          { x: drawX, y: drawY },                              // nw
+          { x: drawX + drawWidth / 2, y: drawY },              // n
+          { x: drawX + drawWidth, y: drawY },                  // ne
+          { x: drawX + drawWidth, y: drawY + drawHeight / 2 }, // e
+          { x: drawX + drawWidth, y: drawY + drawHeight },     // se
+          { x: drawX + drawWidth / 2, y: drawY + drawHeight }, // s
+          { x: drawX, y: drawY + drawHeight },                 // sw
+          { x: drawX, y: drawY + drawHeight / 2 },             // w
+        ];
+
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = 1;
+        for (const handle of handles) {
+          ctx.fillRect(
+            handle.x - HANDLE_SIZE / 2,
+            handle.y - HANDLE_SIZE / 2,
+            HANDLE_SIZE,
+            HANDLE_SIZE
+          );
+          ctx.strokeRect(
+            handle.x - HANDLE_SIZE / 2,
+            handle.y - HANDLE_SIZE / 2,
+            HANDLE_SIZE,
+            HANDLE_SIZE
+          );
+        }
+      }
+    }
+    } // End of overlay rendering (hidden in progress mode)
+
     // Draw canvas border
     ctx.strokeStyle = '#333';
     ctx.lineWidth = 2;
     ctx.strokeRect(0, 0, width * cellSize, height * cellSize);
+
+    // Draw center marker (bullseye/target symbol)
+    if (showCenterMarker) {
+      const centerX = Math.floor(width / 2);
+      const centerY = Math.floor(height / 2);
+      // Center of the center cell
+      const cx = centerX * cellSize + cellSize / 2;
+      const cy = centerY * cellSize + cellSize / 2;
+
+      const radius = cellSize * 0.45;
+      const ringWidth = radius * 0.25;
+
+      ctx.strokeStyle = '#22c55e';
+
+      // Outer ring
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius - ringWidth / 2, 0, Math.PI * 2);
+      ctx.lineWidth = ringWidth;
+      ctx.stroke();
+
+      // Inner ring
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius * 0.3, 0, Math.PI * 2);
+      ctx.lineWidth = ringWidth * 0.8;
+      ctx.stroke();
+    }
 
     // Draw selection overlay
     if (selection) {
@@ -205,8 +490,9 @@ export function PatternCanvas() {
       // Draw floating stitches (new content being placed)
       if (selection.floatingStitches) {
         for (const stitch of selection.floatingStitches) {
-          const rgb = getColor(stitch.colorId);
-          if (rgb) {
+          const colorObj = getColorObject(stitch.colorId);
+          if (colorObj) {
+            const rgb = colorObj.rgb;
             ctx.fillStyle = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
             ctx.fillRect(
               stitch.x * cellSize,
@@ -214,6 +500,20 @@ export function PatternCanvas() {
               cellSize,
               cellSize
             );
+
+            // Draw symbol if enabled and cell is large enough
+            if (showSymbols && colorObj.symbol && cellSize >= 12) {
+              const fontSize = Math.max(8, Math.min(cellSize * 0.7, 16));
+              ctx.font = `bold ${fontSize}px sans-serif`;
+              ctx.fillStyle = getContrastColor(rgb);
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(
+                colorObj.symbol,
+                stitch.x * cellSize + cellSize / 2,
+                stitch.y * cellSize + cellSize / 2
+              );
+            }
           }
         }
       }
@@ -312,7 +612,7 @@ export function PatternCanvas() {
     }
 
     ctx.restore();
-  }, [pattern, zoom, panOffset, showGrid, gridDivisions, getColor, selection, shapeStart, shapeEnd, selectedColorId, activeTool]);
+  }, [pattern, zoom, panOffset, showGrid, gridDivisions, getColor, getColorObject, getContrastColor, showSymbols, showCenterMarker, selection, shapeStart, shapeEnd, selectedColorId, activeTool, overlayImages, overlayImageElements, selectedOverlayId, isProgressMode, progressShadingColor, progressShadingOpacity]);
 
   // Draw horizontal ruler (top)
   const drawTopRuler = useCallback(() => {
@@ -810,13 +1110,74 @@ export function PatternCanvas() {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
+    // Pan mode works in both normal and progress mode
     if (activeTool === 'pan') {
       setIsDrawing(true);
       setLastCell({ x: e.clientX, y: e.clientY });
       return;
     }
 
+    // Progress mode: clicking toggles stitch completion (when not panning)
+    if (isProgressMode) {
+      const cellSize = CELL_SIZE * zoom;
+      const cellX = Math.floor((x - panOffset.x) / cellSize);
+      const cellY = Math.floor((y - panOffset.y) / cellSize);
+
+      // Check if within canvas bounds
+      if (cellX >= 0 && cellX < pattern.canvas.width && cellY >= 0 && cellY < pattern.canvas.height) {
+        toggleStitchCompleted(cellX, cellY);
+      }
+      return;
+    }
+
     if (activeTool === 'select') {
+      // Check if clicking on overlay resize handle (for selected overlay)
+      const overlayHandle = getOverlayResizeHandle(x, y);
+      if (overlayHandle && selectedOverlay) {
+        setOverlayDragState({
+          isDragging: false,
+          isResizing: true,
+          resizeHandle: overlayHandle,
+          startX: x,
+          startY: y,
+          startOverlayX: selectedOverlay.x,
+          startOverlayY: selectedOverlay.y,
+          startOverlayWidth: selectedOverlay.width,
+          startOverlayHeight: selectedOverlay.height,
+        });
+        setIsDrawing(true);
+        return;
+      }
+
+      // Check if clicking inside selected overlay (for drag)
+      if (selectedOverlay && isPointInSelectedOverlay(x, y)) {
+        setOverlayDragState({
+          isDragging: true,
+          isResizing: false,
+          resizeHandle: null,
+          startX: x,
+          startY: y,
+          startOverlayX: selectedOverlay.x,
+          startOverlayY: selectedOverlay.y,
+          startOverlayWidth: selectedOverlay.width,
+          startOverlayHeight: selectedOverlay.height,
+        });
+        setIsDrawing(true);
+        return;
+      }
+
+      // Check if clicking on any overlay (to select it)
+      const clickedOverlayId = getOverlayAtPoint(x, y);
+      if (clickedOverlayId) {
+        selectOverlay(clickedOverlayId);
+        return;
+      }
+
+      // If overlay is selected and we click elsewhere, deselect it
+      if (selectedOverlayId) {
+        deselectOverlay();
+      }
+
       // Check if clicking on a resize handle
       const handle = getResizeHandleAt(x, y);
       if (handle && selection) {
@@ -847,10 +1208,10 @@ export function PatternCanvas() {
       // Check if clicking on a layer's stitches (to select that layer)
       const cell = canvasToCell(x, y);
       if (cell) {
-        // Search layers from top to bottom
+        // Search layers from top to bottom, skipping locked and hidden layers
         for (let i = pattern.layers.length - 1; i >= 0; i--) {
           const layer = pattern.layers[i];
-          if (!layer.visible) continue;
+          if (!layer.visible || layer.locked) continue;
 
           const stitch = layer.stitches.find(s => s.x === cell.x && s.y === cell.y);
           if (stitch) {
@@ -899,6 +1260,88 @@ export function PatternCanvas() {
 
     if (!pattern) return;
 
+    // Handle overlay dragging/resizing
+    if (activeTool === 'select' && isDrawing && overlayDragState && selectedOverlayId && selectedOverlay) {
+      const cellSize = CELL_SIZE * zoom;
+      const deltaX = (x - overlayDragState.startX) / cellSize;
+      const deltaY = (y - overlayDragState.startY) / cellSize;
+
+      if (overlayDragState.isDragging) {
+        updateOverlayPosition(
+          selectedOverlayId,
+          Math.round(overlayDragState.startOverlayX + deltaX),
+          Math.round(overlayDragState.startOverlayY + deltaY)
+        );
+      } else if (overlayDragState.isResizing && overlayDragState.resizeHandle) {
+        const handle = overlayDragState.resizeHandle;
+        let newX = overlayDragState.startOverlayX;
+        let newY = overlayDragState.startOverlayY;
+        let newWidth = overlayDragState.startOverlayWidth;
+        let newHeight = overlayDragState.startOverlayHeight;
+
+        // Calculate aspect ratio from natural dimensions
+        const aspectRatio = selectedOverlay.naturalWidth / selectedOverlay.naturalHeight;
+        const maintainAspect = !e.shiftKey; // Hold Shift to free resize
+
+        if (handle.includes('n')) {
+          newY = overlayDragState.startOverlayY + deltaY;
+          newHeight = overlayDragState.startOverlayHeight - deltaY;
+        }
+        if (handle.includes('s')) {
+          newHeight = overlayDragState.startOverlayHeight + deltaY;
+        }
+        if (handle.includes('w')) {
+          newX = overlayDragState.startOverlayX + deltaX;
+          newWidth = overlayDragState.startOverlayWidth - deltaX;
+        }
+        if (handle.includes('e')) {
+          newWidth = overlayDragState.startOverlayWidth + deltaX;
+        }
+
+        // Maintain aspect ratio unless Shift is pressed
+        if (maintainAspect && newWidth >= 1 && newHeight >= 1) {
+          if (handle === 'n' || handle === 's') {
+            // Vertical only - adjust width to match
+            const adjustedWidth = newHeight * aspectRatio;
+            const widthDiff = adjustedWidth - overlayDragState.startOverlayWidth;
+            newWidth = adjustedWidth;
+            newX = overlayDragState.startOverlayX - widthDiff / 2; // Center horizontally
+          } else if (handle === 'e' || handle === 'w') {
+            // Horizontal only - adjust height to match
+            const adjustedHeight = newWidth / aspectRatio;
+            const heightDiff = adjustedHeight - overlayDragState.startOverlayHeight;
+            newHeight = adjustedHeight;
+            newY = overlayDragState.startOverlayY - heightDiff / 2; // Center vertically
+          } else {
+            // Corner handle - use the larger delta to determine size
+            const widthFromHeight = newHeight * aspectRatio;
+            const heightFromWidth = newWidth / aspectRatio;
+
+            if (Math.abs(deltaX) > Math.abs(deltaY)) {
+              // Width is primary
+              newHeight = heightFromWidth;
+              if (handle.includes('n')) {
+                newY = overlayDragState.startOverlayY + overlayDragState.startOverlayHeight - newHeight;
+              }
+            } else {
+              // Height is primary
+              newWidth = widthFromHeight;
+              if (handle.includes('w')) {
+                newX = overlayDragState.startOverlayX + overlayDragState.startOverlayWidth - newWidth;
+              }
+            }
+          }
+        }
+
+        // Ensure minimum size
+        if (newWidth >= 1 && newHeight >= 1) {
+          updateOverlayPosition(selectedOverlayId, Math.round(newX), Math.round(newY));
+          updateOverlaySize(selectedOverlayId, Math.round(newWidth), Math.round(newHeight));
+        }
+      }
+      return;
+    }
+
     // Handle select tool dragging/resizing
     if (activeTool === 'select' && isDrawing && selection) {
       const cell = canvasToCell(x, y);
@@ -944,6 +1387,11 @@ export function PatternCanvas() {
   };
 
   const handleMouseUp = () => {
+    // Clear overlay drag state
+    if (overlayDragState) {
+      setOverlayDragState(null);
+    }
+
     // Handle select tool drag/resize end
     if (activeTool === 'select' && selection) {
       if (selection.isResizing) {
@@ -972,6 +1420,11 @@ export function PatternCanvas() {
   };
 
   const handleMouseLeave = () => {
+    // Clear overlay drag state
+    if (overlayDragState) {
+      setOverlayDragState(null);
+    }
+
     // Cancel any ongoing drag/resize
     if (activeTool === 'select' && selection) {
       if (selection.isResizing) {
@@ -991,30 +1444,50 @@ export function PatternCanvas() {
   // Get cursor based on current state
   const getCursor = useCallback((): string => {
     if (activeTool === 'pan') return 'grab';
+    if (isProgressMode) return 'pointer';
     if (activeTool === 'select') {
+      const cursors: Record<ResizeHandle, string> = {
+        nw: 'nw-resize',
+        n: 'n-resize',
+        ne: 'ne-resize',
+        e: 'e-resize',
+        se: 'se-resize',
+        s: 's-resize',
+        sw: 'sw-resize',
+        w: 'w-resize',
+      };
+
+      // Check overlay handles first (for selected overlay)
+      if (mousePos && selectedOverlay) {
+        const overlayHandle = getOverlayResizeHandle(mousePos.x, mousePos.y);
+        if (overlayHandle) {
+          return cursors[overlayHandle];
+        }
+        if (isPointInSelectedOverlay(mousePos.x, mousePos.y)) {
+          return 'move';
+        }
+      }
+
+      // Check selection handles
       if (mousePos && selection) {
         const handle = getResizeHandleAt(mousePos.x, mousePos.y);
         if (handle) {
-          const cursors: Record<ResizeHandle, string> = {
-            nw: 'nw-resize',
-            n: 'n-resize',
-            ne: 'ne-resize',
-            e: 'e-resize',
-            se: 'se-resize',
-            s: 's-resize',
-            sw: 'sw-resize',
-            w: 'w-resize',
-          };
           return cursors[handle];
         }
         if (isPointInSelectionBounds(mousePos.x, mousePos.y)) {
           return 'move';
         }
       }
+
+      // Check if hovering over any overlay (to show pointer for selection)
+      if (mousePos && getOverlayAtPoint(mousePos.x, mousePos.y)) {
+        return 'pointer';
+      }
+
       return 'crosshair';
     }
     return 'crosshair';
-  }, [activeTool, mousePos, selection, getResizeHandleAt, isPointInSelectionBounds]);
+  }, [activeTool, mousePos, selection, selectedOverlay, getResizeHandleAt, isPointInSelectionBounds, getOverlayResizeHandle, isPointInSelectedOverlay, getOverlayAtPoint, isProgressMode]);
 
   // Handle wheel for zoom - zoom towards center of viewable area
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
@@ -1083,7 +1556,7 @@ export function PatternCanvas() {
       </div>
 
       {/* Main row: left ruler + canvas + right ruler */}
-      <div className="flex flex-1">
+      <div className="flex flex-1 relative">
         {/* Left ruler */}
         <canvas
           ref={leftRulerRef}

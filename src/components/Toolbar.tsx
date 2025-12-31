@@ -155,14 +155,14 @@ export function Toolbar({ onTextToolClick }: ToolbarProps) {
       {/* View controls */}
       <div className="p-2 space-y-2 border-b border-gray-200">
         <button
-          onClick={() => setZoom(zoom + 0.25)}
+          onClick={() => setZoom(zoom + 0.1)}
           className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-lg"
           title="Zoom In (+)"
         >
           🔍+
         </button>
         <button
-          onClick={() => setZoom(zoom - 0.25)}
+          onClick={() => setZoom(zoom - 0.1)}
           className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-lg"
           title="Zoom Out (-)"
         >

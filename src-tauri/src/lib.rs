@@ -16,6 +16,24 @@ pub struct NdpFile {
     pub canvas: CanvasConfig,
     pub color_palette: Vec<Color>,
     pub layers: Vec<Layer>,
+    #[serde(default)]
+    pub overlays: Option<Vec<OverlayImage>>,
+    #[serde(default = "default_zoom")]
+    pub zoom: Option<f64>,
+    #[serde(default)]
+    pub is_progress_mode: Option<bool>,
+    #[serde(default)]
+    pub progress_shading_color: Option<[u8; 3]>,
+    #[serde(default = "default_shading_opacity")]
+    pub progress_shading_opacity: Option<u32>,
+}
+
+fn default_zoom() -> Option<f64> {
+    Some(1.0)
+}
+
+fn default_shading_opacity() -> Option<u32> {
+    Some(70)
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -61,6 +79,22 @@ pub struct Stitch {
     pub y: u32,
     pub color_id: String,
     pub completed: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OverlayImage {
+    pub id: String,
+    pub name: String,
+    pub data_url: String,
+    pub opacity: u32,
+    pub visible: bool,
+    pub locked: bool,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub natural_width: u32,
+    pub natural_height: u32,
 }
 
 // Image processing structures
@@ -127,6 +161,11 @@ fn create_new_project(
             locked: false,
             stitches: vec![],
         }],
+        overlays: None,
+        zoom: Some(1.0),
+        is_progress_mode: Some(false),
+        progress_shading_color: Some([128, 128, 128]),
+        progress_shading_opacity: Some(70),
     })
 }
 
@@ -751,6 +790,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_window_state::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             greet,
             create_new_project,

@@ -1,4 +1,11 @@
 import { create } from 'zustand';
+import {
+  autoAssignSymbols as doAutoAssignSymbols,
+  SymbolAssignmentMode,
+  getNextAvailableSymbol,
+  assignMissingSymbols,
+  PATTERN_SYMBOLS,
+} from '../utils/symbolAssignment';
 
 // Types matching the Rust NDP format
 export interface Color {
@@ -57,6 +64,23 @@ export interface SelectionState {
   floatingStitches: Stitch[] | null;
 }
 
+export interface OverlayImage {
+  id: string;
+  name: string;
+  dataUrl: string;
+  opacity: number; // 0-100
+  visible: boolean;
+  locked: boolean;
+  // Position and size in grid cells
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  // Original image dimensions for aspect ratio
+  naturalWidth: number;
+  naturalHeight: number;
+}
+
 interface PatternState {
   // Pattern data
   pattern: Pattern | null;
@@ -80,6 +104,15 @@ interface PatternState {
   // Layer state
   activeLayerId: string | null;
   selection: SelectionState | null;
+
+  // Overlay images for tracing
+  overlayImages: OverlayImage[];
+  selectedOverlayId: string | null;
+
+  // Progress tracking mode
+  isProgressMode: boolean;
+  progressShadingColor: [number, number, number]; // RGB for completed stitch overlay
+  progressShadingOpacity: number; // 0-100
 
   // Undo/Redo actions
   undo: () => void;
@@ -124,6 +157,11 @@ interface PatternState {
   // Import as layer
   importAsLayer: (name: string, colors: Color[], stitches: Stitch[]) => void;
 
+  // Symbol assignment actions
+  updateColorSymbol: (colorId: string, symbol: string) => void;
+  autoAssignSymbols: (mode?: 'usage' | 'lightness' | 'sequential') => void;
+  clearAllSymbols: () => void;
+
   // Selection/Transform actions
   selectLayerForTransform: (layerId: string) => void;
   clearSelection: () => void;
@@ -139,22 +177,42 @@ interface PatternState {
   createFloatingSelection: (stitches: Stitch[], width: number, height: number, position: { x: number; y: number }) => void;
   commitFloatingSelection: () => void;
   cancelFloatingSelection: () => void;
+
+  // Overlay image actions
+  addOverlayImage: (dataUrl: string, naturalWidth: number, naturalHeight: number, name?: string) => void;
+  setOverlayImages: (overlays: OverlayImage[]) => void;
+  updateOverlayOpacity: (id: string, opacity: number) => void;
+  toggleOverlayVisibility: (id: string) => void;
+  toggleOverlayLock: (id: string) => void;
+  removeOverlayImage: (id: string) => void;
+  selectOverlay: (id: string) => void;
+  deselectOverlay: () => void;
+  updateOverlayPosition: (id: string, x: number, y: number) => void;
+  updateOverlaySize: (id: string, width: number, height: number) => void;
+  reorderOverlay: (id: string, direction: 'up' | 'down') => void;
+
+  // Progress tracking actions
+  toggleProgressMode: () => void;
+  setProgressMode: (enabled: boolean) => void;
+  toggleStitchCompleted: (x: number, y: number) => void;
+  setProgressShadingColor: (color: [number, number, number]) => void;
+  setProgressShadingOpacity: (opacity: number) => void;
 }
 
-// Default colors for new patterns
+// Default colors for new patterns (with auto-assigned symbols)
 const defaultColors: Color[] = [
-  { id: 'color-1', name: 'Red', rgb: [220, 53, 69] },
-  { id: 'color-2', name: 'Blue', rgb: [0, 123, 255] },
-  { id: 'color-3', name: 'Green', rgb: [40, 167, 69] },
-  { id: 'color-4', name: 'Yellow', rgb: [255, 193, 7] },
-  { id: 'color-5', name: 'Purple', rgb: [111, 66, 193] },
-  { id: 'color-6', name: 'Orange', rgb: [253, 126, 20] },
-  { id: 'color-7', name: 'Pink', rgb: [232, 62, 140] },
-  { id: 'color-8', name: 'Teal', rgb: [32, 201, 151] },
-  { id: 'color-9', name: 'Brown', rgb: [121, 85, 72] },
-  { id: 'color-10', name: 'Black', rgb: [33, 37, 41] },
-  { id: 'color-11', name: 'White', rgb: [248, 249, 250] },
-  { id: 'color-12', name: 'Gray', rgb: [108, 117, 125] },
+  { id: 'color-1', name: 'Red', rgb: [220, 53, 69], symbol: PATTERN_SYMBOLS.all[0] },
+  { id: 'color-2', name: 'Blue', rgb: [0, 123, 255], symbol: PATTERN_SYMBOLS.all[1] },
+  { id: 'color-3', name: 'Green', rgb: [40, 167, 69], symbol: PATTERN_SYMBOLS.all[2] },
+  { id: 'color-4', name: 'Yellow', rgb: [255, 193, 7], symbol: PATTERN_SYMBOLS.all[3] },
+  { id: 'color-5', name: 'Purple', rgb: [111, 66, 193], symbol: PATTERN_SYMBOLS.all[4] },
+  { id: 'color-6', name: 'Orange', rgb: [253, 126, 20], symbol: PATTERN_SYMBOLS.all[5] },
+  { id: 'color-7', name: 'Pink', rgb: [232, 62, 140], symbol: PATTERN_SYMBOLS.all[6] },
+  { id: 'color-8', name: 'Teal', rgb: [32, 201, 151], symbol: PATTERN_SYMBOLS.all[7] },
+  { id: 'color-9', name: 'Brown', rgb: [121, 85, 72], symbol: PATTERN_SYMBOLS.all[8] },
+  { id: 'color-10', name: 'Black', rgb: [33, 37, 41], symbol: PATTERN_SYMBOLS.all[9] },
+  { id: 'color-11', name: 'White', rgb: [248, 249, 250], symbol: PATTERN_SYMBOLS.all[10] },
+  { id: 'color-12', name: 'Gray', rgb: [108, 117, 125], symbol: PATTERN_SYMBOLS.all[11] },
 ];
 
 // Helper function to calculate layer bounding box
@@ -268,6 +326,11 @@ export const usePatternStore = create<PatternState>((set, get) => {
   rulerUnit: 'inches' as RulerUnit,
   activeLayerId: null,
   selection: null,
+  overlayImages: [],
+  selectedOverlayId: null,
+  isProgressMode: false,
+  progressShadingColor: [128, 128, 128] as [number, number, number], // Default grey
+  progressShadingOpacity: 70, // 70% opacity
 
   // Undo/Redo actions
   undo: () => {
@@ -341,16 +404,20 @@ export const usePatternStore = create<PatternState>((set, get) => {
       hasUnsavedChanges: false,
       history: [], // Clear history for new pattern
       future: [],
+      overlayImages: [], // Clear overlays for new pattern
+      selectedOverlayId: null,
     });
   },
 
   importPattern: (name, width, height, meshCount, colors, stitches) => {
     const layerId = 'layer-1';
+    // Auto-assign symbols to colors that don't have them
+    const colorsWithSymbols = assignMissingSymbols(colors);
     set({
       pattern: {
         name,
         canvas: { width, height, meshCount },
-        colorPalette: colors,
+        colorPalette: colorsWithSymbols,
         layers: [{
           id: layerId,
           name: 'Layer 1',
@@ -359,7 +426,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
           stitches,
         }],
       },
-      selectedColorId: colors.length > 0 ? colors[0].id : null,
+      selectedColorId: colorsWithSymbols.length > 0 ? colorsWithSymbols[0].id : null,
       activeLayerId: layerId,
       selection: null,
       zoom: 1,
@@ -373,9 +440,15 @@ export const usePatternStore = create<PatternState>((set, get) => {
 
   loadPattern: (pattern, filePath) => {
     const firstLayerId = pattern.layers.length > 0 ? pattern.layers[0].id : null;
+    // Auto-assign symbols to colors that don't have them
+    const colorsWithSymbols = assignMissingSymbols(pattern.colorPalette);
+    const patternWithSymbols = {
+      ...pattern,
+      colorPalette: colorsWithSymbols,
+    };
     set({
-      pattern,
-      selectedColorId: pattern.colorPalette.length > 0 ? pattern.colorPalette[0].id : null,
+      pattern: patternWithSymbols,
+      selectedColorId: colorsWithSymbols.length > 0 ? colorsWithSymbols[0].id : null,
       activeLayerId: firstLayerId,
       selection: null,
       zoom: 1,
@@ -775,10 +848,15 @@ export const usePatternStore = create<PatternState>((set, get) => {
 
     pushToHistory();
 
+    // Auto-assign a symbol if not already set
+    const colorWithSymbol = color.symbol
+      ? color
+      : { ...color, symbol: getNextAvailableSymbol(pattern.colorPalette) };
+
     set({
       pattern: {
         ...pattern,
-        colorPalette: [...pattern.colorPalette, color],
+        colorPalette: [...pattern.colorPalette, colorWithSymbol],
       },
       hasUnsavedChanges: true,
     });
@@ -1076,6 +1154,10 @@ export const usePatternStore = create<PatternState>((set, get) => {
     );
     const newColors = colors.filter(c => !c.threadCode || !existingCodes.has(c.threadCode));
 
+    // Auto-assign symbols to all colors (existing + new) that don't have them
+    const allColors = [...pattern.colorPalette, ...newColors];
+    const colorsWithSymbols = assignMissingSymbols(allColors);
+
     const newLayerId = `layer-${Date.now()}`;
     const newLayer: Layer = {
       id: newLayerId,
@@ -1088,10 +1170,71 @@ export const usePatternStore = create<PatternState>((set, get) => {
     set({
       pattern: {
         ...pattern,
-        colorPalette: [...pattern.colorPalette, ...newColors],
+        colorPalette: colorsWithSymbols,
         layers: [...pattern.layers, newLayer],
       },
       activeLayerId: newLayerId,
+      hasUnsavedChanges: true,
+    });
+  },
+
+  // Symbol assignment actions
+  updateColorSymbol: (colorId, symbol) => {
+    const { pattern } = get();
+    if (!pattern) return;
+
+    pushToHistory();
+
+    const updatedPalette = pattern.colorPalette.map(c =>
+      c.id === colorId ? { ...c, symbol } : c
+    );
+
+    set({
+      pattern: {
+        ...pattern,
+        colorPalette: updatedPalette,
+      },
+      hasUnsavedChanges: true,
+    });
+  },
+
+  autoAssignSymbols: (mode: SymbolAssignmentMode = 'usage') => {
+    const { pattern } = get();
+    if (!pattern) return;
+
+    pushToHistory();
+
+    // Get all stitches from all layers
+    const allStitches = pattern.layers.flatMap(l => l.stitches);
+
+    // Auto-assign symbols
+    const updatedPalette = doAutoAssignSymbols(pattern.colorPalette, allStitches, mode);
+
+    set({
+      pattern: {
+        ...pattern,
+        colorPalette: updatedPalette,
+      },
+      hasUnsavedChanges: true,
+    });
+  },
+
+  clearAllSymbols: () => {
+    const { pattern } = get();
+    if (!pattern) return;
+
+    pushToHistory();
+
+    const updatedPalette = pattern.colorPalette.map(c => {
+      const { symbol, ...rest } = c;
+      return rest as Color;
+    });
+
+    set({
+      pattern: {
+        ...pattern,
+        colorPalette: updatedPalette,
+      },
       hasUnsavedChanges: true,
     });
   },
@@ -1449,6 +1592,206 @@ export const usePatternStore = create<PatternState>((set, get) => {
     const { selection } = get();
     if (!selection || !selection.floatingStitches) return;
     set({ selection: null });
+  },
+
+  // Overlay image actions
+  addOverlayImage: (dataUrl, naturalWidth, naturalHeight, name) => {
+    const { pattern, overlayImages } = get();
+    if (!pattern) return;
+
+    // Calculate initial size to fit canvas while maintaining aspect ratio
+    const canvasWidth = pattern.canvas.width;
+    const canvasHeight = pattern.canvas.height;
+    const imgAspect = naturalWidth / naturalHeight;
+    const canvasAspect = canvasWidth / canvasHeight;
+
+    let width, height;
+    if (imgAspect > canvasAspect) {
+      // Image is wider - fit to width
+      width = canvasWidth;
+      height = Math.round(canvasWidth / imgAspect);
+    } else {
+      // Image is taller - fit to height
+      height = canvasHeight;
+      width = Math.round(canvasHeight * imgAspect);
+    }
+
+    // Center the image
+    const x = Math.round((canvasWidth - width) / 2);
+    const y = Math.round((canvasHeight - height) / 2);
+
+    const newId = `overlay-${Date.now()}`;
+    const overlayNumber = overlayImages.length + 1;
+
+    set({
+      overlayImages: [
+        ...overlayImages,
+        {
+          id: newId,
+          name: name || `Overlay ${overlayNumber}`,
+          dataUrl,
+          opacity: 50,
+          visible: true,
+          locked: false,
+          x,
+          y,
+          width,
+          height,
+          naturalWidth,
+          naturalHeight,
+        },
+      ],
+      selectedOverlayId: newId,
+      selection: null, // Clear layer selection
+    });
+  },
+
+  setOverlayImages: (overlays) => {
+    set({
+      overlayImages: overlays,
+      selectedOverlayId: null,
+    });
+  },
+
+  updateOverlayOpacity: (id, opacity) => {
+    const { overlayImages } = get();
+    set({
+      overlayImages: overlayImages.map(o =>
+        o.id === id ? { ...o, opacity: Math.max(0, Math.min(100, opacity)) } : o
+      ),
+    });
+  },
+
+  toggleOverlayVisibility: (id) => {
+    const { overlayImages } = get();
+    set({
+      overlayImages: overlayImages.map(o =>
+        o.id === id ? { ...o, visible: !o.visible } : o
+      ),
+    });
+  },
+
+  toggleOverlayLock: (id) => {
+    const { overlayImages } = get();
+    set({
+      overlayImages: overlayImages.map(o =>
+        o.id === id ? { ...o, locked: !o.locked } : o
+      ),
+    });
+  },
+
+  removeOverlayImage: (id) => {
+    const { overlayImages, selectedOverlayId } = get();
+    set({
+      overlayImages: overlayImages.filter(o => o.id !== id),
+      selectedOverlayId: selectedOverlayId === id ? null : selectedOverlayId,
+    });
+  },
+
+  selectOverlay: (id) => {
+    set({
+      selectedOverlayId: id,
+      selection: null, // Clear layer selection when selecting overlay
+    });
+  },
+
+  deselectOverlay: () => {
+    set({ selectedOverlayId: null });
+  },
+
+  updateOverlayPosition: (id, x, y) => {
+    const { overlayImages } = get();
+    set({
+      overlayImages: overlayImages.map(o =>
+        o.id === id ? { ...o, x, y } : o
+      ),
+    });
+  },
+
+  updateOverlaySize: (id, width, height) => {
+    const { overlayImages } = get();
+    set({
+      overlayImages: overlayImages.map(o =>
+        o.id === id ? { ...o, width: Math.max(1, width), height: Math.max(1, height) } : o
+      ),
+    });
+  },
+
+  reorderOverlay: (id, direction) => {
+    const { overlayImages } = get();
+    const index = overlayImages.findIndex(o => o.id === id);
+    if (index === -1) return;
+
+    const newIndex = direction === 'up' ? index + 1 : index - 1;
+    if (newIndex < 0 || newIndex >= overlayImages.length) return;
+
+    const newOverlays = [...overlayImages];
+    [newOverlays[index], newOverlays[newIndex]] = [newOverlays[newIndex], newOverlays[index]];
+
+    set({ overlayImages: newOverlays });
+  },
+
+  // Progress tracking actions
+  toggleProgressMode: () => {
+    const { isProgressMode } = get();
+    set({
+      isProgressMode: !isProgressMode,
+      selection: null, // Clear selection when toggling mode
+      selectedOverlayId: null, // Deselect overlay
+    });
+  },
+
+  setProgressMode: (enabled) => {
+    set({
+      isProgressMode: enabled,
+      selection: null,
+      selectedOverlayId: null,
+    });
+  },
+
+  toggleStitchCompleted: (x, y) => {
+    const { pattern } = get();
+    if (!pattern) return;
+
+    // Find the stitch at this position across all layers (top to bottom)
+    for (let i = pattern.layers.length - 1; i >= 0; i--) {
+      const layer = pattern.layers[i];
+      if (!layer.visible) continue;
+
+      const stitchIndex = layer.stitches.findIndex(s => s.x === x && s.y === y);
+      if (stitchIndex !== -1) {
+        pushToHistory();
+
+        const updatedStitches = [...layer.stitches];
+        updatedStitches[stitchIndex] = {
+          ...updatedStitches[stitchIndex],
+          completed: !updatedStitches[stitchIndex].completed,
+        };
+
+        const updatedLayers = [...pattern.layers];
+        updatedLayers[i] = {
+          ...layer,
+          stitches: updatedStitches,
+        };
+
+        set({
+          pattern: {
+            ...pattern,
+            layers: updatedLayers,
+          },
+          hasUnsavedChanges: true,
+        });
+        return;
+      }
+    }
+  },
+
+  setProgressShadingColor: (color) => {
+    set({ progressShadingColor: color });
+  },
+
+  setProgressShadingOpacity: (opacity) => {
+    set({ progressShadingOpacity: Math.max(0, Math.min(100, opacity)) });
   },
 };
 });
