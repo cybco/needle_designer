@@ -1,14 +1,21 @@
 import { useState, useRef } from 'react';
 import { usePatternStore, Color } from '../stores/patternStore';
 import { ThreadLibraryDialog } from './ThreadLibraryDialog';
-import { dmcThreads } from '../data/dmcThreads';
+import {
+  ThreadBrand,
+  getThreadsByBrand,
+  getThreadLibraries
+} from '../data/threadLibrary';
 
 export function ColorPalette() {
   const { pattern, selectedColorId, selectColor, addColor } = usePatternStore();
   const [showThreadLibrary, setShowThreadLibrary] = useState(false);
-  const [dmcInput, setDmcInput] = useState('');
-  const [dmcError, setDmcError] = useState('');
+  const [selectedBrand, setSelectedBrand] = useState<ThreadBrand>('DMC');
+  const [threadCodeInput, setThreadCodeInput] = useState('');
+  const [threadCodeError, setThreadCodeError] = useState('');
   const colorInputRef = useRef<HTMLInputElement>(null);
+
+  const threadLibraries = getThreadLibraries();
 
   if (!pattern) {
     return (
@@ -40,31 +47,32 @@ export function ColorPalette() {
     selectColor(newColor.id);
   };
 
-  const handleAddDMC = () => {
-    const code = dmcInput.trim().toUpperCase();
+  const handleAddThreadByCode = () => {
+    const code = threadCodeInput.trim().toUpperCase();
     if (!code) return;
 
-    const thread = dmcThreads.find(t => t.code.toUpperCase() === code);
+    const threads = getThreadsByBrand(selectedBrand);
+    const thread = threads.find(t => t.code.toUpperCase() === code);
     if (thread) {
       const newColor: Color = {
-        id: `dmc-${thread.code}-${Date.now()}`,
+        id: `${selectedBrand.toLowerCase()}-${thread.code}-${Date.now()}`,
         name: thread.name,
         rgb: thread.rgb,
-        threadBrand: 'DMC',
+        threadBrand: selectedBrand,
         threadCode: thread.code,
       };
       addColor(newColor);
       selectColor(newColor.id);
-      setDmcInput('');
-      setDmcError('');
+      setThreadCodeInput('');
+      setThreadCodeError('');
     } else {
-      setDmcError(`DMC ${code} not found`);
+      setThreadCodeError(`${selectedBrand} ${code} not found`);
     }
   };
 
-  const handleDmcKeyDown = (e: React.KeyboardEvent) => {
+  const handleThreadCodeKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
-      handleAddDMC();
+      handleAddThreadByCode();
     }
   };
 
@@ -100,29 +108,50 @@ export function ColorPalette() {
       </div>
 
       <div className="p-3 border-t border-gray-200 space-y-3">
-        {/* DMC Code Input */}
+        {/* Thread Library Selector */}
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">
-            Add DMC by Code
+            Thread Library
+          </label>
+          <select
+            value={selectedBrand}
+            onChange={(e) => {
+              setSelectedBrand(e.target.value as ThreadBrand);
+              setThreadCodeError('');
+            }}
+            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            {threadLibraries.map((lib) => (
+              <option key={lib.brand} value={lib.brand}>
+                {lib.name} ({lib.colorCount})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Thread Code Input */}
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">
+            Add by Code
           </label>
           <div className="flex gap-1">
             <input
               type="text"
-              value={dmcInput}
-              onChange={(e) => { setDmcInput(e.target.value); setDmcError(''); }}
-              onKeyDown={handleDmcKeyDown}
-              placeholder="e.g. 310"
+              value={threadCodeInput}
+              onChange={(e) => { setThreadCodeInput(e.target.value); setThreadCodeError(''); }}
+              onKeyDown={handleThreadCodeKeyDown}
+              placeholder={selectedBrand === 'DMC' ? 'e.g. 310' : selectedBrand === 'Anchor' ? 'e.g. 403' : 'e.g. 002'}
               className="flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
             <button
-              onClick={handleAddDMC}
+              onClick={handleAddThreadByCode}
               className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded"
             >
               Add
             </button>
           </div>
-          {dmcError && (
-            <p className="text-xs text-red-500 mt-1">{dmcError}</p>
+          {threadCodeError && (
+            <p className="text-xs text-red-500 mt-1">{threadCodeError}</p>
           )}
         </div>
 
@@ -132,7 +161,7 @@ export function ColorPalette() {
             onClick={() => setShowThreadLibrary(true)}
             className="flex-1 py-2 px-2 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 rounded border border-blue-200"
           >
-            Browse DMC
+            Browse Library
           </button>
           <button
             onClick={handleAddColor}
@@ -184,6 +213,7 @@ export function ColorPalette() {
       <ThreadLibraryDialog
         isOpen={showThreadLibrary}
         onClose={() => setShowThreadLibrary(false)}
+        initialBrand={selectedBrand}
       />
     </div>
   );

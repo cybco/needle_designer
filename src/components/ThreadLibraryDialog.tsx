@@ -1,10 +1,17 @@
-import { useState, useMemo } from 'react';
-import { dmcThreads, ThreadColor, ThreadCategory, categoryNames, getThreadsByCategory } from '../data/dmcThreads';
+import { useState, useMemo, useEffect } from 'react';
+import { dmcThreads, ThreadCategory, categoryNames, getThreadsByCategory } from '../data/dmcThreads';
 import { usePatternStore, Color } from '../stores/patternStore';
+import {
+  ThreadBrand,
+  UnifiedThreadColor,
+  getThreadsByBrand,
+  getThreadLibraries,
+} from '../data/threadLibrary';
 
 interface ThreadLibraryDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  initialBrand?: ThreadBrand;
 }
 
 type SortMode = 'code' | 'name' | 'color';
@@ -56,15 +63,36 @@ function getColorSortKey(r: number, g: number, b: number): number {
   return hueGroup * 100 + (1 - l) * 10 + s;
 }
 
-export function ThreadLibraryDialog({ isOpen, onClose }: ThreadLibraryDialogProps) {
+export function ThreadLibraryDialog({ isOpen, onClose, initialBrand = 'DMC' }: ThreadLibraryDialogProps) {
   const { addColor, selectColor } = usePatternStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('code');
-  const [selectedThread, setSelectedThread] = useState<ThreadColor | null>(null);
+  const [selectedThread, setSelectedThread] = useState<UnifiedThreadColor | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
+  const [selectedBrand, setSelectedBrand] = useState<ThreadBrand>(initialBrand);
 
-  // Get thread counts per category
+  const threadLibraries = getThreadLibraries();
+
+  // Update brand when initialBrand prop changes
+  useEffect(() => {
+    setSelectedBrand(initialBrand);
+  }, [initialBrand]);
+
+  // Reset selections when brand changes
+  useEffect(() => {
+    setSelectedThread(null);
+    setCategoryFilter('all');
+    setSearchQuery('');
+  }, [selectedBrand]);
+
+  // Get all threads for the selected brand
+  const allBrandThreads = useMemo(() => {
+    return getThreadsByBrand(selectedBrand);
+  }, [selectedBrand]);
+
+  // Get thread counts per category (only for DMC)
   const categoryCounts = useMemo(() => {
+    if (selectedBrand !== 'DMC') return null;
     const counts: Record<CategoryFilter, number> = {
       'all': dmcThreads.length,
       'solid': getThreadsByCategory('solid').length,
@@ -74,14 +102,25 @@ export function ThreadLibraryDialog({ isOpen, onClose }: ThreadLibraryDialogProp
       'etoile': getThreadsByCategory('etoile').length,
     };
     return counts;
-  }, []);
+  }, [selectedBrand]);
 
   // Filter and sort threads
   const filteredThreads = useMemo(() => {
-    // Start with category filter
-    let threads = categoryFilter === 'all'
-      ? [...dmcThreads]
-      : getThreadsByCategory(categoryFilter);
+    let threads: UnifiedThreadColor[];
+
+    // For DMC, use category filter
+    if (selectedBrand === 'DMC' && categoryFilter !== 'all') {
+      const dmcFiltered = getThreadsByCategory(categoryFilter);
+      threads = dmcFiltered.map(t => ({
+        code: t.code,
+        name: t.name,
+        rgb: t.rgb,
+        brand: 'DMC' as ThreadBrand,
+        category: t.category,
+      }));
+    } else {
+      threads = [...allBrandThreads];
+    }
 
     // Apply search filter
     if (searchQuery) {
@@ -111,14 +150,14 @@ export function ThreadLibraryDialog({ isOpen, onClose }: ThreadLibraryDialogProp
     }
 
     return threads;
-  }, [searchQuery, sortMode, categoryFilter]);
+  }, [searchQuery, sortMode, categoryFilter, selectedBrand, allBrandThreads]);
 
-  const handleAddThread = (thread: ThreadColor) => {
+  const handleAddThread = (thread: UnifiedThreadColor) => {
     const newColor: Color = {
-      id: `dmc-${thread.code}-${Date.now()}`,
+      id: `${thread.brand.toLowerCase()}-${thread.code}-${Date.now()}`,
       name: thread.name,
       rgb: thread.rgb,
-      threadBrand: 'DMC',
+      threadBrand: thread.brand,
       threadCode: thread.code,
     };
     addColor(newColor);
@@ -140,36 +179,55 @@ export function ThreadLibraryDialog({ isOpen, onClose }: ThreadLibraryDialogProp
         {/* Header */}
         <div className="p-4 border-b border-gray-200">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-xl font-bold text-gray-800">DMC Thread Library</h2>
-            <span className="text-sm text-gray-500">{dmcThreads.length} colors total</span>
+            <h2 className="text-xl font-bold text-gray-800">Thread Library</h2>
+            <span className="text-sm text-gray-500">{allBrandThreads.length} colors in {selectedBrand}</span>
           </div>
 
-          {/* Category Tabs */}
-          <div className="flex gap-1 mb-3 overflow-x-auto">
-            <button
-              onClick={() => setCategoryFilter('all')}
-              className={`px-3 py-1.5 text-sm rounded-md whitespace-nowrap transition-colors ${
-                categoryFilter === 'all'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              All ({categoryCounts['all']})
-            </button>
-            {(Object.entries(categoryNames) as [ThreadCategory, string][]).map(([key, name]) => (
+          {/* Brand Tabs */}
+          <div className="flex gap-1 mb-3">
+            {threadLibraries.map((lib) => (
               <button
-                key={key}
-                onClick={() => setCategoryFilter(key)}
+                key={lib.brand}
+                onClick={() => setSelectedBrand(lib.brand)}
                 className={`px-3 py-1.5 text-sm rounded-md whitespace-nowrap transition-colors ${
-                  categoryFilter === key
+                  selectedBrand === lib.brand
                     ? 'bg-blue-600 text-white'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
-                {name} ({categoryCounts[key]})
+                {lib.name} ({lib.colorCount})
               </button>
             ))}
           </div>
+
+          {/* Category Tabs (DMC only) */}
+          {selectedBrand === 'DMC' && categoryCounts && (
+            <div className="flex gap-1 mb-3 overflow-x-auto">
+              <button
+                onClick={() => setCategoryFilter('all')}
+                className={`px-3 py-1.5 text-sm rounded-md whitespace-nowrap transition-colors ${
+                  categoryFilter === 'all'
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                All ({categoryCounts['all']})
+              </button>
+              {(Object.entries(categoryNames) as [ThreadCategory, string][]).map(([key, name]) => (
+                <button
+                  key={key}
+                  onClick={() => setCategoryFilter(key)}
+                  className={`px-3 py-1.5 text-sm rounded-md whitespace-nowrap transition-colors ${
+                    categoryFilter === key
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {name} ({categoryCounts[key]})
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Search and Sort */}
           <div className="flex gap-3">
@@ -244,10 +302,13 @@ export function ThreadLibraryDialog({ isOpen, onClose }: ThreadLibraryDialogProp
                 }}
               />
               <div className="flex-1">
-                <p className="font-bold text-gray-800">DMC {selectedThread.code}</p>
+                <p className="font-bold text-gray-800">{selectedThread.brand} {selectedThread.code}</p>
                 <p className="text-sm text-gray-600">{selectedThread.name}</p>
                 <p className="text-xs text-gray-500 mt-1">
-                  {categoryNames[selectedThread.category]} | RGB: {selectedThread.rgb[0]}, {selectedThread.rgb[1]}, {selectedThread.rgb[2]}
+                  {selectedThread.category && categoryNames[selectedThread.category as ThreadCategory]
+                    ? `${categoryNames[selectedThread.category as ThreadCategory]} | `
+                    : ''}
+                  RGB: {selectedThread.rgb[0]}, {selectedThread.rgb[1]}, {selectedThread.rgb[2]}
                 </p>
               </div>
             </div>

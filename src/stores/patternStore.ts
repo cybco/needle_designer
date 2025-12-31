@@ -38,7 +38,7 @@ export interface Pattern {
   layers: Layer[];
 }
 
-export type Tool = 'pencil' | 'eraser' | 'fill' | 'pan' | 'select' | 'text';
+export type Tool = 'pencil' | 'eraser' | 'fill' | 'pan' | 'select' | 'text' | 'line' | 'rectangle' | 'ellipse';
 
 export type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
@@ -95,6 +95,9 @@ interface PatternState {
   setStitch: (x: number, y: number, colorId: string) => void;
   removeStitch: (x: number, y: number) => void;
   fillArea: (x: number, y: number, colorId: string) => void;
+  drawLine: (x1: number, y1: number, x2: number, y2: number, colorId: string) => void;
+  drawRectangle: (x1: number, y1: number, x2: number, y2: number, colorId: string, filled: boolean) => void;
+  drawEllipse: (x1: number, y1: number, x2: number, y2: number, colorId: string, filled: boolean) => void;
   addColor: (color: Color) => void;
   removeColor: (colorId: string) => void;
   selectColor: (colorId: string | null) => void;
@@ -175,6 +178,7 @@ function calculateLayerBounds(stitches: Stitch[]): { x: number; y: number; width
 }
 
 // Helper function to resample stitches when resizing
+// Uses reverse mapping to ensure no gaps when scaling up
 function resampleStitches(
   stitches: Stitch[],
   originalBounds: { x: number; y: number; width: number; height: number },
@@ -184,45 +188,36 @@ function resampleStitches(
     return stitches;
   }
 
-  const scaleX = newBounds.width / originalBounds.width;
-  const scaleY = newBounds.height / originalBounds.height;
-
-  // Create a map to handle overlapping stitches after scaling
-  const stitchMap = new Map<string, Stitch[]>();
-
+  // Create a lookup map of original stitches by position (relative to bounds)
+  const originalMap = new Map<string, Stitch>();
   for (const stitch of stitches) {
-    // Normalize position relative to original bounds
     const relX = stitch.x - originalBounds.x;
     const relY = stitch.y - originalBounds.y;
-
-    // Scale and offset to new bounds
-    const newX = Math.round(relX * scaleX + newBounds.x);
-    const newY = Math.round(relY * scaleY + newBounds.y);
-
-    const key = `${newX},${newY}`;
-    if (!stitchMap.has(key)) {
-      stitchMap.set(key, []);
-    }
-    stitchMap.get(key)!.push({ ...stitch, x: newX, y: newY });
+    originalMap.set(`${relX},${relY}`, stitch);
   }
 
-  // Resolve overlapping stitches (use most common color at each position)
   const result: Stitch[] = [];
-  for (const [, overlapping] of stitchMap) {
-    // Pick the most common color among overlapping stitches
-    const colorCounts = new Map<string, number>();
-    for (const s of overlapping) {
-      colorCounts.set(s.colorId, (colorCounts.get(s.colorId) || 0) + 1);
-    }
-    let maxColor = overlapping[0].colorId;
-    let maxCount = 0;
-    for (const [colorId, count] of colorCounts) {
-      if (count > maxCount) {
-        maxColor = colorId;
-        maxCount = count;
+
+  // For each pixel in the new bounds, find the corresponding source pixel
+  // This reverse mapping ensures no gaps when scaling up
+  for (let newRelY = 0; newRelY < newBounds.height; newRelY++) {
+    for (let newRelX = 0; newRelX < newBounds.width; newRelX++) {
+      // Map back to original coordinates (use floor for nearest-neighbor sampling)
+      const srcRelX = Math.floor((newRelX * originalBounds.width) / newBounds.width);
+      const srcRelY = Math.floor((newRelY * originalBounds.height) / newBounds.height);
+
+      const srcKey = `${srcRelX},${srcRelY}`;
+      const srcStitch = originalMap.get(srcKey);
+
+      if (srcStitch) {
+        result.push({
+          x: newBounds.x + newRelX,
+          y: newBounds.y + newRelY,
+          colorId: srcStitch.colorId,
+          completed: srcStitch.completed,
+        });
       }
     }
-    result.push({ ...overlapping[0], colorId: maxColor });
   }
 
   return result;
@@ -528,6 +523,241 @@ export const usePatternStore = create<PatternState>((set, get) => {
     updatedLayers[layerIndex] = {
       ...activeLayer,
       stitches: updatedStitches,
+    };
+
+    set({
+      pattern: {
+        ...pattern,
+        layers: updatedLayers,
+      },
+      hasUnsavedChanges: true,
+    });
+  },
+
+  drawLine: (x1, y1, x2, y2, colorId) => {
+    const { pattern, activeLayerId } = get();
+    if (!pattern || !activeLayerId) return;
+
+    const layerIndex = pattern.layers.findIndex(l => l.id === activeLayerId);
+    if (layerIndex === -1) return;
+
+    const activeLayer = pattern.layers[layerIndex];
+    if (activeLayer.locked) return;
+
+    pushToHistory();
+
+    // Bresenham's line algorithm
+    const newStitches: Stitch[] = [];
+    const dx = Math.abs(x2 - x1);
+    const dy = Math.abs(y2 - y1);
+    const sx = x1 < x2 ? 1 : -1;
+    const sy = y1 < y2 ? 1 : -1;
+    let err = dx - dy;
+
+    let x = x1;
+    let y = y1;
+
+    while (true) {
+      if (x >= 0 && x < pattern.canvas.width && y >= 0 && y < pattern.canvas.height) {
+        newStitches.push({ x, y, colorId, completed: false });
+      }
+
+      if (x === x2 && y === y2) break;
+
+      const e2 = 2 * err;
+      if (e2 > -dy) {
+        err -= dy;
+        x += sx;
+      }
+      if (e2 < dx) {
+        err += dx;
+        y += sy;
+      }
+    }
+
+    // Merge new stitches with existing (new overwrites old at same positions)
+    const stitchMap = new Map<string, Stitch>();
+    activeLayer.stitches.forEach(s => stitchMap.set(`${s.x},${s.y}`, s));
+    newStitches.forEach(s => stitchMap.set(`${s.x},${s.y}`, s));
+
+    const updatedLayers = [...pattern.layers];
+    updatedLayers[layerIndex] = {
+      ...activeLayer,
+      stitches: Array.from(stitchMap.values()),
+    };
+
+    set({
+      pattern: {
+        ...pattern,
+        layers: updatedLayers,
+      },
+      hasUnsavedChanges: true,
+    });
+  },
+
+  drawRectangle: (x1, y1, x2, y2, colorId, filled) => {
+    const { pattern, activeLayerId } = get();
+    if (!pattern || !activeLayerId) return;
+
+    const layerIndex = pattern.layers.findIndex(l => l.id === activeLayerId);
+    if (layerIndex === -1) return;
+
+    const activeLayer = pattern.layers[layerIndex];
+    if (activeLayer.locked) return;
+
+    pushToHistory();
+
+    const minX = Math.max(0, Math.min(x1, x2));
+    const maxX = Math.min(pattern.canvas.width - 1, Math.max(x1, x2));
+    const minY = Math.max(0, Math.min(y1, y2));
+    const maxY = Math.min(pattern.canvas.height - 1, Math.max(y1, y2));
+
+    const newStitches: Stitch[] = [];
+
+    if (filled) {
+      // Fill entire rectangle
+      for (let y = minY; y <= maxY; y++) {
+        for (let x = minX; x <= maxX; x++) {
+          newStitches.push({ x, y, colorId, completed: false });
+        }
+      }
+    } else {
+      // Draw outline only
+      for (let x = minX; x <= maxX; x++) {
+        newStitches.push({ x, y: minY, colorId, completed: false });
+        newStitches.push({ x, y: maxY, colorId, completed: false });
+      }
+      for (let y = minY + 1; y < maxY; y++) {
+        newStitches.push({ x: minX, y, colorId, completed: false });
+        newStitches.push({ x: maxX, y, colorId, completed: false });
+      }
+    }
+
+    // Merge new stitches with existing
+    const stitchMap = new Map<string, Stitch>();
+    activeLayer.stitches.forEach(s => stitchMap.set(`${s.x},${s.y}`, s));
+    newStitches.forEach(s => stitchMap.set(`${s.x},${s.y}`, s));
+
+    const updatedLayers = [...pattern.layers];
+    updatedLayers[layerIndex] = {
+      ...activeLayer,
+      stitches: Array.from(stitchMap.values()),
+    };
+
+    set({
+      pattern: {
+        ...pattern,
+        layers: updatedLayers,
+      },
+      hasUnsavedChanges: true,
+    });
+  },
+
+  drawEllipse: (x1, y1, x2, y2, colorId, filled) => {
+    const { pattern, activeLayerId } = get();
+    if (!pattern || !activeLayerId) return;
+
+    const layerIndex = pattern.layers.findIndex(l => l.id === activeLayerId);
+    if (layerIndex === -1) return;
+
+    const activeLayer = pattern.layers[layerIndex];
+    if (activeLayer.locked) return;
+
+    pushToHistory();
+
+    // Calculate center and radii
+    const cx = (x1 + x2) / 2;
+    const cy = (y1 + y2) / 2;
+    const rx = Math.abs(x2 - x1) / 2;
+    const ry = Math.abs(y2 - y1) / 2;
+
+    const newStitches: Stitch[] = [];
+
+    if (filled) {
+      // Filled ellipse - check each point in bounding box
+      const minX = Math.max(0, Math.floor(cx - rx));
+      const maxX = Math.min(pattern.canvas.width - 1, Math.ceil(cx + rx));
+      const minY = Math.max(0, Math.floor(cy - ry));
+      const maxY = Math.min(pattern.canvas.height - 1, Math.ceil(cy + ry));
+
+      for (let y = minY; y <= maxY; y++) {
+        for (let x = minX; x <= maxX; x++) {
+          // Check if point is inside ellipse using ellipse equation
+          const dx = (x + 0.5 - cx) / (rx || 0.5);
+          const dy = (y + 0.5 - cy) / (ry || 0.5);
+          if (dx * dx + dy * dy <= 1) {
+            newStitches.push({ x, y, colorId, completed: false });
+          }
+        }
+      }
+    } else {
+      // Outline ellipse - use midpoint ellipse algorithm
+      if (rx < 0.5 || ry < 0.5) {
+        // Too small, just draw a point
+        const px = Math.round(cx);
+        const py = Math.round(cy);
+        if (px >= 0 && px < pattern.canvas.width && py >= 0 && py < pattern.canvas.height) {
+          newStitches.push({ x: px, y: py, colorId, completed: false });
+        }
+      } else {
+        // Midpoint ellipse algorithm for outline
+        const plotPoint = (x: number, y: number) => {
+          const px = Math.round(cx + x);
+          const py = Math.round(cy + y);
+          if (px >= 0 && px < pattern.canvas.width && py >= 0 && py < pattern.canvas.height) {
+            newStitches.push({ x: px, y: py, colorId, completed: false });
+          }
+        };
+
+        const plotSymmetricPoints = (x: number, y: number) => {
+          plotPoint(x, y);
+          plotPoint(-x, y);
+          plotPoint(x, -y);
+          plotPoint(-x, -y);
+        };
+
+        let x = 0;
+        let y = ry;
+        const rx2 = rx * rx;
+        const ry2 = ry * ry;
+        let p1 = ry2 - rx2 * ry + 0.25 * rx2;
+
+        // Region 1
+        while (ry2 * x < rx2 * y) {
+          plotSymmetricPoints(x, y);
+          x++;
+          if (p1 < 0) {
+            p1 += 2 * ry2 * x + ry2;
+          } else {
+            y--;
+            p1 += 2 * ry2 * x - 2 * rx2 * y + ry2;
+          }
+        }
+
+        // Region 2
+        let p2 = ry2 * (x + 0.5) * (x + 0.5) + rx2 * (y - 1) * (y - 1) - rx2 * ry2;
+        while (y >= 0) {
+          plotSymmetricPoints(x, y);
+          y--;
+          if (p2 > 0) {
+            p2 += rx2 - 2 * rx2 * y;
+          } else {
+            x++;
+            p2 += 2 * ry2 * x - 2 * rx2 * y + rx2;
+          }
+        }
+      }
+    }
+
+    // Remove duplicates and merge with existing
+    const stitchMap = new Map<string, Stitch>();
+    activeLayer.stitches.forEach(s => stitchMap.set(`${s.x},${s.y}`, s));
+    newStitches.forEach(s => stitchMap.set(`${s.x},${s.y}`, s));
+
+    const updatedLayers = [...pattern.layers];
+    updatedLayers[layerIndex] = {
+      ...activeLayer,
+      stitches: Array.from(stitchMap.values()),
     };
 
     set({
@@ -1015,6 +1245,21 @@ export const usePatternStore = create<PatternState>((set, get) => {
     const { pattern, selection } = get();
     if (!pattern || !selection) return;
 
+    // For floating selections, use the floating stitches
+    if (selection.floatingStitches) {
+      set({
+        selection: {
+          ...selection,
+          isResizing: true,
+          resizeHandle: handle,
+          dragStart: point,
+          originalBounds: { ...selection.bounds },
+          originalStitches: selection.floatingStitches.map(s => ({ ...s })),
+        },
+      });
+      return;
+    }
+
     const layer = pattern.layers.find(l => l.id === selection.layerId);
     if (!layer) return;
 
@@ -1074,9 +1319,6 @@ export const usePatternStore = create<PatternState>((set, get) => {
     const { pattern, selection } = get();
     if (!pattern || !selection || !selection.isResizing || !selection.originalBounds || !selection.originalStitches) return;
 
-    const layerIndex = pattern.layers.findIndex(l => l.id === selection.layerId);
-    if (layerIndex === -1) return;
-
     // Resample stitches to new bounds
     const resampledStitches = resampleStitches(
       selection.originalStitches,
@@ -1084,14 +1326,34 @@ export const usePatternStore = create<PatternState>((set, get) => {
       selection.bounds
     );
 
+    // Recalculate bounds after resample
+    const newBounds = calculateLayerBounds(resampledStitches);
+
+    // For floating selections, just update the floating stitches without modifying layers
+    if (selection.floatingStitches) {
+      set({
+        selection: newBounds ? {
+          ...selection,
+          bounds: newBounds,
+          isResizing: false,
+          resizeHandle: null,
+          dragStart: null,
+          originalBounds: null,
+          originalStitches: null,
+          floatingStitches: resampledStitches,
+        } : null,
+      });
+      return;
+    }
+
+    const layerIndex = pattern.layers.findIndex(l => l.id === selection.layerId);
+    if (layerIndex === -1) return;
+
     const updatedLayers = [...pattern.layers];
     updatedLayers[layerIndex] = {
       ...pattern.layers[layerIndex],
       stitches: resampledStitches,
     };
-
-    // Recalculate bounds after resample
-    const newBounds = calculateLayerBounds(resampledStitches);
 
     set({
       pattern: {

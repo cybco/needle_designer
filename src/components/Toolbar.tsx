@@ -28,7 +28,11 @@ function ToolButton({ tool, icon, label, activeTool, onClick }: ToolButtonProps)
   );
 }
 
-export function Toolbar() {
+interface ToolbarProps {
+  onTextToolClick?: () => void;
+}
+
+export function Toolbar({ onTextToolClick }: ToolbarProps) {
   const { pattern, activeTool, zoom, showGrid, history, future, setTool, setZoom, toggleGrid, undo, redo } = usePatternStore();
 
   if (!pattern) {
@@ -86,6 +90,35 @@ export function Toolbar() {
           tool="text"
           icon="T"
           label="Text (T)"
+          activeTool={activeTool}
+          onClick={() => {
+            if (onTextToolClick) {
+              onTextToolClick();
+            }
+          }}
+        />
+      </div>
+
+      {/* Shape tools */}
+      <div className="p-2 space-y-2 border-b border-gray-200">
+        <ToolButton
+          tool="line"
+          icon="╱"
+          label="Line (L)"
+          activeTool={activeTool}
+          onClick={setTool}
+        />
+        <ToolButton
+          tool="rectangle"
+          icon="▢"
+          label="Rectangle (R)"
+          activeTool={activeTool}
+          onClick={setTool}
+        />
+        <ToolButton
+          tool="ellipse"
+          icon="◯"
+          label="Ellipse (O)"
           activeTool={activeTool}
           onClick={setTool}
         />

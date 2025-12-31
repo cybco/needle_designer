@@ -1,6 +1,7 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use image::{DynamicImage, GenericImageView, ImageFormat, Rgba, RgbaImage};
 use resvg;
+use screenshots::Screen;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -317,9 +318,101 @@ fn open_project(path: String) -> Result<NdpFile, String> {
 }
 
 #[tauri::command]
+fn save_pdf(path: String, data: String) -> Result<(), String> {
+    // Decode base64 data
+    let bytes = STANDARD.decode(&data)
+        .map_err(|e| format!("Failed to decode PDF data: {}", e))?;
+
+    // Write to file
+    fs::write(&path, bytes)
+        .map_err(|e| format!("Failed to write PDF file: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
 fn get_save_path(default_name: String) -> Result<Option<String>, String> {
     // This is a placeholder - actual file dialog will be handled in frontend
     Ok(Some(format!("{}.ndp", default_name)))
+}
+
+/// Get the color of the pixel at the specified screen coordinates
+#[tauri::command]
+fn pick_screen_color(x: i32, y: i32) -> Result<[u8; 3], String> {
+    // Get all screens
+    let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
+
+    // Find the screen containing this point
+    for screen in screens {
+        let info = screen.display_info;
+        let screen_x = info.x;
+        let screen_y = info.y;
+        let screen_width = info.width as i32;
+        let screen_height = info.height as i32;
+
+        // Check if the point is within this screen
+        if x >= screen_x && x < screen_x + screen_width &&
+           y >= screen_y && y < screen_y + screen_height {
+            // Capture a small region around the point (1x1 pixel)
+            let local_x = (x - screen_x) as u32;
+            let local_y = (y - screen_y) as u32;
+
+            // Capture from this screen
+            let capture = screen.capture_area(local_x as i32, local_y as i32, 1, 1)
+                .map_err(|e| format!("Failed to capture screen: {}", e))?;
+
+            // Get the pixel color from the captured image - use as_raw() to get pixel data
+            let raw = capture.as_raw();
+            if raw.len() >= 4 {
+                // BGRA format on Windows
+                return Ok([raw[2], raw[1], raw[0]]);
+            }
+        }
+    }
+
+    Err("Point not found on any screen".to_string())
+}
+
+/// Capture the primary screen and return as base64 encoded PNG
+#[tauri::command]
+fn capture_screen() -> Result<String, String> {
+    let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
+
+    // Get the primary screen (first one)
+    let screen = screens.into_iter().next()
+        .ok_or("No screens found")?;
+
+    // Capture the entire screen
+    let capture = screen.capture()
+        .map_err(|e| format!("Failed to capture screen: {}", e))?;
+
+    // Convert to PNG and base64 encode
+    let width = capture.width();
+    let height = capture.height();
+    let raw = capture.as_raw();
+
+    // Create an RgbaImage from the raw data (BGRA -> RGBA)
+    let mut rgba_data = Vec::with_capacity(raw.len());
+    for chunk in raw.chunks(4) {
+        if chunk.len() >= 4 {
+            rgba_data.push(chunk[2]); // R
+            rgba_data.push(chunk[1]); // G
+            rgba_data.push(chunk[0]); // B
+            rgba_data.push(chunk[3]); // A
+        }
+    }
+
+    let img = RgbaImage::from_raw(width, height, rgba_data)
+        .ok_or("Failed to create image from capture")?;
+
+    let dynamic_img = DynamicImage::ImageRgba8(img);
+
+    // Encode to PNG and base64
+    let mut bytes: Vec<u8> = Vec::new();
+    dynamic_img.write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
+        .map_err(|e| format!("Failed to encode image: {}", e))?;
+
+    Ok(format!("data:image/png;base64,{}", STANDARD.encode(&bytes)))
 }
 
 // Helper functions
@@ -657,13 +750,17 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             greet,
             create_new_project,
             load_image,
             process_image,
             save_project,
-            open_project
+            open_project,
+            save_pdf,
+            pick_screen_color,
+            capture_screen
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -7,10 +7,16 @@ import { NewProjectDialog } from './components/NewProjectDialog';
 import { ImportImageDialog } from './components/ImportImageDialog';
 import { TextEditorDialog } from './components/TextEditorDialog';
 import { FontBrowserDialog } from './components/FontBrowserDialog';
+import { DeleteLayerDialog } from './components/DeleteLayerDialog';
+import { ExportPdfDialog } from './components/ExportPdfDialog';
+import { UnsavedChangesDialog } from './components/UnsavedChangesDialog';
+import { ColorMatchDialog } from './components/ColorMatchDialog';
 import { usePatternStore, Pattern, RulerUnit, Stitch } from './stores/patternStore';
 import { loadBundledFonts } from './data/bundledFonts';
 import { invoke } from '@tauri-apps/api/core';
 import { save, open } from '@tauri-apps/plugin-dialog';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { exit } from '@tauri-apps/plugin-process';
 
 // NDP file format for Tauri
 interface NdpFile {
@@ -59,12 +65,14 @@ interface Preferences {
   autoSaveMinutes: number | null; // null means disabled
   historySize: number;
   rulerUnit: RulerUnit;
+  confirmLayerDelete: boolean; // Show confirmation when deleting layers
 }
 
 const DEFAULT_PREFERENCES: Preferences = {
   autoSaveMinutes: 1,
   historySize: 50,
   rulerUnit: 'inches',
+  confirmLayerDelete: true,
 };
 
 function App() {
@@ -72,6 +80,7 @@ function App() {
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showFileMenu, setShowFileMenu] = useState(false);
   const [showImportMenu, setShowImportMenu] = useState(false);
+  const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [showPreferencesMenu, setShowPreferencesMenu] = useState(false);
   const [showRecentMenu, setShowRecentMenu] = useState(false);
   const [recentFiles, setRecentFiles] = useState<string[]>(() => {
@@ -94,9 +103,21 @@ function App() {
   // Text tool state
   const [showTextEditor, setShowTextEditor] = useState(false);
   const [showFontBrowser, setShowFontBrowser] = useState(false);
-  const [textPosition, setTextPosition] = useState<{ x: number; y: number } | null>(null);
   const [selectedFont, setSelectedFont] = useState('Roboto');
   const [selectedFontWeight, setSelectedFontWeight] = useState(400);
+
+  // Delete confirmation dialog state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [layerToDelete, setLayerToDelete] = useState<string | null>(null);
+
+  // Export dialog state
+  const [showExportPdfDialog, setShowExportPdfDialog] = useState(false);
+
+  // Color match dialog state
+  const [showColorMatchDialog, setShowColorMatchDialog] = useState(false);
+
+  // Unsaved changes dialog state
+  const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = useState(false);
 
   const {
     pattern,
@@ -117,14 +138,53 @@ function App() {
     redo,
     setMaxHistorySize,
     setRulerUnit,
-    createFloatingSelection,
-    commitFloatingSelection,
-    cancelFloatingSelection,
+    importAsLayer,
+    removeLayer,
+    clearSelection,
   } = usePatternStore();
 
   // Load bundled fonts on app startup
   useEffect(() => {
     loadBundledFonts();
+  }, []);
+
+  // Handle window close with unsaved changes check
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    const setupCloseHandler = async () => {
+      try {
+        const appWindow = getCurrentWindow();
+        unlisten = await appWindow.onCloseRequested(async (event) => {
+          // Get the latest state from the store
+          const state = usePatternStore.getState();
+
+          if (state.pattern && state.hasUnsavedChanges) {
+            // Prevent the window from closing
+            event.preventDefault();
+            // Show our custom dialog
+            setShowUnsavedChangesDialog(true);
+          } else {
+            // No unsaved changes or no pattern - exit immediately
+            try {
+              await exit(0);
+            } catch (err) {
+              console.error('Failed to exit:', err);
+            }
+          }
+        });
+      } catch (error) {
+        console.error('Failed to setup close handler:', error);
+      }
+    };
+
+    setupCloseHandler();
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
   }, []);
 
   // Keyboard shortcuts
@@ -135,16 +195,21 @@ function App() {
         return;
       }
 
-      // Handle floating selection commit/cancel
-      if (selection?.floatingStitches) {
-        if (e.key === 'Enter') {
+      // Handle Delete key for selected layer or active layer
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        // Determine which layer to delete: selection first, then active layer
+        const layerIdToDelete = selection?.layerId || activeLayerId;
+
+        if (layerIdToDelete && pattern && pattern.layers.length > 1) {
           e.preventDefault();
-          commitFloatingSelection();
-          return;
-        }
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          cancelFloatingSelection();
+          // Request layer deletion (will show confirmation if preference is enabled)
+          if (preferences.confirmLayerDelete) {
+            setLayerToDelete(layerIdToDelete);
+            setShowDeleteConfirm(true);
+          } else {
+            removeLayer(layerIdToDelete);
+            if (selection) clearSelection();
+          }
           return;
         }
       }
@@ -166,7 +231,30 @@ function App() {
           break;
         case 't':
           if (!e.ctrlKey && !e.metaKey) {
-            setTool('text');
+            // Open text dialog when T is pressed (if pattern exists)
+            if (pattern) {
+              setShowTextEditor(true);
+            }
+          }
+          break;
+        case 'l':
+          if (!e.ctrlKey && !e.metaKey) {
+            setTool('line');
+          }
+          break;
+        case 'r':
+          if (!e.ctrlKey && !e.metaKey) {
+            setTool('rectangle');
+          }
+          break;
+        case 'o':
+          if (!e.ctrlKey && !e.metaKey) {
+            setTool('ellipse');
+          }
+          break;
+        case 'm':
+          if (!e.ctrlKey && !e.metaKey && pattern) {
+            setShowColorMatchDialog(true);
           }
           break;
         case ' ':
@@ -204,7 +292,7 @@ function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [zoom, activeTool, selection, setTool, setZoom, commitFloatingSelection, cancelFloatingSelection]);
+  }, [zoom, activeTool, pattern, selection, activeLayerId, preferences.confirmLayerDelete, setTool, setZoom, removeLayer, clearSelection]);
 
   // Add file to recent files list
   const addToRecentFiles = useCallback((filePath: string) => {
@@ -394,6 +482,66 @@ function App() {
     });
   }, []);
 
+  // Confirm delete layer
+  const handleConfirmDelete = useCallback((suppressFutureWarnings: boolean) => {
+    if (layerToDelete) {
+      removeLayer(layerToDelete);
+      clearSelection();
+      setLayerToDelete(null);
+      setShowDeleteConfirm(false);
+
+      if (suppressFutureWarnings) {
+        updatePreferences({ confirmLayerDelete: false });
+      }
+    }
+  }, [layerToDelete, removeLayer, clearSelection, updatePreferences]);
+
+  // Cancel delete
+  const handleCancelDelete = useCallback(() => {
+    setLayerToDelete(null);
+    setShowDeleteConfirm(false);
+  }, []);
+
+  // Handle unsaved changes dialog actions
+  const handleUnsavedSave = useCallback(async () => {
+    setShowUnsavedChangesDialog(false);
+    await handleSave();
+    // After saving, exit the application
+    try {
+      await exit(0);
+    } catch (error) {
+      console.error('Failed to exit:', error);
+    }
+  }, [handleSave]);
+
+  const handleUnsavedDontSave = useCallback(async () => {
+    setShowUnsavedChangesDialog(false);
+    // Exit without saving
+    try {
+      await exit(0);
+    } catch (error) {
+      console.error('Failed to exit:', error);
+    }
+  }, []);
+
+  const handleUnsavedCancel = useCallback(() => {
+    setShowUnsavedChangesDialog(false);
+  }, []);
+
+  // Handle File > Exit menu action
+  const handleExit = useCallback(async () => {
+    const state = usePatternStore.getState();
+    if (state.hasUnsavedChanges) {
+      setShowUnsavedChangesDialog(true);
+    } else {
+      try {
+        await exit(0);
+      } catch (error) {
+        console.error('Failed to exit:', error);
+      }
+    }
+  }, []);
+
   // Sync history size with store when preferences change
   useEffect(() => {
     setMaxHistorySize(preferences.historySize);
@@ -422,22 +570,31 @@ function App() {
     return () => clearInterval(autoSaveTimer);
   }, [preferences.autoSaveMinutes, pattern, currentFilePath, hasUnsavedChanges, handleSave]);
 
-  // Text tool click handler
-  const handleTextToolClick = useCallback((position: { x: number; y: number }) => {
-    setTextPosition(position);
-    setShowTextEditor(true);
-  }, []);
-
-  // Handle text confirm - create floating selection for positioning
+  // Handle text confirm - create a new layer with the text
   const handleTextConfirm = useCallback((stitches: Stitch[], width: number, height: number) => {
-    if (!textPosition || stitches.length === 0) return;
+    if (stitches.length === 0) return;
 
-    // Create a floating selection that the user can move before committing
-    createFloatingSelection(stitches, width, height, textPosition);
+    // Get unique colors from the stitches
+    const colorIds = new Set(stitches.map(s => s.colorId));
+    const colors = pattern?.colorPalette.filter(c => colorIds.has(c.id)) || [];
 
-    // Reset text position
-    setTextPosition(null);
-  }, [textPosition, createFloatingSelection]);
+    // Create a new layer with the text - position at center of canvas
+    const offsetX = pattern ? Math.floor((pattern.canvas.width - width) / 2) : 0;
+    const offsetY = pattern ? Math.floor((pattern.canvas.height - height) / 2) : 0;
+
+    const positionedStitches = stitches.map(s => ({
+      ...s,
+      x: s.x + offsetX,
+      y: s.y + offsetY,
+    }));
+
+    // Generate a unique layer name
+    const layerName = `Text ${new Date().toLocaleTimeString()}`;
+    importAsLayer(layerName, colors, positionedStitches);
+
+    // Switch back to select tool so user can move/resize the new layer
+    setTool('select');
+  }, [pattern, importAsLayer, setTool]);
 
   // Handle font selection from browser
   const handleFontSelect = useCallback((fontFamily: string, weight: number) => {
@@ -487,13 +644,18 @@ function App() {
             <div className="relative">
               <button
                 onClick={() => setShowFileMenu(!showFileMenu)}
-                onBlur={() => setTimeout(() => setShowFileMenu(false), 150)}
                 className="hover:text-blue-300 transition-colors"
               >
                 File
               </button>
               {showFileMenu && (
-                <div className="absolute top-full left-0 mt-1 bg-gray-700 rounded shadow-lg py-1 min-w-[160px] z-50">
+                <>
+                  {/* Backdrop to close menu when clicking outside */}
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setShowFileMenu(false)}
+                  />
+                  <div className="absolute top-full left-0 mt-1 bg-gray-700 rounded shadow-lg py-1 min-w-40 z-50">
                   <button
                     onClick={() => { setShowNewProjectDialog(true); setShowFileMenu(false); }}
                     className="w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors"
@@ -562,12 +724,24 @@ function App() {
                   </button>
                   <div className="border-t border-gray-600 my-1" />
                   <button
-                    disabled
-                    className="w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors opacity-50 cursor-not-allowed"
+                    onClick={() => {
+                      setShowExportPdfDialog(true);
+                      setShowFileMenu(false);
+                    }}
+                    disabled={!pattern}
+                    className={`w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors ${!pattern ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
-                    Export
+                    Export PDF
+                  </button>
+                  <div className="border-t border-gray-600 my-1" />
+                  <button
+                    onClick={() => { handleExit(); setShowFileMenu(false); }}
+                    className="w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors"
+                  >
+                    Exit <span className="text-gray-400 text-xs float-right">Alt+F4</span>
                   </button>
                 </div>
+                </>
               )}
             </div>
 
@@ -575,20 +749,54 @@ function App() {
             <div className="relative">
               <button
                 onClick={() => setShowImportMenu(!showImportMenu)}
-                onBlur={() => setTimeout(() => setShowImportMenu(false), 150)}
                 className="hover:text-blue-300 transition-colors"
               >
                 Import
               </button>
               {showImportMenu && (
-                <div className="absolute top-full left-0 mt-1 bg-gray-700 rounded shadow-lg py-1 min-w-[160px] z-50">
-                  <button
-                    onClick={() => { setShowImportDialog(true); setShowImportMenu(false); }}
-                    className="w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors"
-                  >
-                    Import Image
-                  </button>
-                </div>
+                <>
+                  {/* Backdrop to close menu when clicking outside */}
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setShowImportMenu(false)}
+                  />
+                  <div className="absolute top-full left-0 mt-1 bg-gray-700 rounded shadow-lg py-1 min-w-40 z-50">
+                    <button
+                      onClick={() => { setShowImportDialog(true); setShowImportMenu(false); }}
+                      className="w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors"
+                    >
+                      Import Image
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Tools Menu */}
+            <div className="relative">
+              <button
+                onClick={() => setShowToolsMenu(!showToolsMenu)}
+                className="hover:text-blue-300 transition-colors"
+              >
+                Tools
+              </button>
+              {showToolsMenu && (
+                <>
+                  {/* Backdrop to close menu when clicking outside */}
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setShowToolsMenu(false)}
+                  />
+                  <div className="absolute top-full left-0 mt-1 bg-gray-700 rounded shadow-lg py-1 min-w-40 z-50">
+                    <button
+                      onClick={() => { setShowColorMatchDialog(true); setShowToolsMenu(false); }}
+                      disabled={!pattern}
+                      className={`w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors ${!pattern ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      Color Matching <span className="text-gray-400 text-xs float-right">M</span>
+                    </button>
+                  </div>
+                </>
               )}
             </div>
 
@@ -665,6 +873,19 @@ function App() {
                         <option value="squares">Squares</option>
                       </select>
                     </div>
+                    <div className="px-4 py-2 border-t border-gray-600">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={preferences.confirmLayerDelete}
+                          onChange={(e) => {
+                            updatePreferences({ confirmLayerDelete: e.target.checked });
+                          }}
+                          className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                        />
+                        <span className="text-sm text-white">Confirm layer delete</span>
+                      </label>
+                    </div>
                   </div>
                 </>
               )}
@@ -689,10 +910,10 @@ function App() {
         {pattern ? (
           <>
             {/* Left Toolbar */}
-            <Toolbar />
+            <Toolbar onTextToolClick={() => setShowTextEditor(true)} />
 
             {/* Canvas Area */}
-            <PatternCanvas onTextToolClick={handleTextToolClick} />
+            <PatternCanvas />
 
             {/* Right Panel - Layers and Colors */}
             <div className="flex flex-col border-l border-gray-300">
@@ -703,7 +924,7 @@ function App() {
         ) : (
           /* Welcome Screen */
           <div className="flex-1 flex items-center justify-center">
-            <div className="text-center">
+            <div className="text-center max-w-lg">
               <h2 className="text-3xl font-bold text-gray-800 mb-4">
                 Welcome to NeedlePoint Designer
               </h2>
@@ -718,10 +939,37 @@ function App() {
                 Create New Pattern
               </button>
 
-              <div className="mt-8 text-sm text-gray-500">
+              <div className="mt-6 text-sm text-gray-500">
                 <p>Press Ctrl+N to create a new pattern</p>
-                <p className="mt-2">Powered by Tauri + React + TypeScript</p>
               </div>
+
+              {/* Recent Files */}
+              {recentFiles.length > 0 && (
+                <div className="mt-8 text-left">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Recent Files</h3>
+                  <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+                    {recentFiles.slice(0, 10).map((filePath, index) => (
+                      <button
+                        key={index}
+                        onClick={() => openFilePath(filePath)}
+                        className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors flex items-center gap-3"
+                      >
+                        <svg className="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-gray-800 truncate">
+                            {filePath.split(/[/\\]/).pop()}
+                          </p>
+                          <p className="text-xs text-gray-500 truncate">
+                            {filePath}
+                          </p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -778,10 +1026,7 @@ function App() {
       {/* Text Tool Dialogs */}
       <TextEditorDialog
         isOpen={showTextEditor}
-        onClose={() => {
-          setShowTextEditor(false);
-          setTextPosition(null);
-        }}
+        onClose={() => setShowTextEditor(false)}
         onConfirm={handleTextConfirm}
         colorPalette={pattern?.colorPalette || []}
         initialColorId={selectedColorId || 'color-1'}
@@ -796,6 +1041,39 @@ function App() {
         onSelectFont={handleFontSelect}
         currentFont={selectedFont}
         currentWeight={selectedFontWeight}
+      />
+
+      {/* Delete Layer Confirmation Dialog */}
+      {showDeleteConfirm && layerToDelete && (
+        <DeleteLayerDialog
+          layerName={pattern?.layers.find(l => l.id === layerToDelete)?.name || 'Layer'}
+          onConfirm={handleConfirmDelete}
+          onCancel={handleCancelDelete}
+        />
+      )}
+
+      {/* Export PDF Dialog */}
+      {pattern && (
+        <ExportPdfDialog
+          isOpen={showExportPdfDialog}
+          onClose={() => setShowExportPdfDialog(false)}
+          pattern={pattern}
+        />
+      )}
+
+      {/* Unsaved Changes Dialog */}
+      <UnsavedChangesDialog
+        isOpen={showUnsavedChangesDialog}
+        onSave={handleUnsavedSave}
+        onDontSave={handleUnsavedDontSave}
+        onCancel={handleUnsavedCancel}
+        fileName={currentFilePath?.split(/[/\\]/).pop() || pattern?.name || 'Untitled'}
+      />
+
+      {/* Color Match Dialog */}
+      <ColorMatchDialog
+        isOpen={showColorMatchDialog}
+        onClose={() => setShowColorMatchDialog(false)}
       />
     </div>
   );

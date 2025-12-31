@@ -2,7 +2,13 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { usePatternStore, Color, Stitch } from '../stores/patternStore';
-import { findClosestDMC } from '../data/dmcThreads';
+import { ColorMatchAlgorithm, findClosestColor } from '../utils/colorMatching';
+import {
+  ThreadBrand,
+  getThreadLibraries,
+  getThreadsByBrand,
+  threadsToPalette,
+} from '../data/threadLibrary';
 
 interface ImportImageDialogProps {
   isOpen: boolean;
@@ -53,7 +59,9 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
   const [backgroundThreshold, setBackgroundThreshold] = useState(20);
   const [meshCount, setMeshCount] = useState(18);
   const [previewZoom, setPreviewZoom] = useState(1);
-  const [matchToDMC, setMatchToDMC] = useState(true);
+  const [matchToThreads, setMatchToThreads] = useState(true);
+  const [selectedThreadBrand, setSelectedThreadBrand] = useState<ThreadBrand>('DMC');
+  const [colorMatchAlgorithm, setColorMatchAlgorithm] = useState<ColorMatchAlgorithm>('ciede2000');
 
   // Debounce timer for live preview
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -203,27 +211,38 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
     // Map to track old color ID -> new color ID
     const colorIdMap = new Map<string, string>();
 
-    // Convert processed image colors to Color type, optionally matching to DMC
+    // Get thread palette for the selected brand
+    const threadLibrary = getThreadsByBrand(selectedThreadBrand);
+    const threadPalette = threadsToPalette(threadLibrary);
+
     const colors: Color[] = processedImage.colors.map(c => {
-      if (matchToDMC) {
-        const dmcThread = findClosestDMC(c.rgb[0], c.rgb[1], c.rgb[2]);
-        const newId = `dmc-${dmcThread.code}-${c.id}`;
-        colorIdMap.set(c.id, newId);
-        return {
-          id: newId,
-          name: dmcThread.name,
-          rgb: dmcThread.rgb,
-          threadBrand: 'DMC',
-          threadCode: dmcThread.code,
-        };
-      } else {
-        colorIdMap.set(c.id, c.id);
-        return {
-          id: c.id,
-          name: c.name,
-          rgb: c.rgb,
-        };
+      if (matchToThreads) {
+        // Use the advanced color matching algorithm
+        const match = findClosestColor(c.rgb, threadPalette, colorMatchAlgorithm);
+        if (match) {
+          const matchedThread = threadLibrary.find(t => `${t.brand}-${t.code}` === match.colorId);
+
+          if (matchedThread) {
+            const newId = `${matchedThread.brand.toLowerCase()}-${matchedThread.code}-${c.id}`;
+            colorIdMap.set(c.id, newId);
+            return {
+              id: newId,
+              name: matchedThread.name,
+              rgb: matchedThread.rgb,
+              threadBrand: matchedThread.brand,
+              threadCode: matchedThread.code,
+            };
+          }
+        }
       }
+
+      // Fallback: use original color
+      colorIdMap.set(c.id, c.id);
+      return {
+        id: c.id,
+        name: c.name,
+        rgb: c.rgb,
+      };
     });
 
     // Deduplicate colors (same DMC code might be matched multiple times)
@@ -536,15 +555,51 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
                   <label className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
-                      checked={matchToDMC}
-                      onChange={(e) => setMatchToDMC(e.target.checked)}
+                      checked={matchToThreads}
+                      onChange={(e) => setMatchToThreads(e.target.checked)}
                       className="rounded"
                     />
-                    Match colors to DMC threads
+                    Match colors to thread library
                   </label>
                   <p className="text-xs text-gray-500 mt-1 ml-5">
-                    Convert colors to nearest DMC floss colors
+                    Convert colors to nearest thread colors
                   </p>
+                  {matchToThreads && (
+                    <div className="mt-2 ml-5 space-y-2">
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">
+                          Thread Library
+                        </label>
+                        <select
+                          value={selectedThreadBrand}
+                          onChange={(e) => setSelectedThreadBrand(e.target.value as ThreadBrand)}
+                          className="w-full px-2 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        >
+                          {getThreadLibraries().map(lib => (
+                            <option key={lib.brand} value={lib.brand}>
+                              {lib.name} ({lib.colorCount} colors)
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">
+                          Color Matching Algorithm
+                        </label>
+                        <select
+                          value={colorMatchAlgorithm}
+                          onChange={(e) => setColorMatchAlgorithm(e.target.value as ColorMatchAlgorithm)}
+                          className="w-full px-2 py-1 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        >
+                          <option value="ciede2000">CIEDE2000 (Most Accurate)</option>
+                          <option value="cie94">CIE94 (Textile optimized)</option>
+                          <option value="cie76">CIE76 (Standard)</option>
+                          <option value="weighted">Weighted RGB</option>
+                          <option value="euclidean">Simple RGB</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Import Mode - only show when pattern exists */}

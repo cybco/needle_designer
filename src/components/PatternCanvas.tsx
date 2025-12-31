@@ -5,11 +5,7 @@ const CELL_SIZE = 20; // Base cell size in pixels
 const RULER_SIZE = 24; // Width/height of rulers in pixels
 const HANDLE_SIZE = 8; // Size of resize handles in pixels
 
-interface PatternCanvasProps {
-  onTextToolClick?: (position: { x: number; y: number }) => void;
-}
-
-export function PatternCanvas({ onTextToolClick }: PatternCanvasProps) {
+export function PatternCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const topRulerRef = useRef<HTMLCanvasElement>(null);
@@ -18,6 +14,9 @@ export function PatternCanvas({ onTextToolClick }: PatternCanvasProps) {
   const [isDrawing, setIsDrawing] = useState(false);
   const [lastCell, setLastCell] = useState<{ x: number; y: number } | null>(null);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
+  // Shape drawing state
+  const [shapeStart, setShapeStart] = useState<{ x: number; y: number } | null>(null);
+  const [shapeEnd, setShapeEnd] = useState<{ x: number; y: number } | null>(null);
 
   const {
     pattern,
@@ -32,6 +31,9 @@ export function PatternCanvas({ onTextToolClick }: PatternCanvasProps) {
     setStitch,
     removeStitch,
     fillArea,
+    drawLine,
+    drawRectangle,
+    drawEllipse,
     setZoom,
     setPanOffset,
     selectLayerForTransform,
@@ -273,8 +275,44 @@ export function PatternCanvas({ onTextToolClick }: PatternCanvasProps) {
       }
     }
 
+    // Draw shape preview while dragging
+    if (shapeStart && shapeEnd && selectedColorId) {
+      const rgb = getColor(selectedColorId);
+      if (rgb) {
+        ctx.fillStyle = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.5)`;
+        ctx.strokeStyle = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+        ctx.lineWidth = 2;
+
+        if (activeTool === 'line') {
+          // Draw line preview
+          ctx.beginPath();
+          ctx.moveTo(shapeStart.x * cellSize + cellSize / 2, shapeStart.y * cellSize + cellSize / 2);
+          ctx.lineTo(shapeEnd.x * cellSize + cellSize / 2, shapeEnd.y * cellSize + cellSize / 2);
+          ctx.stroke();
+        } else if (activeTool === 'rectangle') {
+          // Draw rectangle preview
+          const minX = Math.min(shapeStart.x, shapeEnd.x);
+          const minY = Math.min(shapeStart.y, shapeEnd.y);
+          const rectWidth = Math.abs(shapeEnd.x - shapeStart.x) + 1;
+          const rectHeight = Math.abs(shapeEnd.y - shapeStart.y) + 1;
+          ctx.fillRect(minX * cellSize, minY * cellSize, rectWidth * cellSize, rectHeight * cellSize);
+          ctx.strokeRect(minX * cellSize, minY * cellSize, rectWidth * cellSize, rectHeight * cellSize);
+        } else if (activeTool === 'ellipse') {
+          // Draw ellipse preview
+          const cx = ((shapeStart.x + shapeEnd.x) / 2 + 0.5) * cellSize;
+          const cy = ((shapeStart.y + shapeEnd.y) / 2 + 0.5) * cellSize;
+          const rx = (Math.abs(shapeEnd.x - shapeStart.x) + 1) * cellSize / 2;
+          const ry = (Math.abs(shapeEnd.y - shapeStart.y) + 1) * cellSize / 2;
+          ctx.beginPath();
+          ctx.ellipse(cx, cy, rx, ry, 0, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
+    }
+
     ctx.restore();
-  }, [pattern, zoom, panOffset, showGrid, gridDivisions, getColor, selection]);
+  }, [pattern, zoom, panOffset, showGrid, gridDivisions, getColor, selection, shapeStart, shapeEnd, selectedColorId, activeTool]);
 
   // Draw horizontal ruler (top)
   const drawTopRuler = useCallback(() => {
@@ -827,15 +865,6 @@ export function PatternCanvas({ onTextToolClick }: PatternCanvasProps) {
       return;
     }
 
-    // Handle text tool (doesn't require selected color, just a position)
-    if (activeTool === 'text') {
-      const cell = canvasToCell(x, y);
-      if (cell && onTextToolClick) {
-        onTextToolClick({ x: cell.x, y: cell.y });
-      }
-      return;
-    }
-
     // For drawing tools, require a selected color
     if (!selectedColorId) return;
 
@@ -852,6 +881,11 @@ export function PatternCanvas({ onTextToolClick }: PatternCanvasProps) {
       setLastCell(cell);
     } else if (activeTool === 'fill') {
       fillArea(cell.x, cell.y, selectedColorId);
+    } else if (activeTool === 'line' || activeTool === 'rectangle' || activeTool === 'ellipse') {
+      // Start shape drawing
+      setShapeStart(cell);
+      setShapeEnd(cell);
+      setIsDrawing(true);
     }
   };
 
@@ -889,16 +923,24 @@ export function PatternCanvas({ onTextToolClick }: PatternCanvasProps) {
     }
 
     const cell = canvasToCell(x, y);
+    if (!cell) return;
 
-    if (!cell || (lastCell && cell.x === lastCell.x && cell.y === lastCell.y)) return;
+    // Shape tools - update preview on every cell change (don't check lastCell)
+    if ((activeTool === 'line' || activeTool === 'rectangle' || activeTool === 'ellipse') && shapeStart) {
+      setShapeEnd(cell);
+      return;
+    }
+
+    // For pencil/eraser, skip if same cell
+    if (lastCell && cell.x === lastCell.x && cell.y === lastCell.y) return;
 
     if (activeTool === 'pencil' && selectedColorId) {
       setStitch(cell.x, cell.y, selectedColorId);
+      setLastCell(cell);
     } else if (activeTool === 'eraser') {
       removeStitch(cell.x, cell.y);
+      setLastCell(cell);
     }
-
-    setLastCell(cell);
   };
 
   const handleMouseUp = () => {
@@ -911,6 +953,20 @@ export function PatternCanvas({ onTextToolClick }: PatternCanvasProps) {
       }
     }
 
+    // Handle shape tool finalization
+    if (shapeStart && shapeEnd && selectedColorId) {
+      if (activeTool === 'line') {
+        drawLine(shapeStart.x, shapeStart.y, shapeEnd.x, shapeEnd.y, selectedColorId);
+      } else if (activeTool === 'rectangle') {
+        drawRectangle(shapeStart.x, shapeStart.y, shapeEnd.x, shapeEnd.y, selectedColorId, true);
+      } else if (activeTool === 'ellipse') {
+        drawEllipse(shapeStart.x, shapeStart.y, shapeEnd.x, shapeEnd.y, selectedColorId, true);
+      }
+    }
+
+    // Clear shape drawing state
+    setShapeStart(null);
+    setShapeEnd(null);
     setIsDrawing(false);
     setLastCell(null);
   };
@@ -925,6 +981,9 @@ export function PatternCanvas({ onTextToolClick }: PatternCanvasProps) {
       }
     }
 
+    // Cancel shape drawing
+    setShapeStart(null);
+    setShapeEnd(null);
     setIsDrawing(false);
     setLastCell(null);
   };
@@ -932,7 +991,6 @@ export function PatternCanvas({ onTextToolClick }: PatternCanvasProps) {
   // Get cursor based on current state
   const getCursor = useCallback((): string => {
     if (activeTool === 'pan') return 'grab';
-    if (activeTool === 'text') return 'text';
     if (activeTool === 'select') {
       if (mousePos && selection) {
         const handle = getResizeHandleAt(mousePos.x, mousePos.y);
@@ -958,11 +1016,34 @@ export function PatternCanvas({ onTextToolClick }: PatternCanvasProps) {
     return 'crosshair';
   }, [activeTool, mousePos, selection, getResizeHandleAt, isPointInSelectionBounds]);
 
-  // Handle wheel for zoom
+  // Handle wheel for zoom - zoom towards center of viewable area
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault();
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    // Calculate new zoom level
     const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    setZoom(zoom + delta);
+    const newZoom = Math.max(0.1, Math.min(5, zoom + delta));
+
+    if (newZoom === zoom) return;
+
+    // Get the center of the visible canvas area
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+
+    // Calculate the point in pattern space that's currently at the center
+    const patternCenterX = (centerX - panOffset.x) / (CELL_SIZE * zoom);
+    const patternCenterY = (centerY - panOffset.y) / (CELL_SIZE * zoom);
+
+    // Calculate new pan offset to keep that pattern point at the center
+    const newPanX = centerX - patternCenterX * CELL_SIZE * newZoom;
+    const newPanY = centerY - patternCenterY * CELL_SIZE * newZoom;
+
+    // Apply both zoom and pan offset together
+    setPanOffset({ x: newPanX, y: newPanY });
+    setZoom(newZoom);
   };
 
   if (!pattern) {

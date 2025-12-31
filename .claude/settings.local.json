@@ -14,7 +14,12 @@
       "Bash(npm run tauri:build:*)",
       "Bash(npm run:*)",
       "Bash(cargo check:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(curl:*)",
+      "Bash(timeout:*)",
+      "Bash(cat:*)"
     ]
   }
 }
