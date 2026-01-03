@@ -19,7 +19,8 @@
       "Bash(findstr:*)",
       "Bash(curl:*)",
       "Bash(timeout:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(git pull:*)"
     ]
   }
 }
