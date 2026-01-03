@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Cursor;
 use std::path::Path;
+use tauri::Manager;
 
 // NDP File Format structures
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -38,6 +39,8 @@ fn default_shading_opacity() -> Option<u32> {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NdpMetadata {
+    #[serde(default)]
+    pub file_id: Option<String>, // Unique identifier for session history tracking
     pub name: String,
     pub author: Option<String>,
     pub created_at: String,
@@ -140,6 +143,7 @@ fn create_new_project(
     Ok(NdpFile {
         version: "1.0".to_string(),
         metadata: NdpMetadata {
+            file_id: None, // Will be set by frontend
             name,
             author: None,
             created_at: now.clone(),
@@ -783,6 +787,45 @@ fn atkinson_dither(img: &RgbaImage, palette: &[Rgba<u8>]) -> RgbaImage {
     result
 }
 
+// Session History Persistence
+const SESSION_HISTORY_FILE: &str = "session-history.json";
+
+fn get_app_data_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data directory: {}", e))
+}
+
+#[tauri::command]
+fn save_session_history(app: tauri::AppHandle, data: String) -> Result<(), String> {
+    let app_dir = get_app_data_dir(&app)?;
+
+    // Create directory if it doesn't exist
+    fs::create_dir_all(&app_dir)
+        .map_err(|e| format!("Failed to create app data directory: {}", e))?;
+
+    let file_path = app_dir.join(SESSION_HISTORY_FILE);
+    fs::write(&file_path, data)
+        .map_err(|e| format!("Failed to write session history: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+fn load_session_history(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let app_dir = get_app_data_dir(&app)?;
+    let file_path = app_dir.join(SESSION_HISTORY_FILE);
+
+    if !file_path.exists() {
+        return Ok(None);
+    }
+
+    let contents = fs::read_to_string(&file_path)
+        .map_err(|e| format!("Failed to read session history: {}", e))?;
+
+    Ok(Some(contents))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -800,7 +843,9 @@ pub fn run() {
             open_project,
             save_pdf,
             pick_screen_color,
-            capture_screen
+            capture_screen,
+            save_session_history,
+            load_session_history
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

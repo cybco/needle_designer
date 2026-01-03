@@ -297,7 +297,7 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
       <div className="bg-white rounded-lg shadow-xl w-[700px] max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="p-4 border-b border-gray-200">
-          <h2 className="text-xl font-bold text-gray-800">Import Image</h2>
+          <h2 className="text-xl font-bold text-gray-800">Convert to Pattern</h2>
           <div className="flex gap-2 mt-2">
             {['select', 'configure', 'preview'].map((s, i) => (
               <div

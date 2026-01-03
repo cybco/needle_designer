@@ -7,6 +7,11 @@ import {
   PATTERN_SYMBOLS,
 } from '../utils/symbolAssignment';
 
+// Generate a unique file ID for session history tracking
+export function generateFileId(): string {
+  return `file-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+}
+
 // Types matching the Rust NDP format
 export interface Color {
   id: string;
@@ -39,6 +44,7 @@ export interface CanvasConfig {
 }
 
 export interface Pattern {
+  fileId: string; // Unique identifier for session history tracking (persists across renames/moves)
   name: string;
   canvas: CanvasConfig;
   colorPalette: Color[];
@@ -142,6 +148,7 @@ interface PatternState {
   setRulerUnit: (unit: RulerUnit) => void;
   setCurrentFilePath: (path: string | null) => void;
   markSaved: () => void;
+  regenerateFileId: () => string; // Generate new fileId (for Save As)
 
   // Layer management actions
   setActiveLayer: (layerId: string) => void;
@@ -284,6 +291,7 @@ function resampleStitches(
 // Deep clone a pattern for history
 function clonePattern(pattern: Pattern): Pattern {
   return {
+    fileId: pattern.fileId,
     name: pattern.name,
     canvas: { ...pattern.canvas },
     colorPalette: pattern.colorPalette.map(c => ({ ...c })),
@@ -384,6 +392,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
     const layerId = 'layer-1';
     set({
       pattern: {
+        fileId: generateFileId(),
         name,
         canvas: { width, height, meshCount },
         colorPalette: [...defaultColors],
@@ -415,6 +424,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
     const colorsWithSymbols = assignMissingSymbols(colors);
     set({
       pattern: {
+        fileId: generateFileId(),
         name,
         canvas: { width, height, meshCount },
         colorPalette: colorsWithSymbols,
@@ -444,6 +454,8 @@ export const usePatternStore = create<PatternState>((set, get) => {
     const colorsWithSymbols = assignMissingSymbols(pattern.colorPalette);
     const patternWithSymbols = {
       ...pattern,
+      // Generate fileId if not present (backwards compatibility)
+      fileId: pattern.fileId || generateFileId(),
       colorPalette: colorsWithSymbols,
     };
     set({
@@ -912,6 +924,16 @@ export const usePatternStore = create<PatternState>((set, get) => {
 
   markSaved: () => {
     set({ hasUnsavedChanges: false });
+  },
+
+  regenerateFileId: () => {
+    const { pattern } = get();
+    if (!pattern) return '';
+    const newFileId = generateFileId();
+    set({
+      pattern: { ...pattern, fileId: newFileId },
+    });
+    return newFileId;
   },
 
   // Layer management actions

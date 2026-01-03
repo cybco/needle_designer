@@ -14,8 +14,10 @@ import { UnsavedChangesDialog } from './components/UnsavedChangesDialog';
 import { ColorMatchDialog } from './components/ColorMatchDialog';
 import { SymbolAssignmentDialog } from './components/SymbolAssignmentDialog';
 import { OverlayImageDialog } from './components/OverlayImageDialog';
+import { UploadImageDialog } from './components/UploadImageDialog';
 import { ToggleSwitch } from './components/ToggleSwitch';
 import { usePatternStore, Pattern, RulerUnit, Stitch } from './stores/patternStore';
+import { useSessionHistoryStore } from './stores/sessionHistoryStore';
 import { loadBundledFonts } from './data/bundledFonts';
 import { invoke } from '@tauri-apps/api/core';
 import { save, open } from '@tauri-apps/plugin-dialog';
@@ -41,6 +43,7 @@ interface NdpOverlayImage {
 interface NdpFile {
   version: string;
   metadata: {
+    file_id?: string; // Unique identifier for session history tracking
     name: string;
     author: string | null;
     created_at: string;
@@ -169,6 +172,9 @@ function App() {
   // Overlay image dialog state
   const [showOverlayDialog, setShowOverlayDialog] = useState(false);
 
+  // Upload image dialog state (unified entry point)
+  const [showUploadImageDialog, setShowUploadImageDialog] = useState(false);
+
   // Unsaved changes dialog state
   const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = useState(false);
 
@@ -204,7 +210,10 @@ function App() {
     progressShadingOpacity,
     setProgressShadingColor,
     setProgressShadingOpacity,
+    regenerateFileId,
   } = usePatternStore();
+
+  const { currentSessionId, endSession } = useSessionHistoryStore();
 
   // Load bundled fonts on app startup
   useEffect(() => {
@@ -382,6 +391,7 @@ function App() {
     return {
       version: '1.0',
       metadata: {
+        file_id: p.fileId,
         name: p.name,
         author: null,
         created_at: now,
@@ -439,6 +449,8 @@ function App() {
   // Convert NDP file to pattern
   const ndpToPattern = useCallback((ndp: NdpFile): Pattern => {
     return {
+      // Use existing fileId or generate a new one for backwards compatibility
+      fileId: ndp.metadata.file_id || `file-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       name: ndp.metadata.name,
       canvas: {
         width: ndp.canvas.width,
@@ -517,7 +529,15 @@ function App() {
       addToRecentFiles(filePath);
     } catch (error) {
       console.error('Failed to open:', error);
-      alert(`Failed to open project: ${error}`);
+      // Show a simple, user-friendly error message
+      const errorStr = String(error);
+      let message = 'File not found';
+      if (errorStr.includes('Failed to read file')) {
+        message = 'File not found. It may have been moved or deleted.';
+      } else if (errorStr.includes('Failed to parse')) {
+        message = 'Invalid file format.';
+      }
+      alert(message);
       // Remove from recent files if it failed to open
       setRecentFiles((prev) => {
         const updated = prev.filter((f) => f !== filePath);
@@ -569,7 +589,17 @@ function App() {
 
       if (!result) return; // User cancelled
 
-      const ndpFile = patternToNdp(pattern);
+      // End current session if active (it belongs to the old file)
+      if (currentSessionId) {
+        // End with current stats (duration 0 since we don't have access to timer here)
+        endSession(currentSessionId, 0, 0, 0);
+      }
+
+      // Generate new fileId for the new file (this is a new file, not the same file)
+      const newFileId = regenerateFileId();
+
+      // Create NDP with the new fileId
+      const ndpFile = patternToNdp({ ...pattern, fileId: newFileId });
       await invoke('save_project', { path: result, project: ndpFile });
 
       setCurrentFilePath(result);
@@ -579,7 +609,7 @@ function App() {
       console.error('Failed to save:', error);
       alert(`Failed to save project: ${error}`);
     }
-  }, [pattern, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles]);
+  }, [pattern, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles, regenerateFileId, currentSessionId, endSession]);
 
   // Open project
   const handleOpen = useCallback(async () => {
@@ -966,18 +996,11 @@ function App() {
                     </button>
                     <div className="border-t border-gray-600 my-1" />
                     <button
-                      onClick={() => { setShowImportDialog(true); setShowToolsMenu(false); }}
+                      onClick={() => { setShowUploadImageDialog(true); setShowToolsMenu(false); }}
                       disabled={!pattern}
                       className={`w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors ${!pattern ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
-                      Convert Image
-                    </button>
-                    <button
-                      onClick={() => { setShowOverlayDialog(true); setShowToolsMenu(false); }}
-                      disabled={!pattern}
-                      className={`w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors ${!pattern ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    >
-                      Overlay Image
+                      Upload Image
                     </button>
                     <div className="border-t border-gray-600 my-1" />
                     <button
@@ -1303,6 +1326,14 @@ function App() {
       <OverlayImageDialog
         isOpen={showOverlayDialog}
         onClose={() => setShowOverlayDialog(false)}
+      />
+
+      {/* Upload Image Dialog (unified entry point) */}
+      <UploadImageDialog
+        isOpen={showUploadImageDialog}
+        onClose={() => setShowUploadImageDialog(false)}
+        onSelectConvert={() => setShowImportDialog(true)}
+        onSelectOverlay={() => setShowOverlayDialog(true)}
       />
     </div>
   );
