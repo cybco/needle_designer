@@ -326,7 +326,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
   future: [],
   maxHistorySize: 50,
   selectedColorId: null,
-  activeTool: 'pencil',
+  activeTool: 'select',
   zoom: 1,
   panOffset: { x: 0, y: 0 },
   showGrid: true,

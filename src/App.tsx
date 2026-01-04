@@ -998,16 +998,16 @@ function App() {
   return (
     <div className="h-screen flex flex-col bg-gray-100 overflow-hidden">
       {/* Title Bar / Menu */}
-      <header className="bg-gray-800 text-white px-4 py-2 flex items-center justify-between shrink-0">
-        <div
-          className="flex items-center gap-6"
-          onMouseDown={(e) => {
-            // Start window drag on the title area (but not on interactive elements)
-            if ((e.target as HTMLElement).closest('nav, button, a, input, select')) return;
-            e.preventDefault();
-            getCurrentWindow().startDragging();
-          }}
-        >
+      <header
+        className="bg-gray-800 text-white px-4 py-2 flex items-center justify-between shrink-0"
+        onMouseDown={(e) => {
+          // Start window drag on blank areas (but not on interactive elements or window controls)
+          if ((e.target as HTMLElement).closest('nav, button, a, input, select, [data-window-controls]')) return;
+          e.preventDefault();
+          getCurrentWindow().startDragging();
+        }}
+      >
+        <div className="flex items-center gap-6">
           <h1 className="text-lg font-semibold">NeedlePoint Designer</h1>
           <nav className="flex gap-4 text-sm relative z-50">
             {/* Global backdrop to close menus when clicking outside */}
@@ -1274,26 +1274,14 @@ function App() {
         </div>
         <div className="flex items-center gap-4">
           {pattern && (
-            <span
-              className="text-sm text-gray-300 cursor-default"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                getCurrentWindow().startDragging();
-              }}
-            >
+            <span className="text-sm text-gray-300">
               {currentFilePath
                 ? currentFilePath.split(/[/\\]/).pop()
                 : pattern.name}
               {hasUnsavedChanges ? ' *' : ''} - {pattern.canvas.width} x {pattern.canvas.height}
             </span>
           )}
-          <span
-            className="text-sm text-gray-400 cursor-default"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              getCurrentWindow().startDragging();
-            }}
-          >v1.1.0</span>
+          <span className="text-sm text-gray-400">v1.1.0</span>
           {/* Window Controls */}
           <div className="flex items-center gap-1 ml-4" data-window-controls style={{ WebkitAppRegion: 'no-drag', appRegion: 'no-drag' } as React.CSSProperties}>
             <button

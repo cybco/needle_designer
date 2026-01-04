@@ -14,10 +14,11 @@ interface TextEditorDialogProps {
 }
 
 // Convert text to stitches using canvas rendering
+// targetHeight is the desired height in stitches
 function textToStitches(
   text: string,
   fontFamily: string,
-  fontSize: number,
+  targetHeight: number,
   fontWeight: number,
   italic: boolean,
   colorId: string
@@ -26,17 +27,21 @@ function textToStitches(
     return { stitches: [], width: 0, height: 0 };
   }
 
+  // Render at a high resolution first, then scale to target height
+  // Use a large base font size for quality
+  const baseFontSize = Math.max(100, targetHeight * 10);
+
   // Create temporary canvas
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d')!;
 
   // Set up font
-  const fontStyle = `${italic ? 'italic ' : ''}${fontWeight} ${fontSize}px "${fontFamily}"`;
+  const fontStyle = `${italic ? 'italic ' : ''}${fontWeight} ${baseFontSize}px "${fontFamily}"`;
   ctx.font = fontStyle;
 
   // Handle multiline text
   const lines = text.split('\n');
-  const lineHeight = Math.ceil(fontSize * 1.2);
+  const lineHeight = Math.ceil(baseFontSize * 1.2);
 
   // Measure all lines to find actual bounding box (accounts for ascenders/descenders that extend beyond em-square)
   let maxWidth = 0;
@@ -57,7 +62,7 @@ function textToStitches(
   }
 
   // Fallback padding if bounding box metrics not available
-  const padding = Math.max(4, Math.ceil(fontSize * 0.2));
+  const padding = Math.max(4, Math.ceil(baseFontSize * 0.2));
   const topPadding = maxAscent > 0 ? Math.ceil(maxAscent * 0.3) + 2 : padding;
   const leftPadding = maxLeft > 0 ? maxLeft + 2 : padding;
 
@@ -113,18 +118,37 @@ function textToStitches(
     maxY = Math.max(maxY, s.y);
   }
 
-  // Normalize coordinates to start from 0,0
-  const stitches: Stitch[] = rawStitches.map(s => ({
-    x: s.x - minX,
-    y: s.y - minY,
-    colorId,
-    completed: false
-  }));
+  const rawWidth = maxX - minX + 1;
+  const rawHeight = maxY - minY + 1;
 
-  const trimmedWidth = maxX - minX + 1;
-  const trimmedHeight = maxY - minY + 1;
+  // Calculate scale factor to match target height
+  const scale = targetHeight / rawHeight;
+  const finalWidth = Math.round(rawWidth * scale);
+  const finalHeight = targetHeight;
 
-  return { stitches, width: trimmedWidth, height: trimmedHeight };
+  // Scale the stitches to target size
+  // Create a 2D grid to accumulate scaled stitch positions
+  const grid: boolean[][] = Array(finalHeight).fill(null).map(() => Array(finalWidth).fill(false));
+
+  for (const s of rawStitches) {
+    const scaledX = Math.floor((s.x - minX) * scale);
+    const scaledY = Math.floor((s.y - minY) * scale);
+    if (scaledX >= 0 && scaledX < finalWidth && scaledY >= 0 && scaledY < finalHeight) {
+      grid[scaledY][scaledX] = true;
+    }
+  }
+
+  // Convert grid to stitches
+  const stitches: Stitch[] = [];
+  for (let y = 0; y < finalHeight; y++) {
+    for (let x = 0; x < finalWidth; x++) {
+      if (grid[y][x]) {
+        stitches.push({ x, y, colorId, completed: false });
+      }
+    }
+  }
+
+  return { stitches, width: finalWidth, height: finalHeight };
 }
 
 export function TextEditorDialog({
@@ -139,16 +163,19 @@ export function TextEditorDialog({
 }: TextEditorDialogProps) {
   const [text, setText] = useState('');
   const [fontSize, setFontSize] = useState(24);
+  const [fontSizeInput, setFontSizeInput] = useState('24'); // Local string for free typing
   const [italic, setItalic] = useState(false);
   const [selectedColorId, setSelectedColorId] = useState(initialColorId);
   const [previewData, setPreviewData] = useState<{ stitches: Stitch[]; width: number; height: number } | null>(null);
   const [fontLoaded, setFontLoaded] = useState(false);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Reset selected color when dialog opens
+  // Reset state when dialog opens
   useEffect(() => {
     if (isOpen) {
       setSelectedColorId(initialColorId);
+      setFontSizeInput('24'); // Reset to default
+      setFontSize(24);
     }
   }, [isOpen, initialColorId]);
 
@@ -300,12 +327,36 @@ export function TextEditorDialog({
                 Size (stitches tall)
               </label>
               <input
-                type="number"
-                value={fontSize}
-                onChange={(e) => setFontSize(Math.max(8, Math.min(200, parseInt(e.target.value) || 24)))}
+                type="text"
+                inputMode="numeric"
+                value={fontSizeInput}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  // Allow typing any digits
+                  if (val === '' || /^\d+$/.test(val)) {
+                    setFontSizeInput(val);
+                    // Update fontSize if valid number for live preview
+                    const num = parseInt(val);
+                    if (!isNaN(num) && num >= 1) {
+                      setFontSize(num);
+                    }
+                  }
+                }}
+                onBlur={() => {
+                  // Validate and clamp on blur
+                  const num = parseInt(fontSizeInput);
+                  if (isNaN(num) || num < 8) {
+                    setFontSize(8);
+                    setFontSizeInput('8');
+                  } else if (num > 200) {
+                    setFontSize(200);
+                    setFontSizeInput('200');
+                  } else {
+                    setFontSize(num);
+                    setFontSizeInput(String(num));
+                  }
+                }}
                 className="w-24 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                min="8"
-                max="200"
               />
             </div>
 

@@ -193,6 +193,15 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, toolVisibility = DEFAU
       {/* Drawing tools */}
       {hasDrawingTools && (
         <div className="p-2 space-y-2 border-b border-gray-200 w-14">
+          {toolVisibility.select && (
+            <ToolButton
+              tool="select"
+              icon={<CursorIcon />}
+              label="Move (V)"
+              activeTool={activeTool}
+              onClick={setTool}
+            />
+          )}
           {toolVisibility.pencil && (
             <ToolButton
               tool="pencil"
@@ -225,15 +234,6 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, toolVisibility = DEFAU
               tool="pan"
               icon={<PanIcon />}
               label="Pan (Space)"
-              activeTool={activeTool}
-              onClick={setTool}
-            />
-          )}
-          {toolVisibility.select && (
-            <ToolButton
-              tool="select"
-              icon={<CursorIcon />}
-              label="Move (V)"
               activeTool={activeTool}
               onClick={setTool}
             />

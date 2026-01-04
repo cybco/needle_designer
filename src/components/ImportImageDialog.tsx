@@ -78,8 +78,10 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
   const [ditherMode, setDitherMode] = useState<DitherMode>('floyd-steinberg');
   const [removeBackground, setRemoveBackground] = useState(false);
   const [backgroundThreshold, setBackgroundThreshold] = useState(20);
-  const [meshCount, setMeshCount] = useState(18);
   const [previewZoom, setPreviewZoom] = useState(1);
+
+  // Use canvas mesh count (default to 18 if no pattern)
+  const meshCount = pattern?.canvas.meshCount ?? 18;
   const [matchToThreads, setMatchToThreads] = useState(true);
   const [selectedThreadBrand, setSelectedThreadBrand] = useState<ThreadBrand>('DMC');
   const [colorMatchAlgorithm, setColorMatchAlgorithm] = useState<ColorMatchAlgorithm>('ciede2000');
@@ -857,21 +859,6 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Mesh Count
-                  </label>
-                  <select
-                    value={meshCount}
-                    onChange={(e) => setMeshCount(parseInt(e.target.value))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value={14}>14 count</option>
-                    <option value={18}>18 count (standard)</option>
-                    <option value={22}>22 count</option>
-                  </select>
-                </div>
-
                 <div className="border-t pt-3">
                   <label className="flex items-center gap-2 text-sm">
                     <input
@@ -996,8 +983,8 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
                     Physical size: {(targetWidth / meshCount).toFixed(1)}" x {(targetHeight / meshCount).toFixed(1)}" ({(targetWidth / meshCount * 25.4).toFixed(0)} x {(targetHeight / meshCount * 25.4).toFixed(0)} mm)
                   </p>
                   <p className="text-blue-600 text-xs mt-1">
-                    Total: {(targetWidth * targetHeight).toLocaleString()} stitches
-                    {imageInfo && ` (original image: ${imageInfo.width} x ${imageInfo.height} px)`}
+                    Total: {(targetWidth * targetHeight).toLocaleString()} stitches • {meshCount} count canvas
+                    {imageInfo && ` (original: ${imageInfo.width} x ${imageInfo.height} px)`}
                   </p>
                 </div>
               </div>
