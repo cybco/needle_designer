@@ -1,5 +1,24 @@
 import { ReactNode } from 'react';
 import { usePatternStore, Tool } from '../stores/patternStore';
+import handMoveIcon from '../assets/hand-move.svg';
+
+export interface ToolVisibility {
+  pencil: boolean;
+  eraser: boolean;
+  fill: boolean;
+  pan: boolean;
+  select: boolean;
+  text: boolean;
+  line: boolean;
+  rectangle: boolean;
+  ellipse: boolean;
+  undo: boolean;
+  redo: boolean;
+  zoomIn: boolean;
+  zoomOut: boolean;
+  zoomFit: boolean;
+  grid: boolean;
+}
 
 interface ToolButtonProps {
   tool: Tool;
@@ -30,7 +49,7 @@ function ToolButton({ tool, icon, label, activeTool, onClick }: ToolButtonProps)
 }
 
 // Cursor/pointer icon SVG for Move tool
-function CursorIcon({ className }: { className?: string }) {
+export function CursorIcon({ className }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -43,7 +62,7 @@ function CursorIcon({ className }: { className?: string }) {
 }
 
 // Paint bucket/fill icon SVG (custom with red paint)
-function FillIcon({ className }: { className?: string }) {
+export function FillIcon({ className }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 22 22"
@@ -52,21 +71,21 @@ function FillIcon({ className }: { className?: string }) {
       strokeLinejoin="round"
     >
       {/* Handle */}
-      <path d="M9.996,6C8.097,4.101 6.468,2.472 4.996,1" fill="none" stroke="black" strokeWidth="2" />
+      <path d="M9.996,6C8.097,4.101 6.468,2.472 4.996,1" fill="none" stroke="black" strokeWidth="1.5" />
       {/* Fill line */}
-      <path d="M17.988,11L1.037,11" fill="none" stroke="black" strokeWidth="2" />
+      <path d="M17.988,11L1.037,11" fill="none" stroke="black" strokeWidth="1.5" />
       {/* Paint fill inside bucket */}
-      <path d="M1.193,13.443C2.023,14.418 8.537,19.127 8.537,19.127L17.001,12.696L18.868,9.875L1.359,9.875C1.359,9.875 0.363,12.468 1.193,13.443Z" fill="#FF3D00" />
+      <path d="M1.193,13.443C2.023,14.418 8.537,19.127 8.537,19.127L17.001,12.696L18.868,9.875L1.359,9.875C1.359,9.875 0.363,12.468 1.193,13.443Z" fill="#C75B5B" />
       {/* Paint drop */}
-      <path d="M20.141,17.38C19.558,16.901 19.154,16.238 18.996,15.5C18.841,16.239 18.436,16.903 17.851,17.38C17.276,17.84 16.996,18.4 16.996,18.975C16.996,18.983 16.996,18.992 16.996,19C16.996,20.097 17.899,21 18.996,21C20.093,21 20.996,20.097 20.996,19C20.996,18.992 20.996,18.983 20.996,18.975C20.996,18.395 20.711,17.845 20.141,17.38" fill="#FF0000" stroke="#FF0000" strokeWidth="2" />
+      <path d="M20.141,17.38C19.558,16.901 19.154,16.238 18.996,15.5C18.841,16.239 18.436,16.903 17.851,17.38C17.276,17.84 16.996,18.4 16.996,18.975C16.996,18.983 16.996,18.992 16.996,19C16.996,20.097 17.899,21 18.996,21C20.093,21 20.996,20.097 20.996,19C20.996,18.992 20.996,18.983 20.996,18.975C20.996,18.395 20.711,17.845 20.141,17.38" fill="#B84C4C" stroke="#B84C4C" strokeWidth="1.5" />
       {/* Bucket outline */}
-      <path d="M7.496,3.5L9.644,1.352C10.111,0.885 10.881,0.885 11.348,1.352L18.644,8.648C19.111,9.115 19.111,9.885 18.644,10.352L11.052,17.944C9.65,19.346 7.342,19.346 5.94,17.944L2.052,14.056C0.65,12.654 0.65,10.346 2.052,8.944L4.666,6.33" fill="none" stroke="black" strokeWidth="2" />
+      <path d="M7.496,3.5L9.644,1.352C10.111,0.885 10.881,0.885 11.348,1.352L18.644,8.648C19.111,9.115 19.111,9.885 18.644,10.352L11.052,17.944C9.65,19.346 7.342,19.346 5.94,17.944L2.052,14.056C0.65,12.654 0.65,10.346 2.052,8.944L4.666,6.33" fill="none" stroke="black" strokeWidth="1.5" />
     </svg>
   );
 }
 
 // Text icon SVG (Lucide type-outline)
-function TextIcon({ className }: { className?: string }) {
+export function TextIcon({ className }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -82,30 +101,19 @@ function TextIcon({ className }: { className?: string }) {
   );
 }
 
-// Pan/Move icon SVG (Lucide move, dark purple)
-function PanIcon({ className }: { className?: string }) {
+// Pan/Move icon (hand with arrows)
+export function PanIcon({ className }: { className?: string }) {
   return (
-    <svg
-      viewBox="0 0 24 24"
-      className={className || "w-5 h-5"}
-      fill="none"
-      stroke="#6B21A8"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M12 2v20" />
-      <path d="m15 19-3 3-3-3" />
-      <path d="m19 9 3 3-3 3" />
-      <path d="M2 12h20" />
-      <path d="m5 9-3 3 3 3" />
-      <path d="m9 5 3-3 3 3" />
-    </svg>
+    <img
+      src={handMoveIcon}
+      alt="Pan"
+      className={className || "w-7 h-7"}
+    />
   );
 }
 
 // Eraser icon SVG (colored)
-function EraserIcon({ className }: { className?: string }) {
+export function EraserIcon({ className }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -135,13 +143,32 @@ function EraserIcon({ className }: { className?: string }) {
   );
 }
 
+const DEFAULT_VISIBILITY: ToolVisibility = {
+  pencil: true,
+  eraser: true,
+  fill: true,
+  pan: true,
+  select: true,
+  text: true,
+  line: true,
+  rectangle: true,
+  ellipse: true,
+  undo: true,
+  redo: true,
+  zoomIn: true,
+  zoomOut: true,
+  zoomFit: true,
+  grid: true,
+};
+
 interface ToolbarProps {
   onTextToolClick?: () => void;
   onFitToCanvas?: () => void;
+  toolVisibility?: ToolVisibility;
 }
 
-export function Toolbar({ onTextToolClick, onFitToCanvas }: ToolbarProps) {
-  const { pattern, activeTool, zoom, showGrid, history, future, setTool, setZoom, setPanOffset, toggleGrid, undo, redo } = usePatternStore();
+export function Toolbar({ onTextToolClick, onFitToCanvas, toolVisibility = DEFAULT_VISIBILITY }: ToolbarProps) {
+  const { pattern, activeTool, zoom, showGrid, history, future, setTool, setZoom, toggleGrid, undo, redo } = usePatternStore();
 
   if (!pattern) {
     return (
@@ -155,170 +182,198 @@ export function Toolbar({ onTextToolClick, onFitToCanvas }: ToolbarProps) {
     );
   }
 
+  // Check if any tools in a section are visible
+  const hasDrawingTools = toolVisibility.pencil || toolVisibility.eraser || toolVisibility.fill || toolVisibility.pan || toolVisibility.select || toolVisibility.text;
+  const hasShapeTools = toolVisibility.line || toolVisibility.rectangle || toolVisibility.ellipse;
+  const hasHistoryTools = toolVisibility.undo || toolVisibility.redo;
+  const hasZoomControls = toolVisibility.zoomIn || toolVisibility.zoomOut || toolVisibility.zoomFit;
+
   return (
-    <div className="w-18 min-w-18 shrink-0 bg-white border-r border-gray-300 flex flex-col overflow-y-auto">
+    <div className="shrink-0 bg-white border-r border-gray-300 flex flex-col flex-wrap h-full content-start" style={{ maxHeight: '100%' }}>
       {/* Drawing tools */}
-      <div className="p-2 space-y-2 border-b border-gray-200">
-        <ToolButton
-          tool="pencil"
-          icon="✏️"
-          label="Pencil (P)"
-          activeTool={activeTool}
-          onClick={setTool}
-        />
-        <ToolButton
-          tool="eraser"
-          icon={<EraserIcon />}
-          label="Eraser (E)"
-          activeTool={activeTool}
-          onClick={setTool}
-        />
-        <ToolButton
-          tool="fill"
-          icon={<FillIcon />}
-          label="Fill (G)"
-          activeTool={activeTool}
-          onClick={setTool}
-        />
-        <ToolButton
-          tool="pan"
-          icon={<PanIcon />}
-          label="Pan (Space)"
-          activeTool={activeTool}
-          onClick={setTool}
-        />
-        <ToolButton
-          tool="select"
-          icon={<CursorIcon />}
-          label="Move (V)"
-          activeTool={activeTool}
-          onClick={setTool}
-        />
-        <ToolButton
-          tool="text"
-          icon={<TextIcon />}
-          label="Text (T)"
-          activeTool={activeTool}
-          onClick={() => {
-            if (onTextToolClick) {
-              onTextToolClick();
-            }
-          }}
-        />
-      </div>
+      {hasDrawingTools && (
+        <div className="p-2 space-y-2 border-b border-gray-200 w-14">
+          {toolVisibility.pencil && (
+            <ToolButton
+              tool="pencil"
+              icon="✏️"
+              label="Pencil (P)"
+              activeTool={activeTool}
+              onClick={setTool}
+            />
+          )}
+          {toolVisibility.eraser && (
+            <ToolButton
+              tool="eraser"
+              icon={<EraserIcon />}
+              label="Eraser (E)"
+              activeTool={activeTool}
+              onClick={setTool}
+            />
+          )}
+          {toolVisibility.fill && (
+            <ToolButton
+              tool="fill"
+              icon={<FillIcon />}
+              label="Fill (G)"
+              activeTool={activeTool}
+              onClick={setTool}
+            />
+          )}
+          {toolVisibility.pan && (
+            <ToolButton
+              tool="pan"
+              icon={<PanIcon />}
+              label="Pan (Space)"
+              activeTool={activeTool}
+              onClick={setTool}
+            />
+          )}
+          {toolVisibility.select && (
+            <ToolButton
+              tool="select"
+              icon={<CursorIcon />}
+              label="Move (V)"
+              activeTool={activeTool}
+              onClick={setTool}
+            />
+          )}
+          {toolVisibility.text && (
+            <ToolButton
+              tool="text"
+              icon={<TextIcon />}
+              label="Text (T)"
+              activeTool={activeTool}
+              onClick={() => {
+                if (onTextToolClick) {
+                  onTextToolClick();
+                }
+              }}
+            />
+          )}
+        </div>
+      )}
 
       {/* Shape tools */}
-      <div className="p-2 space-y-2 border-b border-gray-200">
-        <ToolButton
-          tool="line"
-          icon="╱"
-          label="Line (L)"
-          activeTool={activeTool}
-          onClick={setTool}
-        />
-        <ToolButton
-          tool="rectangle"
-          icon="▢"
-          label="Rectangle (R)"
-          activeTool={activeTool}
-          onClick={setTool}
-        />
-        <ToolButton
-          tool="ellipse"
-          icon="◯"
-          label="Ellipse (O)"
-          activeTool={activeTool}
-          onClick={setTool}
-        />
-      </div>
+      {hasShapeTools && (
+        <div className="p-2 space-y-2 border-b border-gray-200 w-14">
+          {toolVisibility.line && (
+            <ToolButton
+              tool="line"
+              icon="╱"
+              label="Line (L)"
+              activeTool={activeTool}
+              onClick={setTool}
+            />
+          )}
+          {toolVisibility.rectangle && (
+            <ToolButton
+              tool="rectangle"
+              icon="▢"
+              label="Rectangle (R)"
+              activeTool={activeTool}
+              onClick={setTool}
+            />
+          )}
+          {toolVisibility.ellipse && (
+            <ToolButton
+              tool="ellipse"
+              icon="◯"
+              label="Ellipse (O)"
+              activeTool={activeTool}
+              onClick={setTool}
+            />
+          )}
+        </div>
+      )}
 
       {/* Undo/Redo */}
-      <div className="p-2 space-y-2 border-b border-gray-200">
-        <button
-          onClick={undo}
-          disabled={history.length === 0}
-          className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-            history.length === 0
-              ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          }`}
-          title="Undo (Ctrl+Z)"
-        >
-          ↩️
-        </button>
-        <button
-          onClick={redo}
-          disabled={future.length === 0}
-          className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-            future.length === 0
-              ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          }`}
-          title="Redo (Ctrl+Shift+Z)"
-        >
-          ↪️
-        </button>
-      </div>
+      {hasHistoryTools && (
+        <div className="p-2 space-y-2 border-b border-gray-200 w-14">
+          {toolVisibility.undo && (
+            <button
+              onClick={undo}
+              disabled={history.length === 0}
+              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
+                history.length === 0
+                  ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+              title="Undo (Ctrl+Z)"
+            >
+              ↩️
+            </button>
+          )}
+          {toolVisibility.redo && (
+            <button
+              onClick={redo}
+              disabled={future.length === 0}
+              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
+                future.length === 0
+                  ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+              title="Redo (Ctrl+Shift+Z)"
+            >
+              ↪️
+            </button>
+          )}
+        </div>
+      )}
 
-      {/* View controls */}
-      <div className="p-2 space-y-2 border-b border-gray-200">
-        <button
-          onClick={() => setZoom(zoom + 0.1)}
-          className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-lg"
-          title="Zoom In (+)"
-        >
-          🔍+
-        </button>
-        <button
-          onClick={() => setZoom(zoom - 0.1)}
-          className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-lg"
-          title="Zoom Out (-)"
-        >
-          🔍-
-        </button>
-        <button
-          onClick={() => {
-            setZoom(1);
-            setPanOffset({ x: 0, y: 0 });
-          }}
-          className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-xs font-medium"
-          title="1:1 Zoom (reset to 100%)"
-        >
-          1:1
-        </button>
-        <button
-          onClick={onFitToCanvas}
-          className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-xs font-medium"
-          title="Fit Canvas to Window (0)"
-        >
-          Fit
-        </button>
-      </div>
+      {/* Zoom controls */}
+      {hasZoomControls && (
+        <div className="p-2 space-y-2 border-b border-gray-200 w-14">
+          {toolVisibility.zoomIn && (
+            <button
+              onClick={() => setZoom(Math.min(10, zoom + 0.1))}
+              className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-lg"
+              title="Zoom In (+)"
+            >
+              🔍+
+            </button>
+          )}
+          {toolVisibility.zoomOut && (
+            <button
+              onClick={() => setZoom(Math.max(0.1, zoom - 0.1))}
+              className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-lg"
+              title="Zoom Out (-)"
+            >
+              🔍−
+            </button>
+          )}
+          {toolVisibility.zoomFit && (
+            <button
+              onClick={onFitToCanvas}
+              className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-xs font-medium"
+              title="Fit to Window (0)"
+            >
+              Fit
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Grid toggle */}
-      <div className="p-2 space-y-2">
-        <button
-          onClick={toggleGrid}
-          className={`
-            w-10 h-10 flex items-center justify-center rounded
-            transition-colors text-lg
-            ${showGrid
-              ? 'bg-blue-500 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }
-          `}
-          title="Toggle Grid (G)"
-        >
-          #
-        </button>
-      </div>
-
-      {/* Zoom indicator */}
-      <div className="mt-auto p-2 text-center">
-        <div className="text-xs text-gray-500">
-          {Math.round(zoom * 100)}%
+      {toolVisibility.grid && (
+        <div className="p-2 space-y-2 w-14">
+          <button
+            onClick={toggleGrid}
+            className={`
+              w-10 h-10 flex items-center justify-center rounded
+              transition-colors text-lg
+              ${showGrid
+                ? 'bg-blue-500 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }
+            `}
+            title="Toggle Grid (G)"
+          >
+            #
+          </button>
         </div>
-      </div>
+      )}
+
     </div>
   );
 }

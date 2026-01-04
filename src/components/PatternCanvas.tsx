@@ -4,6 +4,7 @@ import { usePatternStore, ResizeHandle, Color } from '../stores/patternStore';
 const CELL_SIZE = 20; // Base cell size in pixels
 const RULER_SIZE = 24; // Width/height of rulers in pixels
 const HANDLE_SIZE = 8; // Size of resize handles in pixels
+const SCROLLBAR_SIZE = 14; // Width/height of scrollbars
 
 interface PatternCanvasProps {
   showSymbols?: boolean;
@@ -13,10 +14,12 @@ interface PatternCanvasProps {
 export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: PatternCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
   const topRulerRef = useRef<HTMLCanvasElement>(null);
   const leftRulerRef = useRef<HTMLCanvasElement>(null);
   const rightRulerRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [lastCell, setLastCell] = useState<{ x: number; y: number } | null>(null);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
   // Shape drawing state
@@ -1111,6 +1114,172 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     drawRightRuler();
   }, [draw, drawTopRuler, drawLeftRuler, drawRightRuler]);
 
+  // Track viewport size for scrollbars
+  useEffect(() => {
+    const container = canvasContainerRef.current;
+    if (!container) return;
+
+    const updateSize = () => {
+      setViewportSize({
+        width: container.clientWidth,
+        height: container.clientHeight,
+      });
+    };
+
+    updateSize();
+
+    const resizeObserver = new ResizeObserver(updateSize);
+    resizeObserver.observe(container);
+
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  // Calculate scroll dimensions
+  const contentWidth = pattern ? pattern.canvas.width * CELL_SIZE * zoom : 0;
+  const contentHeight = pattern ? pattern.canvas.height * CELL_SIZE * zoom : 0;
+
+  // Add padding around content for scrolling beyond edges
+  const scrollPadding = 100;
+  const totalScrollWidth = contentWidth + scrollPadding * 2;
+  const totalScrollHeight = contentHeight + scrollPadding * 2;
+
+  // Calculate scroll position (0 to 1)
+  const scrollX = totalScrollWidth > viewportSize.width
+    ? Math.max(0, Math.min(1, (scrollPadding - panOffset.x) / (totalScrollWidth - viewportSize.width)))
+    : 0;
+  const scrollY = totalScrollHeight > viewportSize.height
+    ? Math.max(0, Math.min(1, (scrollPadding - panOffset.y) / (totalScrollHeight - viewportSize.height)))
+    : 0;
+
+  // Calculate scrollbar thumb sizes
+  const thumbWidthPercent = Math.min(1, viewportSize.width / totalScrollWidth);
+  const thumbHeightPercent = Math.min(1, viewportSize.height / totalScrollHeight);
+
+  // Show scrollbars only when content exceeds viewport
+  const showHorizontalScrollbar = totalScrollWidth > viewportSize.width;
+  const showVerticalScrollbar = totalScrollHeight > viewportSize.height;
+
+  // Refs for scrollbar tracks
+  const hScrollTrackRef = useRef<HTMLDivElement>(null);
+  const vScrollTrackRef = useRef<HTMLDivElement>(null);
+
+  // Scrollbar drag state
+  const [scrollbarDrag, setScrollbarDrag] = useState<{
+    type: 'horizontal' | 'vertical';
+    startMousePos: number;
+    startScrollPos: number;
+  } | null>(null);
+
+  // Handle scrollbar drag
+  useEffect(() => {
+    if (!scrollbarDrag) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (scrollbarDrag.type === 'horizontal') {
+        const track = hScrollTrackRef.current;
+        if (!track) return;
+        const rect = track.getBoundingClientRect();
+        const trackWidth = rect.width;
+        const thumbWidth = trackWidth * thumbWidthPercent;
+        const scrollableTrack = trackWidth - thumbWidth;
+        if (scrollableTrack <= 0) return;
+
+        const deltaX = e.clientX - scrollbarDrag.startMousePos;
+        const deltaScroll = deltaX / scrollableTrack;
+        const newScrollX = Math.max(0, Math.min(1, scrollbarDrag.startScrollPos + deltaScroll));
+        const newPanX = scrollPadding - newScrollX * (totalScrollWidth - viewportSize.width);
+        setPanOffset({ x: newPanX, y: panOffset.y });
+      } else {
+        const track = vScrollTrackRef.current;
+        if (!track) return;
+        const rect = track.getBoundingClientRect();
+        const trackHeight = rect.height;
+        const thumbHeight = trackHeight * thumbHeightPercent;
+        const scrollableTrack = trackHeight - thumbHeight;
+        if (scrollableTrack <= 0) return;
+
+        const deltaY = e.clientY - scrollbarDrag.startMousePos;
+        const deltaScroll = deltaY / scrollableTrack;
+        const newScrollY = Math.max(0, Math.min(1, scrollbarDrag.startScrollPos + deltaScroll));
+        const newPanY = scrollPadding - newScrollY * (totalScrollHeight - viewportSize.height);
+        setPanOffset({ x: panOffset.x, y: newPanY });
+      }
+    };
+
+    const handleMouseUp = () => {
+      setScrollbarDrag(null);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [scrollbarDrag, thumbWidthPercent, thumbHeightPercent, totalScrollWidth, totalScrollHeight, viewportSize, scrollPadding, panOffset, setPanOffset]);
+
+  // Handle horizontal scrollbar mouse down
+  const handleHorizontalScrollMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!pattern) return;
+    e.preventDefault();
+    setScrollbarDrag({
+      type: 'horizontal',
+      startMousePos: e.clientX,
+      startScrollPos: scrollX,
+    });
+  };
+
+  // Handle vertical scrollbar mouse down
+  const handleVerticalScrollMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!pattern) return;
+    e.preventDefault();
+    setScrollbarDrag({
+      type: 'vertical',
+      startMousePos: e.clientY,
+      startScrollPos: scrollY,
+    });
+  };
+
+  // Handle click on scrollbar track (jump to position)
+  const handleHorizontalTrackClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!pattern || scrollbarDrag) return;
+    // Only handle clicks on the track, not on the thumb
+    if ((e.target as HTMLElement).dataset.scrollThumb) return;
+
+    const track = e.currentTarget;
+    const rect = track.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const trackWidth = rect.width;
+    const thumbWidth = trackWidth * thumbWidthPercent;
+    const scrollableTrack = trackWidth - thumbWidth;
+
+    if (scrollableTrack <= 0) return;
+
+    const newScrollX = Math.max(0, Math.min(1, (clickX - thumbWidth / 2) / scrollableTrack));
+    const newPanX = scrollPadding - newScrollX * (totalScrollWidth - viewportSize.width);
+    setPanOffset({ x: newPanX, y: panOffset.y });
+  };
+
+  const handleVerticalTrackClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!pattern || scrollbarDrag) return;
+    // Only handle clicks on the track, not on the thumb
+    if ((e.target as HTMLElement).dataset.scrollThumb) return;
+
+    const track = e.currentTarget;
+    const rect = track.getBoundingClientRect();
+    const clickY = e.clientY - rect.top;
+    const trackHeight = rect.height;
+    const thumbHeight = trackHeight * thumbHeightPercent;
+    const scrollableTrack = trackHeight - thumbHeight;
+
+    if (scrollableTrack <= 0) return;
+
+    const newScrollY = Math.max(0, Math.min(1, (clickY - thumbHeight / 2) / scrollableTrack));
+    const newPanY = scrollPadding - newScrollY * (totalScrollHeight - viewportSize.height);
+    setPanOffset({ x: panOffset.x, y: newPanY });
+  };
+
   // Handle mouse events
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!pattern) return;
@@ -1452,8 +1621,23 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     setLastCell(null);
   };
 
+  // Custom pencil cursor (black and white, based on pencil.svg)
+  const pencilCursor = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='white' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z'/%3E%3Cpath d='m15 5 4 4'/%3E%3C/svg%3E") 2 22, crosshair`;
+
+  // Custom eraser cursor (black and white)
+  const eraserCursor = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M20 20H9L3.5 14.5c-.7-.7-.7-1.8 0-2.5L13 2.5c.7-.7 1.8-.7 2.5 0l6 6c.7.7.7 1.8 0 2.5L12 20' fill='white' stroke='black' stroke-width='1.5'/%3E%3Cpath d='M9 20L3.5 14.5c-.7-.7-.7-1.8 0-2.5L7 8.5l7 7L9 20z' fill='%23ccc' stroke='black' stroke-width='1.5'/%3E%3Cpath d='M7 8.5L14 15.5' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E") 4 20, crosshair`;
+
+  // Custom fill/paint bucket cursor (black and white, based on FillIcon)
+  const fillCursor = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 22 22' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9.996,6C8.097,4.101 6.468,2.472 4.996,1' fill='none' stroke='black' stroke-width='1.5'/%3E%3Cpath d='M17.988,11L1.037,11' fill='none' stroke='black' stroke-width='1.5'/%3E%3Cpath d='M1.193,13.443C2.023,14.418 8.537,19.127 8.537,19.127L17.001,12.696L18.868,9.875L1.359,9.875C1.359,9.875 0.363,12.468 1.193,13.443Z' fill='white'/%3E%3Cpath d='M20.141,17.38C19.558,16.901 19.154,16.238 18.996,15.5C18.841,16.239 18.436,16.903 17.851,17.38C17.276,17.84 16.996,18.4 16.996,18.975C16.996,18.983 16.996,18.992 16.996,19C16.996,20.097 17.899,21 18.996,21C20.093,21 20.996,20.097 20.996,19C20.996,18.992 20.996,18.983 20.996,18.975C20.996,18.395 20.711,17.845 20.141,17.38' fill='%23ccc' stroke='%23999' stroke-width='1.5'/%3E%3Cpath d='M7.496,3.5L9.644,1.352C10.111,0.885 10.881,0.885 11.348,1.352L18.644,8.648C19.111,9.115 19.111,9.885 18.644,10.352L11.052,17.944C9.65,19.346 7.342,19.346 5.94,17.944L2.052,14.056C0.65,12.654 0.65,10.346 2.052,8.944L4.666,6.33' fill='none' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E") 19 21, crosshair`;
+
+  // Custom move/select cursor (black and white pointer arrow)
+  const moveCursor = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M4 4l7 18 2.5-7.5L21 12 4 4z' fill='white' stroke='black' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E") 4 4, default`;
+
   // Get cursor based on current state
   const getCursor = useCallback((): string => {
+    if (activeTool === 'pencil') return pencilCursor;
+    if (activeTool === 'eraser') return eraserCursor;
+    if (activeTool === 'fill') return fillCursor;
     if (activeTool === 'pan') return 'grab';
     if (isProgressMode) return 'pointer';
     if (activeTool === 'select') {
@@ -1492,10 +1676,10 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
 
       // Check if hovering over any overlay (to show pointer for selection)
       if (mousePos && getOverlayAtPoint(mousePos.x, mousePos.y)) {
-        return 'pointer';
+        return moveCursor;
       }
 
-      return 'crosshair';
+      return moveCursor;
     }
     return 'crosshair';
   }, [activeTool, mousePos, selection, selectedOverlay, getResizeHandleAt, isPointInSelectionBounds, getOverlayResizeHandle, isPointInSelectedOverlay, getOverlayAtPoint, isProgressMode]);
@@ -1546,7 +1730,7 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       ref={containerRef}
       className="flex-1 overflow-hidden bg-gray-200 flex flex-col"
     >
-      {/* Top row: corner + top ruler + corner */}
+      {/* Top row: corner + top ruler + corner + scrollbar corner */}
       <div className="flex" style={{ height: RULER_SIZE }}>
         {/* Top-left corner */}
         <div
@@ -1564,9 +1748,16 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
           className="bg-gray-100 border-l border-b border-gray-300"
           style={{ width: RULER_SIZE, height: RULER_SIZE }}
         />
+        {/* Scrollbar corner spacer */}
+        {showVerticalScrollbar && (
+          <div
+            className="bg-gray-100 border-b border-gray-300"
+            style={{ width: SCROLLBAR_SIZE, height: RULER_SIZE }}
+          />
+        )}
       </div>
 
-      {/* Main row: left ruler + canvas + right ruler */}
+      {/* Main row: left ruler + canvas + right ruler + vertical scrollbar */}
       <div className="flex flex-1 relative" data-canvas-viewport>
         {/* Left ruler */}
         <canvas
@@ -1574,24 +1765,94 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
           className="border-r border-gray-300"
           style={{ width: RULER_SIZE }}
         />
-        {/* Main canvas */}
-        <canvas
-          ref={canvasRef}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseLeave}
-          onWheel={handleWheel}
-          className="flex-1"
-          style={{ cursor: getCursor() }}
-        />
+        {/* Main canvas container */}
+        <div ref={canvasContainerRef} className="flex-1 relative overflow-hidden">
+          <canvas
+            ref={canvasRef}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseLeave}
+            onWheel={handleWheel}
+            className="absolute inset-0"
+            style={{ cursor: getCursor() }}
+          />
+        </div>
         {/* Right ruler */}
         <canvas
           ref={rightRulerRef}
           className="border-l border-gray-300"
           style={{ width: RULER_SIZE }}
         />
+        {/* Vertical scrollbar */}
+        {showVerticalScrollbar && (
+          <div
+            ref={vScrollTrackRef}
+            className="bg-gray-100 border-l border-gray-300 cursor-pointer"
+            style={{ width: SCROLLBAR_SIZE }}
+            onClick={handleVerticalTrackClick}
+          >
+            {/* Scrollbar track */}
+            <div className="relative w-full h-full">
+              {/* Scrollbar thumb */}
+              <div
+                data-scroll-thumb="true"
+                className="absolute left-1 right-1 bg-gray-400 hover:bg-gray-500 rounded-full transition-colors cursor-grab active:cursor-grabbing"
+                style={{
+                  top: `${scrollY * (100 - thumbHeightPercent * 100)}%`,
+                  height: `${thumbHeightPercent * 100}%`,
+                  minHeight: 20,
+                }}
+                onMouseDown={handleVerticalScrollMouseDown}
+              />
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Bottom row: horizontal scrollbar */}
+      {showHorizontalScrollbar && (
+        <div className="flex" style={{ height: SCROLLBAR_SIZE }}>
+          {/* Left spacer for ruler */}
+          <div
+            className="bg-gray-100 border-r border-t border-gray-300"
+            style={{ width: RULER_SIZE, height: SCROLLBAR_SIZE }}
+          />
+          {/* Horizontal scrollbar */}
+          <div
+            ref={hScrollTrackRef}
+            className="flex-1 bg-gray-100 border-t border-gray-300 cursor-pointer"
+            onClick={handleHorizontalTrackClick}
+          >
+            {/* Scrollbar track */}
+            <div className="relative w-full h-full">
+              {/* Scrollbar thumb */}
+              <div
+                data-scroll-thumb="true"
+                className="absolute top-1 bottom-1 bg-gray-400 hover:bg-gray-500 rounded-full transition-colors cursor-grab active:cursor-grabbing"
+                style={{
+                  left: `${scrollX * (100 - thumbWidthPercent * 100)}%`,
+                  width: `${thumbWidthPercent * 100}%`,
+                  minWidth: 20,
+                }}
+                onMouseDown={handleHorizontalScrollMouseDown}
+              />
+            </div>
+          </div>
+          {/* Right spacer for ruler */}
+          <div
+            className="bg-gray-100 border-l border-t border-gray-300"
+            style={{ width: RULER_SIZE, height: SCROLLBAR_SIZE }}
+          />
+          {/* Corner spacer */}
+          {showVerticalScrollbar && (
+            <div
+              className="bg-gray-100 border-t border-gray-300"
+              style={{ width: SCROLLBAR_SIZE, height: SCROLLBAR_SIZE }}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { PatternCanvas } from './components/PatternCanvas';
 import { ColorPalette } from './components/ColorPalette';
-import { Toolbar } from './components/Toolbar';
+import { Toolbar, ToolVisibility, EraserIcon, FillIcon, PanIcon, CursorIcon, TextIcon } from './components/Toolbar';
 import { LayerPanel } from './components/LayerPanel';
 import { ProgressTrackingPanel } from './components/ProgressTrackingPanel';
 import { NewProjectDialog } from './components/NewProjectDialog';
@@ -88,6 +88,28 @@ const RECENT_FILES_KEY = 'needlepoint-recent-files';
 const MAX_RECENT_FILES = 10;
 const PREFERENCES_KEY = 'needlepoint-preferences';
 
+// Tool visibility row component for the dialog
+function ToolVisibilityRow({ checked, onChange, icon, label }: { checked: boolean; onChange: (checked: boolean) => void; icon: React.ReactNode; label: string }) {
+  return (
+    <label className="flex items-center gap-3 cursor-pointer">
+      <div
+        onClick={() => onChange(!checked)}
+        className={`
+          relative w-14 h-7 rounded-full flex items-center transition-all duration-200 shrink-0
+          ${checked ? 'bg-green-500' : 'bg-gray-400'}
+          shadow-inner
+        `}
+      >
+        <span className={`absolute left-1.5 text-[9px] font-bold transition-opacity duration-200 ${checked ? 'opacity-100 text-white' : 'opacity-0'}`}>ON</span>
+        <span className={`absolute right-1.5 text-[9px] font-bold transition-opacity duration-200 ${checked ? 'opacity-0' : 'opacity-100 text-white'}`}>OFF</span>
+        <div className={`absolute top-1 w-5 h-5 bg-white rounded-full shadow-md transition-all duration-200 ease-in-out ${checked ? 'left-8' : 'left-1'}`} />
+      </div>
+      <span className="w-10 flex items-center justify-center">{icon}</span>
+      <span className="text-sm text-gray-700">{label}</span>
+    </label>
+  );
+}
+
 interface Preferences {
   autoSaveMinutes: number | null; // null means disabled
   historySize: number;
@@ -95,7 +117,26 @@ interface Preferences {
   confirmLayerDelete: boolean; // Show confirmation when deleting layers
   showSymbols: boolean; // Show symbols on color swatches
   showCenterMarker: boolean; // Show green X at canvas center
+  toolVisibility: ToolVisibility;
 }
+
+const DEFAULT_TOOL_VISIBILITY: ToolVisibility = {
+  pencil: true,
+  eraser: true,
+  fill: true,
+  pan: true,
+  select: true,
+  text: true,
+  line: true,
+  rectangle: true,
+  ellipse: true,
+  undo: true,
+  redo: true,
+  zoomIn: true,
+  zoomOut: true,
+  zoomFit: true,
+  grid: true,
+};
 
 const DEFAULT_PREFERENCES: Preferences = {
   autoSaveMinutes: 1,
@@ -104,6 +145,7 @@ const DEFAULT_PREFERENCES: Preferences = {
   confirmLayerDelete: true,
   showSymbols: true,
   showCenterMarker: true,
+  toolVisibility: DEFAULT_TOOL_VISIBILITY,
 };
 
 function App() {
@@ -113,6 +155,7 @@ function App() {
   const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [showPreferencesMenu, setShowPreferencesMenu] = useState(false);
   const [showRecentMenu, setShowRecentMenu] = useState(false);
+  const [showToolbarVisibilityDialog, setShowToolbarVisibilityDialog] = useState(false);
   const [recentFiles, setRecentFiles] = useState<string[]>(() => {
     try {
       const stored = localStorage.getItem(RECENT_FILES_KEY);
@@ -133,6 +176,9 @@ function App() {
   // Text tool state
   const [showTextEditor, setShowTextEditor] = useState(false);
   const [showFontBrowser, setShowFontBrowser] = useState(false);
+
+  // Ref to store the tool before space-bar pan (to restore on release)
+  const toolBeforePanRef = useRef<string | null>(null);
 
   // Helper to close all menus
   const closeAllMenus = useCallback(() => {
@@ -202,6 +248,7 @@ function App() {
     importAsLayer,
     removeLayer,
     clearSelection,
+    selectLayerForTransform,
     setOverlayImages,
     isProgressMode,
     toggleProgressMode,
@@ -339,7 +386,11 @@ function App() {
           break;
         case ' ':
           e.preventDefault();
-          setTool('pan');
+          // Save current tool before switching to pan (only if not already panning)
+          if (activeTool !== 'pan') {
+            toolBeforePanRef.current = activeTool;
+            setTool('pan');
+          }
           break;
         case '+':
         case '=':
@@ -361,8 +412,9 @@ function App() {
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === ' ' && activeTool === 'pan') {
-        setTool('pencil');
+      if (e.key === ' ' && activeTool === 'pan' && toolBeforePanRef.current) {
+        setTool(toolBeforePanRef.current as any);
+        toolBeforePanRef.current = null;
       }
     };
 
@@ -384,6 +436,30 @@ function App() {
       return updated;
     });
   }, []);
+
+  // Get next available pattern name based on recent files
+  const getNextPatternName = useCallback(() => {
+    const baseName = 'My Pattern';
+
+    // Extract pattern names from recent file paths
+    const existingNames = recentFiles.map(filePath => {
+      // Get filename without extension
+      const fileName = filePath.split(/[/\\]/).pop() || '';
+      return fileName.replace(/\.ndp$/i, '');
+    });
+
+    // Check if base name exists
+    if (!existingNames.includes(baseName)) {
+      return baseName;
+    }
+
+    // Find next available number
+    let num = 2;
+    while (existingNames.includes(`${baseName} ${num}`)) {
+      num++;
+    }
+    return `${baseName} ${num}`;
+  }, [recentFiles]);
 
   // Convert pattern to NDP file format
   const patternToNdp = useCallback((p: Pattern): NdpFile => {
@@ -872,9 +948,15 @@ function App() {
     const layerName = `Text ${new Date().toLocaleTimeString()}`;
     importAsLayer(layerName, colors, positionedStitches);
 
-    // Switch back to select tool so user can move/resize the new layer
+    // Switch to select tool and select the new layer for transformation
     setTool('select');
-  }, [pattern, importAsLayer, setTool]);
+
+    // Get the newly created layer's ID (importAsLayer sets activeLayerId)
+    const newLayerId = usePatternStore.getState().activeLayerId;
+    if (newLayerId) {
+      selectLayerForTransform(newLayerId);
+    }
+  }, [pattern, importAsLayer, setTool, selectLayerForTransform]);
 
   // Handle font selection from browser
   const handleFontSelect = useCallback((fontFamily: string, weight: number) => {
@@ -917,7 +999,15 @@ function App() {
     <div className="h-screen flex flex-col bg-gray-100 overflow-hidden">
       {/* Title Bar / Menu */}
       <header className="bg-gray-800 text-white px-4 py-2 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-6">
+        <div
+          className="flex items-center gap-6"
+          onMouseDown={(e) => {
+            // Start window drag on the title area (but not on interactive elements)
+            if ((e.target as HTMLElement).closest('nav, button, a, input, select')) return;
+            e.preventDefault();
+            getCurrentWindow().startDragging();
+          }}
+        >
           <h1 className="text-lg font-semibold">NeedlePoint Designer</h1>
           <nav className="flex gap-4 text-sm relative z-50">
             {/* Global backdrop to close menus when clicking outside */}
@@ -1166,6 +1256,17 @@ function App() {
                         label="Show Center Marker"
                       />
                     </div>
+                    {/* Toolbar Visibility - opens modal */}
+                    <button
+                      className="w-full px-4 py-2 text-left hover:bg-gray-600 border-t border-gray-600 flex items-center justify-between"
+                      onClick={() => {
+                        setShowToolbarVisibilityDialog(true);
+                        setShowPreferencesMenu(false);
+                      }}
+                    >
+                      <span>Toolbar Visibility...</span>
+                      <span className="text-gray-400">→</span>
+                    </button>
                 </div>
               )}
             </div>
@@ -1173,14 +1274,74 @@ function App() {
         </div>
         <div className="flex items-center gap-4">
           {pattern && (
-            <span className="text-sm text-gray-300">
+            <span
+              className="text-sm text-gray-300 cursor-default"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                getCurrentWindow().startDragging();
+              }}
+            >
               {currentFilePath
                 ? currentFilePath.split(/[/\\]/).pop()
                 : pattern.name}
               {hasUnsavedChanges ? ' *' : ''} - {pattern.canvas.width} x {pattern.canvas.height}
             </span>
           )}
-          <span className="text-sm text-gray-400">v1.0.0</span>
+          <span
+            className="text-sm text-gray-400 cursor-default"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              getCurrentWindow().startDragging();
+            }}
+          >v1.1.0</span>
+          {/* Window Controls */}
+          <div className="flex items-center gap-1 ml-4" data-window-controls style={{ WebkitAppRegion: 'no-drag', appRegion: 'no-drag' } as React.CSSProperties}>
+            <button
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('Minimize clicked');
+                getCurrentWindow().minimize();
+              }}
+              className="w-8 h-8 flex items-center justify-center hover:bg-gray-700 rounded transition-colors"
+              style={{ WebkitAppRegion: 'no-drag', appRegion: 'no-drag' } as React.CSSProperties}
+              title="Minimize"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" style={{ pointerEvents: 'none' }}>
+                <rect y="5" width="12" height="2" />
+              </svg>
+            </button>
+            <button
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('Maximize clicked');
+                getCurrentWindow().toggleMaximize();
+              }}
+              className="w-8 h-8 flex items-center justify-center hover:bg-gray-700 rounded transition-colors"
+              style={{ WebkitAppRegion: 'no-drag', appRegion: 'no-drag' } as React.CSSProperties}
+              title="Maximize"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ pointerEvents: 'none' }}>
+                <rect x="1" y="1" width="10" height="10" />
+              </svg>
+            </button>
+            <button
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('Close clicked');
+                getCurrentWindow().close();
+              }}
+              className="w-8 h-8 flex items-center justify-center hover:bg-red-600 rounded transition-colors"
+              style={{ WebkitAppRegion: 'no-drag', appRegion: 'no-drag' } as React.CSSProperties}
+              title="Close"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" style={{ pointerEvents: 'none' }}>
+                <path d="M1 1l10 10M11 1L1 11" />
+              </svg>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -1190,7 +1351,7 @@ function App() {
           <>
             {/* Left Toolbar - hidden in progress mode */}
             {!isProgressMode && (
-              <Toolbar onTextToolClick={() => setShowTextEditor(true)} onFitToCanvas={handleFitToCanvas} />
+              <Toolbar onTextToolClick={() => setShowTextEditor(true)} onFitToCanvas={handleFitToCanvas} toolVisibility={preferences.toolVisibility} />
             )}
 
             {/* Canvas Area */}
@@ -1273,13 +1434,29 @@ function App() {
           {pattern && (
             <>
               <span>|</span>
-              <button
-                onClick={handleFitToCanvas}
-                className="hover:text-blue-400 hover:underline cursor-pointer"
-                title="Click to fit canvas to viewport"
-              >
-                Zoom: {Math.round(zoom * 100)}%
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setZoom(Math.max(0.1, zoom - 0.1))}
+                  className="px-1.5 hover:bg-gray-300 rounded text-base leading-none"
+                  title="Zoom Out (-)"
+                >
+                  −
+                </button>
+                <button
+                  onClick={handleFitToCanvas}
+                  className="hover:text-blue-600 hover:underline cursor-pointer min-w-[60px] text-center"
+                  title="Click to fit canvas to viewport"
+                >
+                  {Math.round(zoom * 100)}%
+                </button>
+                <button
+                  onClick={() => setZoom(Math.min(10, zoom + 0.1))}
+                  className="px-1.5 hover:bg-gray-300 rounded text-base leading-none"
+                  title="Zoom In (+)"
+                >
+                  +
+                </button>
+              </div>
               <span>|</span>
               <span>
                 Layer: {pattern.layers.find(l => l.id === activeLayerId)?.name || 'None'}
@@ -1312,6 +1489,7 @@ function App() {
       <NewProjectDialog
         isOpen={showNewProjectDialog}
         onClose={() => setShowNewProjectDialog(false)}
+        defaultName={getNextPatternName()}
       />
       <ImportImageDialog
         isOpen={showImportDialog}
@@ -1390,6 +1568,88 @@ function App() {
         onSelectConvert={() => setShowImportDialog(true)}
         onSelectOverlay={() => setShowOverlayDialog(true)}
       />
+
+      {/* Toolbar Visibility Dialog */}
+      {showToolbarVisibilityDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-[500px] max-h-[80vh] flex flex-col">
+            {/* Header */}
+            <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">Toolbar Visibility</h2>
+              <button
+                onClick={() => setShowToolbarVisibilityDialog(false)}
+                className="text-gray-400 hover:text-gray-600 text-xl"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Content - 2 columns */}
+            <div className="p-4 overflow-y-auto grid grid-cols-2 gap-6">
+              {/* Left Column */}
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-sm font-medium text-gray-700 mb-2">Drawing Tools</h3>
+                  <div className="space-y-2">
+                    <ToolVisibilityRow checked={preferences.toolVisibility.pencil} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, pencil: checked } })} icon={<span className="text-lg">✏️</span>} label="Pencil (P)" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.eraser} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, eraser: checked } })} icon={<EraserIcon className="w-5 h-5" />} label="Eraser (E)" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.fill} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, fill: checked } })} icon={<FillIcon className="w-5 h-5" />} label="Fill (G)" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.pan} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, pan: checked } })} icon={<PanIcon className="w-5 h-5" />} label="Pan (Space)" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.select} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, select: checked } })} icon={<CursorIcon className="w-5 h-5" />} label="Move (V)" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.text} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, text: checked } })} icon={<TextIcon className="w-5 h-5" />} label="Text (T)" />
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-sm font-medium text-gray-700 mb-2">Shape Tools</h3>
+                  <div className="space-y-2">
+                    <ToolVisibilityRow checked={preferences.toolVisibility.line} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, line: checked } })} icon={<span className="text-lg">╱</span>} label="Line (L)" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.rectangle} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, rectangle: checked } })} icon={<span className="text-lg">▢</span>} label="Rectangle (R)" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.ellipse} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, ellipse: checked } })} icon={<span className="text-lg">◯</span>} label="Ellipse (O)" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column */}
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-sm font-medium text-gray-700 mb-2">History</h3>
+                  <div className="space-y-2">
+                    <ToolVisibilityRow checked={preferences.toolVisibility.undo} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, undo: checked } })} icon={<span className="text-lg">↩️</span>} label="Undo (Ctrl+Z)" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.redo} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, redo: checked } })} icon={<span className="text-lg">↪️</span>} label="Redo (Ctrl+Y)" />
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-sm font-medium text-gray-700 mb-2">Zoom</h3>
+                  <div className="space-y-2">
+                    <ToolVisibilityRow checked={preferences.toolVisibility.zoomIn} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, zoomIn: checked } })} icon={<span className="text-sm">🔍+</span>} label="Zoom In" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.zoomOut} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, zoomOut: checked } })} icon={<span className="text-sm">🔍−</span>} label="Zoom Out" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.zoomFit} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, zoomFit: checked } })} icon={<span className="text-xs font-medium">Fit</span>} label="Fit to Window" />
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-sm font-medium text-gray-700 mb-2">View</h3>
+                  <div className="space-y-2">
+                    <ToolVisibilityRow checked={preferences.toolVisibility.grid} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, grid: checked } })} icon={<span className="text-lg">#</span>} label="Grid Toggle" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-gray-200 flex justify-end">
+              <button
+                onClick={() => setShowToolbarVisibilityDialog(false)}
+                className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

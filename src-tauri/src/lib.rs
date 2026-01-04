@@ -1029,6 +1029,13 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
+        .setup(|app| {
+            // Ensure decorations are disabled (custom titlebar)
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_decorations(false);
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             greet,
             create_new_project,

@@ -4,6 +4,7 @@ import { usePatternStore } from '../stores/patternStore';
 interface NewProjectDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  defaultName?: string;
 }
 
 type Unit = 'inches' | 'mm';
@@ -11,9 +12,16 @@ type InputMode = 'physical' | 'stitches';
 
 const MM_PER_INCH = 25.4;
 
-export function NewProjectDialog({ isOpen, onClose }: NewProjectDialogProps) {
+export function NewProjectDialog({ isOpen, onClose, defaultName = 'My Pattern' }: NewProjectDialogProps) {
   const { createNewPattern } = usePatternStore();
-  const [name, setName] = useState('My Pattern');
+  const [name, setName] = useState(defaultName);
+
+  // Update name when dialog opens with new default
+  useEffect(() => {
+    if (isOpen) {
+      setName(defaultName);
+    }
+  }, [isOpen, defaultName]);
   const [meshCount, setMeshCount] = useState(18);
   const [unit, setUnit] = useState<Unit>('inches');
 

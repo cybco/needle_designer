@@ -38,18 +38,34 @@ function textToStitches(
   const lines = text.split('\n');
   const lineHeight = Math.ceil(fontSize * 1.2);
 
-  // Measure all lines to find max width
+  // Measure all lines to find actual bounding box (accounts for ascenders/descenders that extend beyond em-square)
   let maxWidth = 0;
+  let maxAscent = 0;
+  let maxDescent = 0;
+  let maxLeft = 0;
+
   for (const line of lines) {
     const metrics = ctx.measureText(line);
     maxWidth = Math.max(maxWidth, Math.ceil(metrics.width));
+
+    // Use actual bounding box if available (modern browsers)
+    if (metrics.actualBoundingBoxAscent !== undefined) {
+      maxAscent = Math.max(maxAscent, Math.ceil(metrics.actualBoundingBoxAscent));
+      maxDescent = Math.max(maxDescent, Math.ceil(metrics.actualBoundingBoxDescent));
+      maxLeft = Math.max(maxLeft, Math.ceil(metrics.actualBoundingBoxLeft));
+    }
   }
+
+  // Fallback padding if bounding box metrics not available
+  const padding = Math.max(4, Math.ceil(fontSize * 0.2));
+  const topPadding = maxAscent > 0 ? Math.ceil(maxAscent * 0.3) + 2 : padding;
+  const leftPadding = maxLeft > 0 ? maxLeft + 2 : padding;
 
   const totalHeight = lineHeight * lines.length;
 
-  // Size canvas with some padding
-  canvas.width = maxWidth + 2;
-  canvas.height = totalHeight + 2;
+  // Size canvas with adequate padding for glyphs that extend beyond em-square
+  canvas.width = maxWidth + leftPadding + padding;
+  canvas.height = totalHeight + topPadding + padding;
 
   // Clear and redraw
   ctx.fillStyle = 'white';
@@ -61,14 +77,14 @@ function textToStitches(
   ctx.textBaseline = 'top';
 
   for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], 1, 1 + i * lineHeight);
+    ctx.fillText(lines[i], leftPadding, topPadding + i * lineHeight);
   }
 
   // Get pixel data
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
   // Convert to stitches (any pixel that's not white becomes a stitch)
-  const stitches: Stitch[] = [];
+  const rawStitches: { x: number; y: number }[] = [];
   for (let y = 0; y < canvas.height; y++) {
     for (let x = 0; x < canvas.width; x++) {
       const i = (y * canvas.width + x) * 4;
@@ -79,12 +95,36 @@ function textToStitches(
       // Check if pixel is dark enough (text is rendered in black on white)
       const brightness = (r + g + b) / 3;
       if (brightness < 200) { // threshold for anti-aliased edges
-        stitches.push({ x, y, colorId, completed: false });
+        rawStitches.push({ x, y });
       }
     }
   }
 
-  return { stitches, width: canvas.width, height: canvas.height };
+  if (rawStitches.length === 0) {
+    return { stitches: [], width: 0, height: 0 };
+  }
+
+  // Find bounding box of actual stitches to trim empty space
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const s of rawStitches) {
+    minX = Math.min(minX, s.x);
+    minY = Math.min(minY, s.y);
+    maxX = Math.max(maxX, s.x);
+    maxY = Math.max(maxY, s.y);
+  }
+
+  // Normalize coordinates to start from 0,0
+  const stitches: Stitch[] = rawStitches.map(s => ({
+    x: s.x - minX,
+    y: s.y - minY,
+    colorId,
+    completed: false
+  }));
+
+  const trimmedWidth = maxX - minX + 1;
+  const trimmedHeight = maxY - minY + 1;
+
+  return { stitches, width: trimmedWidth, height: trimmedHeight };
 }
 
 export function TextEditorDialog({
