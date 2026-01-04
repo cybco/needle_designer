@@ -9,6 +9,9 @@ use std::io::Cursor;
 use std::path::Path;
 use tauri::Manager;
 
+mod threads;
+use threads::color_matching::ColorMatchAlgorithm;
+
 // NDP File Format structures
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct NdpFile {
@@ -336,6 +339,198 @@ fn process_image(
         pixels,
         preview_base64,
     })
+}
+
+/// Result of complete server-side image processing with thread matching
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProcessedImageWithThreads {
+    pub width: u32,
+    pub height: u32,
+    pub colors: Vec<Color>,           // Thread-matched colors with brand/code
+    pub pixels: Vec<Vec<String>>,     // color_id for each pixel
+    pub preview_base64: String,
+    pub thread_brand: String,         // Brand used for matching
+    pub algorithm: String,            // Algorithm used for matching
+}
+
+/// Process an image with complete server-side thread matching
+/// This does all processing in Rust including color quantization, dithering, and thread matching
+#[tauri::command]
+fn process_image_with_threads(
+    path: String,
+    target_width: u32,
+    target_height: u32,
+    max_colors: u32,
+    dither_mode: String,
+    remove_background: bool,
+    background_threshold: u8,
+    thread_brand: String,
+    color_match_algorithm: String,
+) -> Result<ProcessedImageWithThreads, String> {
+    // Load image
+    let img = if is_svg_file(&path) {
+        load_svg(&path)?
+    } else {
+        image::open(&path).map_err(|e| format!("Failed to open image: {}", e))?
+    };
+
+    // Resize to target dimensions
+    let resized = img.resize_exact(
+        target_width,
+        target_height,
+        image::imageops::FilterType::Lanczos3,
+    );
+
+    let rgba = resized.to_rgba8();
+
+    // Extract colors and reduce palette
+    let (quantized, palette) =
+        quantize_colors(&rgba, max_colors as usize, remove_background, background_threshold);
+
+    // Apply dithering
+    let dither = match dither_mode.as_str() {
+        "floyd-steinberg" => DitherMode::FloydSteinberg,
+        "ordered" => DitherMode::Ordered,
+        "atkinson" => DitherMode::Atkinson,
+        _ => DitherMode::None,
+    };
+
+    let dithered = apply_dithering(&quantized, &palette, &dither);
+
+    // Get thread library for selected brand
+    let brand = match thread_brand.as_str() {
+        "Anchor" => threads::ThreadBrand::Anchor,
+        "Kreinik" => threads::ThreadBrand::Kreinik,
+        _ => threads::ThreadBrand::DMC,
+    };
+    let thread_colors = threads::get_threads_by_brand(brand);
+
+    // Parse algorithm
+    let algorithm = match color_match_algorithm.as_str() {
+        "euclidean" => ColorMatchAlgorithm::Euclidean,
+        "weighted" => ColorMatchAlgorithm::Weighted,
+        "cie76" => ColorMatchAlgorithm::Cie76,
+        "cie94" => ColorMatchAlgorithm::Cie94,
+        _ => ColorMatchAlgorithm::Ciede2000,
+    };
+
+    // Build thread palette for matching
+    let thread_palette: Vec<(String, [u8; 3], String)> = thread_colors
+        .iter()
+        .map(|t| (
+            format!("{}-{}", t.brand, t.code),
+            t.rgb,
+            t.name.clone(),
+        ))
+        .collect();
+
+    // Match each quantized color to nearest thread
+    let mut matched_colors: Vec<Color> = Vec::new();
+    let mut color_id_map: HashMap<usize, String> = HashMap::new();
+    let mut seen_thread_ids: HashMap<String, usize> = HashMap::new();
+
+    for (i, quantized_color) in palette.iter().enumerate() {
+        if is_transparent(quantized_color) {
+            continue;
+        }
+
+        let rgb = [quantized_color[0], quantized_color[1], quantized_color[2]];
+
+        if let Some(match_result) = threads::color_matching::find_closest_color(rgb, &thread_palette, algorithm) {
+            // Check if we already have this thread color
+            if let Some(&existing_idx) = seen_thread_ids.get(&match_result.color_id) {
+                // Reuse existing color
+                color_id_map.insert(i, matched_colors[existing_idx].id.clone());
+            } else {
+                // Add new thread color
+                let color_id = format!("{}-color-{}", match_result.color_id, i + 1);
+                let thread_info = thread_colors.iter()
+                    .find(|t| format!("{}-{}", t.brand, t.code) == match_result.color_id);
+
+                let color = Color {
+                    id: color_id.clone(),
+                    name: match_result.name,
+                    rgb: match_result.color,
+                    thread_brand: Some(brand.to_string()),
+                    thread_code: thread_info.map(|t| t.code.clone()),
+                    symbol: None,
+                };
+
+                seen_thread_ids.insert(match_result.color_id, matched_colors.len());
+                color_id_map.insert(i, color_id);
+                matched_colors.push(color);
+            }
+        }
+    }
+
+    // Create pixel map with thread-matched colors
+    let mut pixels: Vec<Vec<String>> = Vec::with_capacity(target_height as usize);
+    for y in 0..target_height {
+        let mut row: Vec<String> = Vec::with_capacity(target_width as usize);
+        for x in 0..target_width {
+            let pixel = dithered.get_pixel(x, y);
+            if is_transparent(pixel) || (remove_background && is_background(pixel, background_threshold)) {
+                row.push(String::new()); // Empty = no stitch
+            } else {
+                // Find matching color in original palette
+                let color_idx = find_closest_color_idx(pixel, &palette);
+                if let Some(color_id) = color_id_map.get(&color_idx) {
+                    row.push(color_id.clone());
+                } else {
+                    row.push(String::new());
+                }
+            }
+        }
+        pixels.push(row);
+    }
+
+    // Create preview with thread-matched colors
+    let mut preview_img = RgbaImage::new(target_width, target_height);
+    for y in 0..target_height {
+        for x in 0..target_width {
+            let color_id = &pixels[y as usize][x as usize];
+            if color_id.is_empty() {
+                preview_img.put_pixel(x, y, Rgba([0, 0, 0, 0]));
+            } else {
+                if let Some(color) = matched_colors.iter().find(|c| &c.id == color_id) {
+                    preview_img.put_pixel(x, y, Rgba([color.rgb[0], color.rgb[1], color.rgb[2], 255]));
+                } else {
+                    preview_img.put_pixel(x, y, Rgba([128, 128, 128, 255]));
+                }
+            }
+        }
+    }
+
+    let preview_base64 = image_to_base64(&DynamicImage::ImageRgba8(preview_img))?;
+
+    Ok(ProcessedImageWithThreads {
+        width: target_width,
+        height: target_height,
+        colors: matched_colors,
+        pixels,
+        preview_base64,
+        thread_brand: brand.to_string(),
+        algorithm: format!("{:?}", algorithm),
+    })
+}
+
+/// Find the index of the closest color in a palette
+fn find_closest_color_idx(pixel: &Rgba<u8>, palette: &[Rgba<u8>]) -> usize {
+    let mut min_dist = f64::MAX;
+    let mut closest_idx = 0;
+
+    for (i, color) in palette.iter().enumerate() {
+        if is_transparent(color) {
+            continue;
+        }
+        let dist = color_distance(pixel, color);
+        if dist < min_dist {
+            min_dist = dist;
+            closest_idx = i;
+        }
+    }
+
+    closest_idx
 }
 
 #[tauri::command]
@@ -839,6 +1034,7 @@ pub fn run() {
             create_new_project,
             load_image,
             process_image,
+            process_image_with_threads,
             save_project,
             open_project,
             save_pdf,

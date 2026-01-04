@@ -899,7 +899,8 @@ export const usePatternStore = create<PatternState>((set, get) => {
   },
 
   setZoom: (zoom) => {
-    set({ zoom: Math.max(0.1, Math.min(5, zoom)) });
+    // Allow zoom from 5% to 500% to handle large patterns
+    set({ zoom: Math.max(0.05, Math.min(5, zoom)) });
   },
 
   setPanOffset: (offset) => {
@@ -1168,13 +1169,40 @@ export const usePatternStore = create<PatternState>((set, get) => {
 
     pushToHistory();
 
-    // Merge colors into palette (avoiding duplicates by threadCode)
-    const existingCodes = new Set(
-      pattern.colorPalette
-        .map(c => c.threadCode)
-        .filter(Boolean)
-    );
-    const newColors = colors.filter(c => !c.threadCode || !existingCodes.has(c.threadCode));
+    // Build a map from threadCode to existing color ID for deduplication
+    const existingCodeToId = new Map<string, string>();
+    for (const c of pattern.colorPalette) {
+      if (c.threadCode) {
+        existingCodeToId.set(c.threadCode, c.id);
+      }
+    }
+
+    // Build color ID remapping: new color ID -> existing color ID (if duplicate)
+    const colorIdRemap = new Map<string, string>();
+    const newColors: Color[] = [];
+
+    for (const c of colors) {
+      if (c.threadCode && existingCodeToId.has(c.threadCode)) {
+        // This color already exists in palette - remap to existing ID
+        colorIdRemap.set(c.id, existingCodeToId.get(c.threadCode)!);
+      } else {
+        // New color - add to palette
+        newColors.push(c);
+        // Also track this new color's threadCode if it has one
+        if (c.threadCode) {
+          existingCodeToId.set(c.threadCode, c.id);
+        }
+      }
+    }
+
+    // Remap stitch color IDs to use existing palette colors where applicable
+    const remappedStitches = stitches.map(s => {
+      const remappedId = colorIdRemap.get(s.colorId);
+      if (remappedId) {
+        return { ...s, colorId: remappedId };
+      }
+      return s;
+    });
 
     // Auto-assign symbols to all colors (existing + new) that don't have them
     const allColors = [...pattern.colorPalette, ...newColors];
@@ -1186,8 +1214,16 @@ export const usePatternStore = create<PatternState>((set, get) => {
       name,
       visible: true,
       locked: false,
-      stitches,
+      stitches: remappedStitches,
     };
+
+    console.log('importAsLayer:', {
+      inputColors: colors.length,
+      newColors: newColors.length,
+      remappedColors: colorIdRemap.size,
+      inputStitches: stitches.length,
+      remappedStitches: remappedStitches.length,
+    });
 
     set({
       pattern: {

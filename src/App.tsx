@@ -773,6 +773,55 @@ function App() {
     setPanOffset({ x: newPanX, y: newPanY });
   }, [pattern, zoom, setPanOffset]);
 
+  // Fit the entire canvas to the viewport
+  const handleFitToCanvas = useCallback(() => {
+    console.log('=== FIT TO CANVAS CLICKED ===');
+    if (!pattern) {
+      console.log('No pattern, aborting');
+      return;
+    }
+
+    // Constants from PatternCanvas
+    const CELL_SIZE = 20;
+    const RULER_SIZE = 24;
+
+    // Try to find the canvas viewport element
+    const canvasViewport = document.querySelector('[data-canvas-viewport]') as HTMLElement;
+
+    let viewportWidth: number;
+    let viewportHeight: number;
+
+    if (canvasViewport) {
+      const rect = canvasViewport.getBoundingClientRect();
+      viewportWidth = rect.width - RULER_SIZE * 2;
+      viewportHeight = rect.height;
+      console.log('Viewport:', { w: viewportWidth, h: viewportHeight });
+    } else {
+      const toolbarWidth = isProgressMode ? 0 : 56;
+      const rightPanelWidth = 256;
+      viewportWidth = window.innerWidth - toolbarWidth - rightPanelWidth - RULER_SIZE * 2;
+      viewportHeight = window.innerHeight - 40 - 28 - RULER_SIZE;
+      console.log('Fallback viewport:', { w: viewportWidth, h: viewportHeight });
+    }
+
+    // Pattern size in pixels at zoom 1.0
+    const patternWidth = pattern.canvas.width * CELL_SIZE;
+    const patternHeight = pattern.canvas.height * CELL_SIZE;
+    console.log('Pattern px:', { w: patternWidth, h: patternHeight });
+
+    // Calculate fit zoom
+    const zoomX = viewportWidth / patternWidth;
+    const zoomY = viewportHeight / patternHeight;
+    const fitZoom = Math.min(zoomX, zoomY);
+
+    console.log('Calculated zoom:', { zoomX, zoomY, fitZoom, percent: Math.round(fitZoom * 100) + '%' });
+
+    // Apply zoom and reset pan
+    setZoom(fitZoom);
+    setPanOffset({ x: 0, y: 0 });
+    console.log('=== DONE ===');
+  }, [pattern, isProgressMode, setZoom, setPanOffset]);
+
   // Sync history size with store when preferences change
   useEffect(() => {
     setMaxHistorySize(preferences.historySize);
@@ -865,7 +914,7 @@ function App() {
   }, [handleSave, handleSaveAs, handleOpen, undo, redo]);
 
   return (
-    <div className="min-h-screen h-screen flex flex-col bg-gray-100">
+    <div className="h-screen flex flex-col bg-gray-100 overflow-hidden">
       {/* Title Bar / Menu */}
       <header className="bg-gray-800 text-white px-4 py-2 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-6">
@@ -1141,7 +1190,7 @@ function App() {
           <>
             {/* Left Toolbar - hidden in progress mode */}
             {!isProgressMode && (
-              <Toolbar onTextToolClick={() => setShowTextEditor(true)} />
+              <Toolbar onTextToolClick={() => setShowTextEditor(true)} onFitToCanvas={handleFitToCanvas} />
             )}
 
             {/* Canvas Area */}
@@ -1151,7 +1200,7 @@ function App() {
             {isProgressMode ? (
               <ProgressTrackingPanel />
             ) : (
-              <div className="flex flex-col border-l border-gray-300">
+              <div className="w-64 flex flex-col border-l border-gray-300 overflow-hidden">
                 <LayerPanel />
                 <ColorPalette showSymbols={preferences.showSymbols} />
               </div>
@@ -1224,7 +1273,13 @@ function App() {
           {pattern && (
             <>
               <span>|</span>
-              <span>Zoom: {Math.round(zoom * 100)}%</span>
+              <button
+                onClick={handleFitToCanvas}
+                className="hover:text-blue-400 hover:underline cursor-pointer"
+                title="Click to fit canvas to viewport"
+              >
+                Zoom: {Math.round(zoom * 100)}%
+              </button>
               <span>|</span>
               <span>
                 Layer: {pattern.layers.find(l => l.id === activeLayerId)?.name || 'None'}

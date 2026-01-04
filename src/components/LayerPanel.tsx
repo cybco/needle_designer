@@ -80,7 +80,7 @@ export function LayerPanel() {
   const reversedLayers = [...pattern.layers].reverse();
 
   return (
-    <div className="w-56 bg-white border-b border-gray-300 flex flex-col max-h-64">
+    <div className="w-full bg-white border-b border-gray-300 flex flex-col max-h-64 shrink-0">
       {/* Header */}
       <div className="p-2 border-b border-gray-200 flex items-center justify-between">
         <span className="font-medium text-sm text-gray-700">Layers</span>

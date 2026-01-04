@@ -20,7 +20,10 @@
       "Bash(curl:*)",
       "Bash(timeout:*)",
       "Bash(cat:*)",
-      "Bash(git pull:*)"
+      "Bash(git pull:*)",
+      "Bash(find:*)",
+      "Bash(mkdir:*)",
+      "Bash(node:*)"
     ]
   }
 }

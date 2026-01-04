@@ -275,6 +275,17 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     return { x, y };
   }, [pattern, zoom, panOffset]);
 
+  // Convert canvas coordinates to grid cell without bounds checking (for resize/drag operations)
+  const canvasToCellUnbounded = useCallback((canvasX: number, canvasY: number): { x: number; y: number } | null => {
+    if (!pattern) return null;
+
+    const cellSize = CELL_SIZE * zoom;
+    const x = Math.floor((canvasX - panOffset.x) / cellSize);
+    const y = Math.floor((canvasY - panOffset.y) / cellSize);
+
+    return { x, y };
+  }, [pattern, zoom, panOffset]);
+
   // Draw the canvas
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -1181,7 +1192,7 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       // Check if clicking on a resize handle
       const handle = getResizeHandleAt(x, y);
       if (handle && selection) {
-        const cell = canvasToCell(x, y);
+        const cell = canvasToCellUnbounded(x, y);
         if (cell) {
           startResize(handle, cell);
           setIsDrawing(true);
@@ -1191,7 +1202,7 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
 
       // Check if clicking inside selection bounds (for drag)
       if (selection && isPointInSelectionBounds(x, y)) {
-        const cell = canvasToCell(x, y);
+        const cell = canvasToCellUnbounded(x, y);
         if (cell) {
           startDrag(cell);
           setIsDrawing(true);
@@ -1344,7 +1355,7 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
 
     // Handle select tool dragging/resizing
     if (activeTool === 'select' && isDrawing && selection) {
-      const cell = canvasToCell(x, y);
+      const cell = canvasToCellUnbounded(x, y);
       if (cell) {
         if (selection.isResizing) {
           updateResize(cell, e.shiftKey);
@@ -1556,7 +1567,7 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       </div>
 
       {/* Main row: left ruler + canvas + right ruler */}
-      <div className="flex flex-1 relative">
+      <div className="flex flex-1 relative" data-canvas-viewport>
         {/* Left ruler */}
         <canvas
           ref={leftRulerRef}

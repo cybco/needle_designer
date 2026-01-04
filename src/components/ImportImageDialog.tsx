@@ -34,6 +34,23 @@ interface ProcessedImage {
   preview_base64: string;
 }
 
+// Response from the new Rust-side complete processing with thread matching
+interface ProcessedImageWithThreads {
+  width: number;
+  height: number;
+  colors: Array<{
+    id: string;
+    name: string;
+    rgb: [number, number, number];
+    thread_brand?: string;
+    thread_code?: string;
+  }>;
+  pixels: string[][];
+  preview_base64: string;
+  thread_brand: string;
+  algorithm: string;
+}
+
 type DitherMode = 'none' | 'floyd-steinberg' | 'ordered' | 'atkinson';
 type DimensionUnit = 'stitches' | 'inches' | 'mm';
 
@@ -249,6 +266,10 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
       setLivePreview(null);
       setError(null);
       setPreviewZoom(1);
+      setIsGeneratingPreview(false);
+      setIsProcessing(false);
+      abortPreviewRef.current = false;
+      livePreviewSettingsRef.current = null;
     }
   }, [isOpen]);
 
@@ -316,48 +337,121 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
     setIsProcessing(true);
     setError(null);
 
-    // Capture current values to avoid closure issues
-    const params = {
-      path: imagePath,
-      targetWidth,
-      targetHeight,
-      maxColors,
-      ditherMode,
-      removeBackground,
-      backgroundThreshold,
-    };
-
-    console.log('Processing with params:', params);
-
     // Defer processing to next frame so UI updates immediately
     requestAnimationFrame(() => {
-      invoke<ProcessedImage>('process_image', params)
-        .then((result) => {
-          setProcessedImage(result);
-          setStep('preview');
-        })
-        .catch((err) => {
-          setError(`Failed to process image: ${err}`);
-        })
-        .finally(() => {
-          setIsProcessing(false);
-        });
+      if (matchToThreads) {
+        // Use new Rust-side complete processing with thread matching
+        const params = {
+          path: imagePath,
+          targetWidth,
+          targetHeight,
+          maxColors,
+          ditherMode,
+          removeBackground,
+          backgroundThreshold,
+          threadBrand: selectedThreadBrand,
+          colorMatchAlgorithm,
+        };
+
+        console.log('Processing with thread matching (Rust):', params);
+
+        invoke<ProcessedImageWithThreads>('process_image_with_threads', params)
+          .then((result) => {
+            // Convert to ProcessedImage format for compatibility
+            setProcessedImage({
+              width: result.width,
+              height: result.height,
+              colors: result.colors.map(c => ({
+                id: c.id,
+                name: c.name,
+                rgb: c.rgb,
+                // Store thread info for later use
+                threadBrand: c.thread_brand,
+                threadCode: c.thread_code,
+              })) as ProcessedImage['colors'],
+              pixels: result.pixels,
+              preview_base64: result.preview_base64,
+            });
+            setStep('preview');
+          })
+          .catch((err) => {
+            setError(`Failed to process image: ${err}`);
+          })
+          .finally(() => {
+            setIsProcessing(false);
+          });
+      } else {
+        // Use original Rust processing without thread matching
+        const params = {
+          path: imagePath,
+          targetWidth,
+          targetHeight,
+          maxColors,
+          ditherMode,
+          removeBackground,
+          backgroundThreshold,
+        };
+
+        console.log('Processing without thread matching:', params);
+
+        invoke<ProcessedImage>('process_image', params)
+          .then((result) => {
+            setProcessedImage(result);
+            setStep('preview');
+          })
+          .catch((err) => {
+            setError(`Failed to process image: ${err}`);
+          })
+          .finally(() => {
+            setIsProcessing(false);
+          });
+      }
     });
   };
 
   const handleImport = () => {
-    if (!processedImage) return;
+    if (!processedImage) {
+      console.error('handleImport called but processedImage is null');
+      return;
+    }
 
-    // Map to track old color ID -> new color ID
-    const colorIdMap = new Map<string, string>();
+    console.log('Importing pattern:', {
+      width: processedImage.width,
+      height: processedImage.height,
+      pixelRows: processedImage.pixels?.length,
+      firstRowLength: processedImage.pixels?.[0]?.length,
+      colors: processedImage.colors?.length,
+      samplePixels: processedImage.pixels?.[0]?.slice(0, 5),
+      sampleColorIds: processedImage.colors?.slice(0, 3).map(c => c.id),
+    });
 
-    // Get thread palette for the selected brand
-    const threadLibrary = getThreadsByBrand(selectedThreadBrand);
-    const threadPalette = threadsToPalette(threadLibrary);
+    // Check if colors already have thread info (from Rust-side processing)
+    const hasThreadInfo = processedImage.colors.some(c =>
+      (c as { threadBrand?: string }).threadBrand || (c as { threadCode?: string }).threadCode
+    );
 
-    const colors: Color[] = processedImage.colors.map(c => {
-      if (matchToThreads) {
-        // Use the advanced color matching algorithm
+    let colors: Color[];
+    let finalColorIdMap: Map<string, string>;
+
+    if (hasThreadInfo) {
+      // Colors already have thread info from Rust processing - use directly
+      console.log('Using Rust-side thread matching results');
+      colors = processedImage.colors.map(c => ({
+        id: c.id,
+        name: c.name,
+        rgb: c.rgb,
+        threadBrand: (c as { threadBrand?: string }).threadBrand,
+        threadCode: (c as { threadCode?: string }).threadCode,
+      }));
+      finalColorIdMap = new Map(colors.map(c => [c.id, c.id]));
+    } else if (matchToThreads) {
+      // Need to do JavaScript-side thread matching (fallback for old process_image command)
+      console.log('Using JavaScript-side thread matching');
+      const colorIdMap = new Map<string, string>();
+      const threadLibrary = getThreadsByBrand(selectedThreadBrand);
+      const threadPalette = threadsToPalette(threadLibrary);
+
+      colors = processedImage.colors.map(c => {
         const match = findClosestColor(c.rgb, threadPalette, colorMatchAlgorithm);
         if (match) {
           const matchedThread = threadLibrary.find(t => `${t.brand}-${t.code}` === match.colorId);
@@ -374,57 +468,90 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
             };
           }
         }
-      }
 
-      // Fallback: use original color
-      colorIdMap.set(c.id, c.id);
-      return {
+        // Fallback: use original color
+        colorIdMap.set(c.id, c.id);
+        return {
+          id: c.id,
+          name: c.name,
+          rgb: c.rgb,
+        };
+      });
+
+      // Deduplicate colors (same thread code might be matched multiple times)
+      const uniqueColors: Color[] = [];
+      const seenCodes = new Set<string>();
+      finalColorIdMap = new Map<string, string>();
+
+      for (const [oldId, newId] of colorIdMap.entries()) {
+        const color = colors.find(c => c.id === newId);
+        if (color) {
+          const key = color.threadCode || color.id;
+          if (!seenCodes.has(key)) {
+            seenCodes.add(key);
+            uniqueColors.push(color);
+          }
+          const existingColor = uniqueColors.find(c => (c.threadCode || c.id) === key);
+          if (existingColor) {
+            finalColorIdMap.set(oldId, existingColor.id);
+          }
+        }
+      }
+      colors = uniqueColors;
+    } else {
+      // No thread matching - use original colors
+      console.log('No thread matching');
+      colors = processedImage.colors.map(c => ({
         id: c.id,
         name: c.name,
         rgb: c.rgb,
-      };
-    });
-
-    // Deduplicate colors (same DMC code might be matched multiple times)
-    const uniqueColors: Color[] = [];
-    const seenCodes = new Set<string>();
-    const finalColorIdMap = new Map<string, string>();
-
-    for (const [oldId, newId] of colorIdMap.entries()) {
-      const color = colors.find(c => c.id === newId);
-      if (color) {
-        const key = color.threadCode || color.id;
-        if (!seenCodes.has(key)) {
-          seenCodes.add(key);
-          uniqueColors.push(color);
-        }
-        // Map to the first occurrence of this color
-        const existingColor = uniqueColors.find(c => (c.threadCode || c.id) === key);
-        if (existingColor) {
-          finalColorIdMap.set(oldId, existingColor.id);
-        }
-      }
+      }));
+      finalColorIdMap = new Map(colors.map(c => [c.id, c.id]));
     }
+
+    console.log('Color mapping:', {
+      hasThreadInfo,
+      finalColorIdMapSize: finalColorIdMap.size,
+      mapEntries: Array.from(finalColorIdMap.entries()).slice(0, 5),
+    });
 
     // Convert pixel data to stitches with remapped color IDs
     const stitches: Stitch[] = [];
+    let emptyPixels = 0;
+    let mappedPixels = 0;
+    let unmappedPixels = 0;
     for (let y = 0; y < processedImage.pixels.length; y++) {
       for (let x = 0; x < processedImage.pixels[y].length; x++) {
         const oldColorId = processedImage.pixels[y][x];
         if (oldColorId) {
           const newColorId = finalColorIdMap.get(oldColorId) || oldColorId;
+          if (finalColorIdMap.has(oldColorId)) {
+            mappedPixels++;
+          } else {
+            unmappedPixels++;
+          }
           stitches.push({ x, y, colorId: newColorId, completed: false });
+        } else {
+          emptyPixels++;
         }
       }
     }
 
+    console.log('Stitch creation:', {
+      stitches: stitches.length,
+      colors: colors.length,
+      emptyPixels,
+      mappedPixels,
+      unmappedPixels,
+    });
+
     // Import based on mode
     if (importMode === 'add-layer' && pattern) {
       // Import as a new layer in the existing pattern
-      importAsLayer(patternName, uniqueColors, stitches);
+      importAsLayer(patternName, colors, stitches);
     } else {
       // Create new pattern (or replace existing)
-      importPattern(patternName, processedImage.width, processedImage.height, meshCount, uniqueColors, stitches);
+      importPattern(patternName, processedImage.width, processedImage.height, meshCount, colors, stitches);
     }
 
     onClose();
