@@ -1281,7 +1281,7 @@ function App() {
               {hasUnsavedChanges ? ' *' : ''} - {pattern.canvas.width} x {pattern.canvas.height}
             </span>
           )}
-          <span className="text-sm text-gray-400">v1.1.0</span>
+          <span className="text-sm text-gray-400">v1.1.1</span>
           {/* Window Controls */}
           <div className="flex items-center gap-1 ml-4" data-window-controls style={{ WebkitAppRegion: 'no-drag', appRegion: 'no-drag' } as React.CSSProperties}>
             <button
