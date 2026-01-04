@@ -176,7 +176,7 @@ interface PatternState {
   updateDrag: (point: { x: number; y: number }) => void;
   endDrag: () => void;
   startResize: (handle: ResizeHandle, point: { x: number; y: number }) => void;
-  updateResize: (point: { x: number; y: number }) => void;
+  updateResize: (point: { x: number; y: number }, shiftKey?: boolean) => void;
   endResize: () => void;
   getLayerBounds: (layerId: string) => { x: number; y: number; width: number; height: number } | null;
 
@@ -1442,7 +1442,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
     });
   },
 
-  updateResize: (point) => {
+  updateResize: (point, shiftKey = false) => {
     const { selection } = get();
     if (!selection || !selection.isResizing || !selection.dragStart || !selection.originalBounds || !selection.resizeHandle) return;
 
@@ -1451,6 +1451,8 @@ export const usePatternStore = create<PatternState>((set, get) => {
 
     let newBounds = { ...selection.originalBounds };
     const handle = selection.resizeHandle;
+    const originalAspectRatio = selection.originalBounds.width / selection.originalBounds.height;
+    const maintainAspect = !shiftKey;
 
     // Update bounds based on which handle is being dragged
     if (handle.includes('n')) {
@@ -1468,9 +1470,44 @@ export const usePatternStore = create<PatternState>((set, get) => {
       newBounds.width = selection.originalBounds.width + deltaX;
     }
 
-    // Ensure minimum size
+    // Ensure minimum size first
     newBounds.width = Math.max(1, newBounds.width);
     newBounds.height = Math.max(1, newBounds.height);
+
+    // Maintain aspect ratio unless Shift is pressed
+    if (maintainAspect) {
+      if (handle === 'n' || handle === 's') {
+        // Vertical only - adjust width to match, keeping centered
+        const adjustedWidth = Math.round(newBounds.height * originalAspectRatio);
+        const widthDiff = adjustedWidth - selection.originalBounds.width;
+        newBounds.width = Math.max(1, adjustedWidth);
+        newBounds.x = selection.originalBounds.x - Math.round(widthDiff / 2);
+      } else if (handle === 'e' || handle === 'w') {
+        // Horizontal only - adjust height to match, keeping centered
+        const adjustedHeight = Math.round(newBounds.width / originalAspectRatio);
+        const heightDiff = adjustedHeight - selection.originalBounds.height;
+        newBounds.height = Math.max(1, adjustedHeight);
+        newBounds.y = selection.originalBounds.y - Math.round(heightDiff / 2);
+      } else {
+        // Corner handle - use the larger delta to determine size
+        const widthFromHeight = Math.round(newBounds.height * originalAspectRatio);
+        const heightFromWidth = Math.round(newBounds.width / originalAspectRatio);
+
+        if (Math.abs(deltaX) > Math.abs(deltaY)) {
+          // Width is primary
+          newBounds.height = Math.max(1, heightFromWidth);
+          if (handle.includes('n')) {
+            newBounds.y = selection.originalBounds.y + selection.originalBounds.height - newBounds.height;
+          }
+        } else {
+          // Height is primary
+          newBounds.width = Math.max(1, widthFromHeight);
+          if (handle.includes('w')) {
+            newBounds.x = selection.originalBounds.x + selection.originalBounds.width - newBounds.width;
+          }
+        }
+      }
+    }
 
     set({
       selection: {

@@ -1347,7 +1347,7 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       const cell = canvasToCell(x, y);
       if (cell) {
         if (selection.isResizing) {
-          updateResize(cell);
+          updateResize(cell, e.shiftKey);
         } else if (selection.isDragging) {
           updateDrag(cell);
         }

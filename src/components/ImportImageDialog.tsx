@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { usePatternStore, Color, Stitch } from '../stores/patternStore';
+import { useConfigStore } from '../stores/configStore';
 import { ColorMatchAlgorithm, findClosestColor } from '../utils/colorMatching';
 import {
   ThreadBrand,
@@ -34,9 +35,11 @@ interface ProcessedImage {
 }
 
 type DitherMode = 'none' | 'floyd-steinberg' | 'ordered' | 'atkinson';
+type DimensionUnit = 'stitches' | 'inches' | 'mm';
 
 export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
   const { pattern, importPattern, importAsLayer } = usePatternStore();
+  const { autoGeneratePreview, setAutoGeneratePreview } = useConfigStore();
 
   const [step, setStep] = useState<'select' | 'configure' | 'preview'>('select');
   const [importMode, setImportMode] = useState<'new-pattern' | 'add-layer'>('add-layer');
@@ -53,6 +56,7 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
   const [targetWidth, setTargetWidth] = useState(100);
   const [targetHeight, setTargetHeight] = useState(100);
   const [maintainAspectRatio, setMaintainAspectRatio] = useState(true);
+  const [dimensionUnit, setDimensionUnit] = useState<DimensionUnit>('stitches');
   const [maxColors, setMaxColors] = useState(16);
   const [ditherMode, setDitherMode] = useState<DitherMode>('floyd-steinberg');
   const [removeBackground, setRemoveBackground] = useState(false);
@@ -63,36 +67,141 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
   const [selectedThreadBrand, setSelectedThreadBrand] = useState<ThreadBrand>('DMC');
   const [colorMatchAlgorithm, setColorMatchAlgorithm] = useState<ColorMatchAlgorithm>('ciede2000');
 
+  // Unit conversion helpers
+  const stitchesToUnit = useCallback((stitches: number, unit: DimensionUnit): number => {
+    switch (unit) {
+      case 'inches':
+        return stitches / meshCount;
+      case 'mm':
+        return (stitches / meshCount) * 25.4;
+      default:
+        return stitches;
+    }
+  }, [meshCount]);
+
+  const unitToStitches = useCallback((value: number, unit: DimensionUnit): number => {
+    switch (unit) {
+      case 'inches':
+        return Math.round(value * meshCount);
+      case 'mm':
+        return Math.round((value / 25.4) * meshCount);
+      default:
+        return Math.round(value);
+    }
+  }, [meshCount]);
+
+  // Local string state for dimension inputs (allows free typing)
+  const [widthInput, setWidthInput] = useState('');
+  const [heightInput, setHeightInput] = useState('');
+
+  // Format value for display based on unit
+  const formatForDisplay = useCallback((stitches: number, unit: DimensionUnit): string => {
+    if (unit === 'stitches') {
+      return String(stitches);
+    }
+    const converted = stitchesToUnit(stitches, unit);
+    // Show more precision for small values
+    return converted < 10 ? converted.toFixed(2) : converted.toFixed(1);
+  }, [stitchesToUnit]);
+
+  // Sync input strings when stitches or unit changes externally
+  useEffect(() => {
+    setWidthInput(formatForDisplay(targetWidth, dimensionUnit));
+  }, [targetWidth, dimensionUnit, formatForDisplay]);
+
+  useEffect(() => {
+    setHeightInput(formatForDisplay(targetHeight, dimensionUnit));
+  }, [targetHeight, dimensionUnit, formatForDisplay]);
+
+  // Commit width value (on blur or enter)
+  const commitWidth = useCallback(() => {
+    const value = parseFloat(widthInput);
+    if (!isNaN(value) && value > 0) {
+      const newStitches = unitToStitches(value, dimensionUnit);
+      setTargetWidth(Math.max(1, newStitches));
+    } else {
+      // Reset to current value if invalid
+      setWidthInput(formatForDisplay(targetWidth, dimensionUnit));
+    }
+  }, [widthInput, dimensionUnit, unitToStitches, targetWidth, formatForDisplay]);
+
+  // Commit height value (on blur or enter)
+  const commitHeight = useCallback(() => {
+    const value = parseFloat(heightInput);
+    if (!isNaN(value) && value > 0) {
+      setMaintainAspectRatio(false);
+      const newStitches = unitToStitches(value, dimensionUnit);
+      setTargetHeight(Math.max(1, newStitches));
+    } else {
+      // Reset to current value if invalid
+      setHeightInput(formatForDisplay(targetHeight, dimensionUnit));
+    }
+  }, [heightInput, dimensionUnit, unitToStitches, targetHeight, formatForDisplay]);
+
+  // Handle unit change - keep the stitch values, just change display
+  const handleUnitChange = (newUnit: DimensionUnit) => {
+    setDimensionUnit(newUnit);
+  };
+
   // Debounce timer for live preview
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Flag to abort preview generation when processing starts
+  const abortPreviewRef = useRef(false);
+  // Track settings used for current live preview
+  const livePreviewSettingsRef = useRef<{
+    width: number;
+    height: number;
+    maxColors: number;
+    ditherMode: DitherMode;
+    removeBackground: boolean;
+    backgroundThreshold: number;
+  } | null>(null);
 
   // Generate live preview with debouncing
   const generateLivePreview = useCallback(async () => {
     if (!imagePath || step !== 'configure') return;
 
+    // Reset abort flag when starting new preview
+    abortPreviewRef.current = false;
     setIsGeneratingPreview(true);
-    try {
-      // Use reasonable preview size - larger for better quality
-      const maxPreviewSize = 200;
-      const previewScale = Math.min(1, maxPreviewSize / Math.max(targetWidth, targetHeight));
-      const previewWidth = Math.max(20, Math.round(targetWidth * previewScale));
-      const previewHeight = Math.max(20, Math.round(targetHeight * previewScale));
 
-      const result = await invoke<ProcessedImage>('process_image', {
+    // Capture current settings for this preview
+    const currentSettings = {
+      width: targetWidth,
+      height: targetHeight,
+      maxColors,
+      ditherMode,
+      removeBackground,
+      backgroundThreshold,
+    };
+
+    try {
+      // Use actual target dimensions for accurate preview (including dithering)
+      const previewParams = {
         path: imagePath,
-        targetWidth: previewWidth,
-        targetHeight: previewHeight,
+        targetWidth,
+        targetHeight,
         maxColors,
         ditherMode,
         removeBackground,
         backgroundThreshold,
-      });
+      };
+      console.log('Preview with params:', previewParams);
+      const result = await invoke<ProcessedImage>('process_image', previewParams);
 
-      setLivePreview(result);
+      // Only set result if not aborted
+      if (!abortPreviewRef.current) {
+        setLivePreview(result);
+        livePreviewSettingsRef.current = currentSettings;
+      }
     } catch (err) {
-      console.error('Preview generation failed:', err);
+      if (!abortPreviewRef.current) {
+        console.error('Preview generation failed:', err);
+      }
     } finally {
-      setIsGeneratingPreview(false);
+      if (!abortPreviewRef.current) {
+        setIsGeneratingPreview(false);
+      }
     }
   }, [imagePath, step, targetWidth, targetHeight, maxColors, ditherMode, removeBackground, backgroundThreshold]);
 
@@ -100,10 +209,16 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
   useEffect(() => {
     if (step !== 'configure' || !imagePath) return;
 
+    // Mark current preview as stale immediately when settings change
+    livePreviewSettingsRef.current = null;
+
     // Clear existing timer
     if (previewTimerRef.current) {
       clearTimeout(previewTimerRef.current);
     }
+
+    // Only auto-generate if enabled
+    if (!autoGeneratePreview) return;
 
     // Set new timer for debounced preview
     previewTimerRef.current = setTimeout(() => {
@@ -115,7 +230,14 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
         clearTimeout(previewTimerRef.current);
       }
     };
-  }, [generateLivePreview, step, imagePath, targetWidth, targetHeight, maxColors, ditherMode, removeBackground, backgroundThreshold]);
+  }, [generateLivePreview, step, imagePath, targetWidth, targetHeight, maxColors, ditherMode, removeBackground, backgroundThreshold, autoGeneratePreview]);
+
+  // Check if current preview matches current settings
+  const isPreviewStale = !livePreviewSettingsRef.current ||
+    livePreviewSettingsRef.current.width !== targetWidth ||
+    livePreviewSettingsRef.current.height !== targetHeight ||
+    livePreviewSettingsRef.current.maxColors !== maxColors ||
+    livePreviewSettingsRef.current.ditherMode !== ditherMode;
 
   // Reset when dialog opens/closes
   useEffect(() => {
@@ -179,30 +301,48 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
     }
   };
 
-  const handleProcessImage = async () => {
-    if (!imagePath) return;
+  const handleProcessImage = () => {
+    if (!imagePath || isProcessing) return;
+
+    // Cancel any pending preview generation
+    if (previewTimerRef.current) {
+      clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
+    // Abort any in-flight preview request
+    abortPreviewRef.current = true;
+    setIsGeneratingPreview(false);
 
     setIsProcessing(true);
     setError(null);
 
-    try {
-      const result = await invoke<ProcessedImage>('process_image', {
-        path: imagePath,
-        targetWidth,
-        targetHeight,
-        maxColors,
-        ditherMode,
-        removeBackground,
-        backgroundThreshold,
-      });
+    // Capture current values to avoid closure issues
+    const params = {
+      path: imagePath,
+      targetWidth,
+      targetHeight,
+      maxColors,
+      ditherMode,
+      removeBackground,
+      backgroundThreshold,
+    };
 
-      setProcessedImage(result);
-      setStep('preview');
-    } catch (err) {
-      setError(`Failed to process image: ${err}`);
-    } finally {
-      setIsProcessing(false);
-    }
+    console.log('Processing with params:', params);
+
+    // Defer processing to next frame so UI updates immediately
+    requestAnimationFrame(() => {
+      invoke<ProcessedImage>('process_image', params)
+        .then((result) => {
+          setProcessedImage(result);
+          setStep('preview');
+        })
+        .catch((err) => {
+          setError(`Failed to process image: ${err}`);
+        })
+        .finally(() => {
+          setIsProcessing(false);
+        });
+    });
   };
 
   const handleImport = () => {
@@ -348,9 +488,9 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
           {step === 'configure' && imageInfo && (
             <div className="grid grid-cols-2 gap-6">
               {/* Preview Area */}
-              <div className="flex flex-col h-full">
+              <div className="flex flex-col">
                 {/* Live Preview */}
-                <div className="flex-1 flex flex-col min-h-0">
+                <div className="flex flex-col">
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="font-medium text-gray-700 flex items-center gap-2">
                       Preview
@@ -413,7 +553,13 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
                       </div>
                     ) : (
                       <div className="w-full h-full flex items-center justify-center">
-                        <span className="text-gray-400 text-sm">Generating preview...</span>
+                        <span className="text-gray-400 text-sm">
+                          {isGeneratingPreview
+                            ? 'Generating preview...'
+                            : autoGeneratePreview
+                              ? 'Preview will generate automatically'
+                              : 'Click "Generate Preview" below'}
+                        </span>
                       </div>
                     )}
                   </div>
@@ -444,6 +590,32 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
                     </div>
                   </div>
                 )}
+
+                {/* Auto-generate Preview Control */}
+                <div className="mt-3 pt-3 border-t border-gray-200">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={autoGeneratePreview}
+                      onChange={(e) => setAutoGeneratePreview(e.target.checked)}
+                      className="rounded"
+                    />
+                    Auto-generate preview
+                  </label>
+                  {!autoGeneratePreview && (
+                    <button
+                      onClick={generateLivePreview}
+                      disabled={isGeneratingPreview}
+                      className={`mt-2 w-full px-3 py-2 text-sm rounded-md transition-colors disabled:opacity-50 ${
+                        isPreviewStale && !isGeneratingPreview
+                          ? 'bg-green-600 hover:bg-green-700 text-white'
+                          : 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                      }`}
+                    >
+                      {isGeneratingPreview ? 'Generating...' : 'Generate Preview'}
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Settings */}
@@ -460,33 +632,55 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
                   />
                 </div>
 
+                {/* Unit Selector */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Dimension Unit
+                  </label>
+                  <div className="flex gap-1">
+                    {(['stitches', 'inches', 'mm'] as DimensionUnit[]).map((unit) => (
+                      <button
+                        key={unit}
+                        type="button"
+                        onClick={() => handleUnitChange(unit)}
+                        className={`flex-1 py-1.5 px-2 text-sm rounded border transition-colors ${
+                          dimensionUnit === unit
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        {unit === 'stitches' ? 'Stitches' : unit === 'inches' ? 'Inches' : 'mm'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Width (stitches)
+                      Width {dimensionUnit !== 'stitches' && <span className="text-gray-400 font-normal">({targetWidth} st)</span>}
                     </label>
                     <input
-                      type="number"
-                      value={targetWidth}
-                      onChange={(e) => setTargetWidth(Math.max(1, parseInt(e.target.value) || 1))}
-                      min={1}
-                      max={500}
+                      type="text"
+                      inputMode="decimal"
+                      value={widthInput}
+                      onChange={(e) => setWidthInput(e.target.value)}
+                      onBlur={commitWidth}
+                      onKeyDown={(e) => e.key === 'Enter' && commitWidth()}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Height (stitches)
+                      Height {dimensionUnit !== 'stitches' && <span className="text-gray-400 font-normal">({targetHeight} st)</span>}
                     </label>
                     <input
-                      type="number"
-                      value={targetHeight}
-                      onChange={(e) => {
-                        setMaintainAspectRatio(false);
-                        setTargetHeight(Math.max(1, parseInt(e.target.value) || 1));
-                      }}
-                      min={1}
-                      max={500}
+                      type="text"
+                      inputMode="decimal"
+                      value={heightInput}
+                      onChange={(e) => setHeightInput(e.target.value)}
+                      onBlur={commitHeight}
+                      onKeyDown={(e) => e.key === 'Enter' && commitHeight()}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
@@ -667,9 +861,17 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
                   )}
                 </div>
 
-                <div className="bg-gray-50 rounded p-3 text-sm text-gray-600">
-                  <p><strong>Canvas size:</strong> {(targetWidth / meshCount).toFixed(1)}" x {(targetHeight / meshCount).toFixed(1)}"</p>
-                  <p><strong>Total stitches:</strong> {(targetWidth * targetHeight).toLocaleString()}</p>
+                <div className="bg-blue-50 border border-blue-200 rounded p-3 text-sm">
+                  <p className="font-semibold text-blue-800">
+                    Pattern: {targetWidth} x {targetHeight} stitches
+                  </p>
+                  <p className="text-blue-700">
+                    Physical size: {(targetWidth / meshCount).toFixed(1)}" x {(targetHeight / meshCount).toFixed(1)}" ({(targetWidth / meshCount * 25.4).toFixed(0)} x {(targetHeight / meshCount * 25.4).toFixed(0)} mm)
+                  </p>
+                  <p className="text-blue-600 text-xs mt-1">
+                    Total: {(targetWidth * targetHeight).toLocaleString()} stitches
+                    {imageInfo && ` (original image: ${imageInfo.width} x ${imageInfo.height} px)`}
+                  </p>
                 </div>
               </div>
             </div>
@@ -753,10 +955,10 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
             {step === 'configure' && (
               <button
                 onClick={handleProcessImage}
-                disabled={isProcessing}
+                disabled={isProcessing || isGeneratingPreview}
                 className="px-4 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors disabled:opacity-50"
               >
-                {isProcessing ? 'Processing...' : 'Process Image'}
+                {isProcessing ? 'Processing...' : isGeneratingPreview ? 'Preview updating...' : 'Process Image'}
               </button>
             )}
             {step === 'preview' && (
