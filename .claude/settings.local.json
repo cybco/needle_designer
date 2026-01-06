@@ -23,7 +23,9 @@
       "Bash(git pull:*)",
       "Bash(find:*)",
       "Bash(mkdir:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(git checkout:*)",
+      "Bash(git push:*)"
     ]
   }
 }

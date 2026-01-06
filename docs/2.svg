@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="100%" height="100%" viewBox="0 0 35 28" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:serif="http://www.serif.com/" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linejoin:round;stroke-miterlimit:2;">
+    <g transform="matrix(1,0,0,1,-41.588,-0.482179)">
+        <g id="Artboard1" transform="matrix(0.231488,0,0,0.216771,-162.578,-102.703)">
+            <rect x="881.975" y="476.008" width="150.437" height="127.983" style="fill:none;"/>
+            <clipPath id="_clip1">
+                <rect x="881.975" y="476.008" width="150.437" height="127.983"/>
+            </clipPath>
+            <g clip-path="url(#_clip1)">
+                <g transform="matrix(4.31988,0,0,4.61316,734.75,440.438)">
+                    <use xlink:href="#_Image2" x="0" y="0" width="124px" height="98px"/>
+                </g>
+                <g transform="matrix(3.64965,0,0,4.61316,741.788,473.784)">
+                    <rect x="51.568" y="0.103" width="12.73" height="28.931" style="fill:rgb(101,2,2);"/>
+                </g>
+                <g transform="matrix(4.31988,0,0,4.16183,702.32,480.381)">
+                    <rect x="40.999" y="7.046" width="36.568" height="12.112" style="fill:rgb(101,2,2);"/>
+                </g>
+                <g transform="matrix(0.843562,0,0,0.457202,864.68,501.7)">
+                    <rect x="40.999" y="7.046" width="36.568" height="12.112" style="fill:rgb(88,0,0);"/>
+                </g>
+                <g transform="matrix(2.21061,0,0,0.457202,835.002,501.245)">
+                    <rect x="40.999" y="7.046" width="36.568" height="12.112" style="fill:rgb(88,0,0);"/>
+                </g>
+                <g transform="matrix(2.21973,0,0,0.457202,834.935,552.267)">
+                    <rect x="40.999" y="7.046" width="36.568" height="12.112" style="fill:rgb(88,0,0);"/>
+                </g>
+                <g transform="matrix(0.843562,0,0,0.457202,864.68,554.317)">
+                    <rect x="40.999" y="7.046" width="36.568" height="12.112" style="fill:rgb(88,0,0);"/>
+                </g>
+                <g transform="matrix(0.0164855,0.900659,-0.428054,0.008935,932.331,524.791)">
+                    <rect x="40.999" y="7.046" width="36.568" height="12.112" style="fill:rgb(88,0,0);"/>
+                </g>
+                <g transform="matrix(0.0164855,0.900659,-0.428054,0.008935,983.522,523.424)">
+                    <rect x="40.999" y="7.046" width="36.568" height="12.112" style="fill:rgb(88,0,0);"/>
+                </g>
+                <g transform="matrix(1.738e-16,3.03106,-0.428136,2.79956e-17,934.163,270.374)">
+                    <rect x="40.999" y="7.046" width="36.568" height="12.112" style="fill:rgb(88,0,0);"/>
+                </g>
+            </g>
+        </g>
+    </g>
+    <defs>
+        <image id="_Image2" width="124px" height="98px" xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHwAAABiCAYAAACSwrdVAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAMNSURBVHhe7dxhbuIwEAVgwy1yC8T9z0Aj7rBFvcPW7J+tdv0UezwTo4S890n+k1Yzo7wUKmNxej7zMw2Sc05fX19pmib8UdU8z+lyueDlTTDMf8YLvXLOiysCa0TreGC/NX2xRrSOB/br7Xv6/PwV+gt/PB54KaWU0jRNzScM3W43vJTS3zqvxDr/6fv7dzPwnHO63+94ucpqiGo3rMXzEqr5S+fz+ZystTc4n7X2Buez1khjq8nuKXAyZuDzPOOlpto/EzWe97MU+GdI85fMwOVYFDgZBU5GgZNR4GQUOJmT9WlZ7dOg1paid3doadP/er3ipZQ7Pg1Cmr8UDnwLI2/YFvYwf/1RkENS4GQUOBkFTkaBk1HgZBQ4GQVORoGT6Qoczz4vbSWOhv3W9MUa0Toe2G9NX6wRrZN6tlZre7ae7cGI2lEd6xgu0vylcOAtnr3fPPjcNdL8pa6XdC88V22tvcH5rLU3OF+x8Jfl2BQ4GTPw1vvBEs/7U3rBuWuk+Utm4HIsCpyMAiejwMkocDIKnMzp4+PW3FpNb3bueonm/8fcS/foaYhqN2wLDPP7HjV5ewqcjAIno8DJKHAyCpyMAiejwMkocDLhwPGc9M+KwBrROh7Yb01frBGt44H9evvq+9LB0efX96WDo8+v70vfAM5nrZHGVpPdU+BkzMDf7dw10vwlM3A5FgVORoGTUeBkFDgZBU7GPKZcO4bb2lL07g4tbfpHz10jzV8KB76FkTdsC3uYv/4oyCEpcDIKnIwCJ6PAyShwMgqcjAIno8DJdAWOZ5+XthJHw35r+mKNaB0P7LemL9aI1kk9W6u1PVvP9mBE7aiOdQwXaf5SOPAWz95vHnzuGmn+UtdLuheeq7bW3uB81tobnK9Y+MtybAqcjBl46/1gief9Kb3g3DXS/CUzcDkWBU5GgZNR4GQUOBkFTkbfl/4fhvnNvXSPnoaodsO2wDC/71GTt6fAyShwMgqcjAIno8DJKHAyCpyMAicTDhzPSf+sCKwRreOB/db0xRrROh7Yr7fvH7rquo7j5qVWAAAAAElFTkSuQmCC"/>
+    </defs>
+</svg>
