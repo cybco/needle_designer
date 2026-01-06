@@ -4,7 +4,6 @@ import {
   SymbolAssignmentMode,
   getNextAvailableSymbol,
   assignMissingSymbols,
-  PATTERN_SYMBOLS,
 } from '../utils/symbolAssignment';
 
 // Generate a unique file ID for session history tracking
@@ -208,21 +207,8 @@ interface PatternState {
   setProgressShadingOpacity: (opacity: number) => void;
 }
 
-// Default colors for new patterns (with auto-assigned symbols)
-const defaultColors: Color[] = [
-  { id: 'color-1', name: 'Red', rgb: [220, 53, 69], symbol: PATTERN_SYMBOLS.all[0] },
-  { id: 'color-2', name: 'Blue', rgb: [0, 123, 255], symbol: PATTERN_SYMBOLS.all[1] },
-  { id: 'color-3', name: 'Green', rgb: [40, 167, 69], symbol: PATTERN_SYMBOLS.all[2] },
-  { id: 'color-4', name: 'Yellow', rgb: [255, 193, 7], symbol: PATTERN_SYMBOLS.all[3] },
-  { id: 'color-5', name: 'Purple', rgb: [111, 66, 193], symbol: PATTERN_SYMBOLS.all[4] },
-  { id: 'color-6', name: 'Orange', rgb: [253, 126, 20], symbol: PATTERN_SYMBOLS.all[5] },
-  { id: 'color-7', name: 'Pink', rgb: [232, 62, 140], symbol: PATTERN_SYMBOLS.all[6] },
-  { id: 'color-8', name: 'Teal', rgb: [32, 201, 151], symbol: PATTERN_SYMBOLS.all[7] },
-  { id: 'color-9', name: 'Brown', rgb: [121, 85, 72], symbol: PATTERN_SYMBOLS.all[8] },
-  { id: 'color-10', name: 'Black', rgb: [33, 37, 41], symbol: PATTERN_SYMBOLS.all[9] },
-  { id: 'color-11', name: 'White', rgb: [248, 249, 250], symbol: PATTERN_SYMBOLS.all[10] },
-  { id: 'color-12', name: 'Gray', rgb: [108, 117, 125], symbol: PATTERN_SYMBOLS.all[11] },
-];
+// Default colors for new patterns (empty - user adds colors as needed)
+const defaultColors: Color[] = [];
 
 // Helper function to calculate layer bounding box
 function calculateLayerBounds(stitches: Stitch[]): { x: number; y: number; width: number; height: number } | null {
@@ -406,7 +392,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
           stitches: [],
         }],
       },
-      selectedColorId: 'color-1',
+      selectedColorId: null,
       activeLayerId: layerId,
       selection: null,
       zoom: 1,
