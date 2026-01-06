@@ -23,7 +23,31 @@
       "Bash(git pull:*)",
       "Bash(find:*)",
       "Bash(mkdir:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(source \"$HOME/.cargo/env\")",
+      "Bash(xcode-select:*)",
+      "Bash(xcodebuild -version:*)",
+      "Bash(rustup target add:*)",
+      "Bash(open:*)",
+      "Bash(xcrun simctl:*)",
+      "Bash(cargo build:*)",
+      "Bash(/Users/mikemalone/.cargo/bin/cargo build --target aarch64-apple-ios-sim --release)",
+      "Bash(/Users/mikemalone/.cargo/bin/cargo build:*)",
+      "Bash(export PATH=\"$HOME/.cargo/bin:$PATH\")",
+      "Bash(/Users/mikemalone/.cargo/bin/cargo check:*)",
+      "Bash(export PATH=\"$HOME/.cargo/bin:/usr/bin:/bin:$PATH\")",
+      "Bash(export PATH=\"$HOME/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH\")",
+      "Bash(tee:*)",
+      "Bash(echo:*)",
+      "Bash(export PATH=\"$HOME/.nvm/versions/node/v20.19.4/bin:$HOME/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH\":*)",
+      "Bash(source ~/.zshrc)",
+      "Bash(PATH=\"$HOME/.nvm/versions/node/v20.19.4/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\" npm run tauri ios build)",
+      "Bash(PATH=\"$HOME/.nvm/versions/node/v20.19.4/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\" npm run tauri ios dev:*)",
+      "Bash(/Users/mikemalone/.nvm/versions/node/v20.19.4/bin/npm run tauri ios dev -- \"iPad Pro 11-inch \\(M4\\)\")",
+      "Bash(PATH=\"$HOME/.nvm/versions/node/v20.19.4/bin:$PATH\" npx tsc:*)",
+      "Bash(lsof:*)",
+      "Bash(xargs kill -9)",
+      "Bash(PATH=\"$HOME/.nvm/versions/node/v20.19.4/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\" npm run tauri ios dev -- \"16 Pro Max\")"
     ]
   }
 }

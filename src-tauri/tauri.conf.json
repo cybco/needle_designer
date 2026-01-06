@@ -23,6 +23,10 @@
       "nsis": {
         "installMode": "currentUser"
       }
+    },
+    "iOS": {
+      "developmentTeam": "2R9XF345CU",
+      "minimumSystemVersion": "13.0"
     }
   },
   "app": {

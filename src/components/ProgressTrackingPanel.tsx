@@ -303,9 +303,9 @@ export function ProgressTrackingPanel() {
   }
 
   return (
-    <div className="w-64 bg-white border-l border-gray-300 flex flex-col h-full">
-      {/* Header */}
-      <div className="p-3 border-b border-gray-200 bg-green-50">
+    <div className="w-64 bg-white border-l border-gray-300 flex flex-col h-full overflow-hidden">
+      {/* Header - fixed at top */}
+      <div className="p-3 border-b border-gray-200 bg-green-50 shrink-0">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold text-green-800">Progress Tracking</h2>
           <button
@@ -318,7 +318,12 @@ export function ProgressTrackingPanel() {
         <p className="text-xs text-green-600 mt-1">Click on stitches to mark complete</p>
       </div>
 
-      {/* Canvas Navigation - Moved to top */}
+      {/* Main scrollable area - everything else scrolls */}
+      <div
+        className="flex-1 overflow-y-auto min-h-0"
+        style={{ WebkitOverflowScrolling: 'touch' }}
+      >
+      {/* Canvas Navigation */}
       <div className="p-3 border-b border-gray-200">
         <div className="flex items-center gap-2">
           <button
@@ -390,11 +395,25 @@ export function ProgressTrackingPanel() {
                 />
               </div>
             </div>
-            <div className="text-sm text-gray-600">
+            <div className="text-sm text-gray-600 mb-2">
               <span className="font-medium text-gray-800">{progressData.completedStitches.toLocaleString()}</span>
               {' / '}
               <span>{progressData.totalStitches.toLocaleString()}</span>
               {' stitches'}
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-center text-xs">
+              <div className="bg-gray-100 rounded p-2">
+                <div className="text-gray-500">Remaining</div>
+                <div className="font-medium text-gray-800">
+                  {(progressData.totalStitches - progressData.completedStitches).toLocaleString()}
+                </div>
+              </div>
+              <div className="bg-gray-100 rounded p-2">
+                <div className="text-gray-500">Colors</div>
+                <div className="font-medium text-gray-800">
+                  {progressData.colorProgress.length}
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -511,8 +530,7 @@ export function ProgressTrackingPanel() {
         )}
       </div>
 
-      {/* Progress by Color - Collapsible */}
-      <div className="flex-1 overflow-y-auto flex flex-col">
+        {/* Progress by Color - Collapsible */}
         <div className="border-b border-gray-200">
           <button
             onClick={() => setShowColorProgress(!showColorProgress)}
@@ -537,177 +555,159 @@ export function ProgressTrackingPanel() {
               </svg>
             </div>
           </button>
-        </div>
 
-        {showColorProgress && (
-          <div className="flex-1 overflow-y-auto p-3">
-            {progressData.colorProgress.length === 0 ? (
-              <p className="text-sm text-gray-500">No stitches in pattern</p>
-            ) : (
-              <div className="space-y-3">
-                {progressData.colorProgress.map(cp => (
-                  <div key={cp.colorId} className="text-sm">
-                    <div className="flex items-center gap-2 mb-1">
-                      <div
-                        className="w-4 h-4 rounded border border-gray-300 shrink-0"
-                        style={{ backgroundColor: `rgb(${cp.rgb[0]}, ${cp.rgb[1]}, ${cp.rgb[2]})` }}
-                      />
-                      <span className="text-gray-700 truncate flex-1" title={cp.colorName}>
-                        {cp.colorName}
-                      </span>
-                      <span className="text-gray-500 text-xs">
-                        {cp.percentage.toFixed(0)}%
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div
-                        className="h-2 rounded-full transition-all duration-300"
-                        style={{
-                          width: `${cp.percentage}%`,
-                          backgroundColor: `rgb(${cp.rgb[0]}, ${cp.rgb[1]}, ${cp.rgb[2]})`,
-                        }}
-                      />
-                    </div>
-                    <div className="text-xs text-gray-500 mt-0.5">
-                      {cp.completedStitches.toLocaleString()} / {cp.totalStitches.toLocaleString()}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Settings - Collapsible */}
-      <div className="border-b border-gray-200 bg-gray-50">
-        <button
-          onClick={() => setShowSettings(!showSettings)}
-          className="w-full p-3 flex items-center justify-between hover:bg-gray-100 transition-colors"
-        >
-          <h3 className="text-sm font-medium text-gray-700">Settings</h3>
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={`text-gray-500 transition-transform ${showSettings ? 'rotate-180' : ''}`}
-          >
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-        </button>
-
-        {showSettings && (
-          <div className="px-3 pb-3 space-y-3">
-            {/* Completed Shading Color */}
-            <div>
-              <span className="text-xs text-gray-500 block mb-1">Completed Shading</span>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-600 w-12">Color</span>
-                <div className="relative flex-1">
-                  <button
-                    onClick={() => setShowColorPicker(!showColorPicker)}
-                    className="w-full h-7 rounded border border-gray-300 flex items-center px-2 gap-2"
-                  >
-                    <div
-                      className="w-5 h-5 rounded border border-gray-400"
-                      style={{
-                        backgroundColor: `rgb(${progressShadingColor[0]}, ${progressShadingColor[1]}, ${progressShadingColor[2]})`,
-                      }}
-                    />
-                    <span className="text-xs text-gray-600">
-                      {rgbToHex(progressShadingColor[0], progressShadingColor[1], progressShadingColor[2]).toUpperCase()}
-                    </span>
-                  </button>
-                  {showColorPicker && (
-                    <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-gray-300 p-2 z-20">
-                      <input
-                        type="color"
-                        value={rgbToHex(progressShadingColor[0], progressShadingColor[1], progressShadingColor[2])}
-                        onChange={(e) => {
-                          setProgressShadingColor(hexToRgb(e.target.value));
-                          setShowColorPicker(false);
-                        }}
-                        className="w-full h-8 cursor-pointer"
-                      />
-                      <div className="flex gap-1 mt-2 justify-center">
-                        {presetColors.map((color, i) => (
-                          <button
-                            key={i}
-                            onClick={() => {
-                              setProgressShadingColor(color);
-                              setShowColorPicker(false);
-                            }}
-                            className="w-7 h-7 rounded border border-gray-300 hover:scale-110 transition-transform"
-                            style={{ backgroundColor: `rgb(${color[0]}, ${color[1]}, ${color[2]})` }}
-                            title={`RGB(${color[0]}, ${color[1]}, ${color[2]})`}
-                          />
-                        ))}
+          {showColorProgress && (
+            <div className="p-3">
+              {progressData.colorProgress.length === 0 ? (
+                <p className="text-sm text-gray-500">No stitches in pattern</p>
+              ) : (
+                <div className="space-y-3">
+                  {progressData.colorProgress.map(cp => (
+                    <div key={cp.colorId} className="text-sm">
+                      <div className="flex items-center gap-2 mb-1">
+                        <div
+                          className="w-4 h-4 rounded border border-gray-300 shrink-0"
+                          style={{ backgroundColor: `rgb(${cp.rgb[0]}, ${cp.rgb[1]}, ${cp.rgb[2]})` }}
+                        />
+                        <span className="text-gray-700 truncate flex-1" title={cp.colorName}>
+                          {cp.colorName}
+                        </span>
+                        <span className="text-gray-500 text-xs">
+                          {cp.percentage.toFixed(0)}%
+                        </span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className="h-2 rounded-full transition-all duration-300"
+                          style={{
+                            width: `${cp.percentage}%`,
+                            backgroundColor: `rgb(${cp.rgb[0]}, ${cp.rgb[1]}, ${cp.rgb[2]})`,
+                          }}
+                        />
+                      </div>
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        {cp.completedStitches.toLocaleString()} / {cp.totalStitches.toLocaleString()}
                       </div>
                     </div>
-                  )}
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Settings - Collapsible */}
+        <div className="border-b border-gray-200 bg-gray-50">
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className="w-full p-3 flex items-center justify-between hover:bg-gray-100 transition-colors"
+          >
+            <h3 className="text-sm font-medium text-gray-700">Settings</h3>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={`text-gray-500 transition-transform ${showSettings ? 'rotate-180' : ''}`}
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+
+          {showSettings && (
+            <div className="px-3 pb-3 space-y-3">
+              {/* Completed Shading Color */}
+              <div>
+                <span className="text-xs text-gray-500 block mb-1">Completed Shading</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-600 w-12">Color</span>
+                  <div className="relative flex-1">
+                    <button
+                      onClick={() => setShowColorPicker(!showColorPicker)}
+                      className="w-full h-7 rounded border border-gray-300 flex items-center px-2 gap-2"
+                    >
+                      <div
+                        className="w-5 h-5 rounded border border-gray-400"
+                        style={{
+                          backgroundColor: `rgb(${progressShadingColor[0]}, ${progressShadingColor[1]}, ${progressShadingColor[2]})`,
+                        }}
+                      />
+                      <span className="text-xs text-gray-600">
+                        {rgbToHex(progressShadingColor[0], progressShadingColor[1], progressShadingColor[2]).toUpperCase()}
+                      </span>
+                    </button>
+                    {showColorPicker && (
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-lg border border-gray-300 p-2 z-20">
+                        <input
+                          type="color"
+                          value={rgbToHex(progressShadingColor[0], progressShadingColor[1], progressShadingColor[2])}
+                          onChange={(e) => {
+                            setProgressShadingColor(hexToRgb(e.target.value));
+                            setShowColorPicker(false);
+                          }}
+                          className="w-full h-8 cursor-pointer"
+                        />
+                        <div className="flex gap-1 mt-2 justify-center">
+                          {presetColors.map((color, i) => (
+                            <button
+                              key={i}
+                              onClick={() => {
+                                setProgressShadingColor(color);
+                                setShowColorPicker(false);
+                              }}
+                              className="w-7 h-7 rounded border border-gray-300 hover:scale-110 transition-transform"
+                              style={{ backgroundColor: `rgb(${color[0]}, ${color[1]}, ${color[2]})` }}
+                              title={`RGB(${color[0]}, ${color[1]}, ${color[2]})`}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Opacity Slider */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-600 w-12">Opacity</span>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={progressShadingOpacity}
-                onChange={(e) => setProgressShadingOpacity(parseInt(e.target.value, 10))}
-                className="flex-1 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-              />
-              <span className="text-xs text-gray-600 w-8 text-right">{progressShadingOpacity}%</span>
-            </div>
+              {/* Opacity Slider */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-600 w-12">Opacity</span>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={progressShadingOpacity}
+                  onChange={(e) => setProgressShadingOpacity(parseInt(e.target.value, 10))}
+                  className="flex-1 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                />
+                <span className="text-xs text-gray-600 w-8 text-right">{progressShadingOpacity}%</span>
+              </div>
 
-            {/* ETA Update Interval */}
-            <div className="flex items-center gap-2 pt-2 border-t border-gray-200">
-              <span className="text-xs text-gray-600 flex-1">ETA Update</span>
-              <select
-                value={etaUpdateSeconds}
-                onChange={(e) => setEtaUpdateSeconds(parseInt(e.target.value, 10))}
-                className="px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                <option value="0">Realtime</option>
-                <option value="5">5 sec</option>
-                <option value="10">10 sec</option>
-                <option value="30">30 sec</option>
-                <option value="60">1 min</option>
-                <option value="300">5 min</option>
-                <option value="600">10 min</option>
-                <option value="900">15 min</option>
-              </select>
+              {/* ETA Update Interval */}
+              <div className="flex items-center gap-2 pt-2 border-t border-gray-200">
+                <span className="text-xs text-gray-600 flex-1">ETA Update</span>
+                <select
+                  value={etaUpdateSeconds}
+                  onChange={(e) => setEtaUpdateSeconds(parseInt(e.target.value, 10))}
+                  className="px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="0">Realtime</option>
+                  <option value="5">5 sec</option>
+                  <option value="10">10 sec</option>
+                  <option value="30">30 sec</option>
+                  <option value="60">1 min</option>
+                  <option value="300">5 min</option>
+                  <option value="600">10 min</option>
+                  <option value="900">15 min</option>
+                </select>
+              </div>
             </div>
-          </div>
-        )}
-      </div>
-
-      {/* Footer with quick stats */}
-      <div className="p-3 border-t border-gray-200 bg-gray-50">
-        <div className="grid grid-cols-2 gap-2 text-center text-xs">
-          <div>
-            <div className="text-gray-500">Remaining</div>
-            <div className="font-medium text-gray-800">
-              {(progressData.totalStitches - progressData.completedStitches).toLocaleString()}
-            </div>
-          </div>
-          <div>
-            <div className="text-gray-500">Colors</div>
-            <div className="font-medium text-gray-800">
-              {progressData.colorProgress.length}
-            </div>
-          </div>
+          )}
         </div>
-      </div>
+      </div>{/* End of main scrollable area */}
 
       {/* Session History Modal */}
       {showHistoryModal && (
