@@ -1,5 +1,6 @@
 import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
 import { usePatternStore, ResizeHandle, Color } from '../stores/patternStore';
+import { drawMeshOverlay, drawEmptyCanvasBackground, drawCrossStitch } from '../utils/canvasMeshPattern';
 
 const CELL_SIZE = 20; // Base cell size in pixels
 const RULER_SIZE = 24; // Width/height of rulers in pixels
@@ -34,6 +35,8 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     panOffset,
     showGrid,
     gridDivisions,
+    canvasStyle,
+    canvasColor,
     rulerUnit,
     selection,
     overlayImages,
@@ -306,9 +309,15 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     ctx.save();
     ctx.translate(panOffset.x, panOffset.y);
 
-    // Draw canvas background (white)
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, width * cellSize, height * cellSize);
+    // Draw canvas background
+    if (canvasStyle === 'canvas') {
+      // Draw woven canvas background (grey threads with holes)
+      drawEmptyCanvasBackground(ctx, width, height, cellSize, canvasColor, pattern.canvas.meshCount);
+    } else {
+      // Simple white background
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, width * cellSize, height * cellSize);
+    }
 
     // Draw all visible layers (bottom to top)
     for (const layer of pattern.layers) {
@@ -322,22 +331,31 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
           const isCompleted = isProgressMode && stitch.completed;
 
           // Draw the stitch background
+          let stitchColor: string;
           if (isCompleted) {
             // Blend stitch color with shading color based on opacity
             const blendFactor = progressShadingOpacity / 100;
             const blendedR = Math.round(rgb[0] * (1 - blendFactor) + progressShadingColor[0] * blendFactor);
             const blendedG = Math.round(rgb[1] * (1 - blendFactor) + progressShadingColor[1] * blendFactor);
             const blendedB = Math.round(rgb[2] * (1 - blendFactor) + progressShadingColor[2] * blendFactor);
-            ctx.fillStyle = `rgb(${blendedR}, ${blendedG}, ${blendedB})`;
+            stitchColor = `rgb(${blendedR}, ${blendedG}, ${blendedB})`;
           } else {
-            ctx.fillStyle = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+            stitchColor = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
           }
-          ctx.fillRect(
-            stitch.x * cellSize,
-            stitch.y * cellSize,
-            cellSize,
-            cellSize
-          );
+
+          if (canvasStyle === 'canvas') {
+            // Draw cross-shaped stitch (covers thread areas, leaves corners empty)
+            drawCrossStitch(ctx, stitch.x, stitch.y, cellSize, stitchColor, pattern.canvas.meshCount);
+          } else {
+            // Simple square fill for grid mode
+            ctx.fillStyle = stitchColor;
+            ctx.fillRect(
+              stitch.x * cellSize,
+              stitch.y * cellSize,
+              cellSize,
+              cellSize
+            );
+          }
 
           // Draw symbol if enabled and cell is large enough
           if (showSymbols && colorObj.symbol && cellSize >= 12) {
@@ -373,31 +391,59 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       }
     }
 
-    // Draw grid
+    // Draw mesh overlay ON TOP of stitches (so stitch color shows through transparent centers)
+    if (canvasStyle === 'canvas') {
+      drawMeshOverlay(ctx, width, height, cellSize, canvasColor, pattern.canvas.meshCount);
+    }
+
+    // Draw grid lines
     if (showGrid) {
-      ctx.strokeStyle = '#e0e0e0';
-      ctx.lineWidth = 1;
+      if (canvasStyle === 'canvas') {
+        // For canvas mode, only draw grid division lines (mesh is already drawn)
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+        ctx.lineWidth = 1;
 
-      // Vertical lines
-      for (let x = 0; x <= width; x++) {
-        const lineWidth = x % gridDivisions === 0 ? 2 : 1;
-        ctx.lineWidth = lineWidth;
-        ctx.strokeStyle = x % gridDivisions === 0 ? '#999' : '#e0e0e0';
-        ctx.beginPath();
-        ctx.moveTo(x * cellSize, 0);
-        ctx.lineTo(x * cellSize, height * cellSize);
-        ctx.stroke();
-      }
+        // Vertical division lines
+        for (let x = gridDivisions; x < width; x += gridDivisions) {
+          ctx.beginPath();
+          ctx.moveTo(x * cellSize, 0);
+          ctx.lineTo(x * cellSize, height * cellSize);
+          ctx.stroke();
+        }
 
-      // Horizontal lines
-      for (let y = 0; y <= height; y++) {
-        const lineWidth = y % gridDivisions === 0 ? 2 : 1;
-        ctx.lineWidth = lineWidth;
-        ctx.strokeStyle = y % gridDivisions === 0 ? '#999' : '#e0e0e0';
-        ctx.beginPath();
-        ctx.moveTo(0, y * cellSize);
-        ctx.lineTo(width * cellSize, y * cellSize);
-        ctx.stroke();
+        // Horizontal division lines
+        for (let y = gridDivisions; y < height; y += gridDivisions) {
+          ctx.beginPath();
+          ctx.moveTo(0, y * cellSize);
+          ctx.lineTo(width * cellSize, y * cellSize);
+          ctx.stroke();
+        }
+      } else {
+        // Draw simple grid lines for grid mode
+        ctx.strokeStyle = '#e0e0e0';
+        ctx.lineWidth = 1;
+
+        // Vertical lines
+        for (let x = 0; x <= width; x++) {
+          const lineWidth = x % gridDivisions === 0 ? 2 : 1;
+          ctx.lineWidth = lineWidth;
+          ctx.strokeStyle = x % gridDivisions === 0 ? '#999' : '#e0e0e0';
+          ctx.beginPath();
+          ctx.moveTo(x * cellSize, 0);
+          ctx.lineTo(x * cellSize, height * cellSize);
+          ctx.stroke();
+        }
+
+        // Horizontal lines
+        for (let y = 0; y <= height; y++) {
+          const lineWidth = y % gridDivisions === 0 ? 2 : 1;
+          ctx.lineWidth = lineWidth;
+          ctx.strokeStyle = y % gridDivisions === 0 ? '#999' : '#e0e0e0';
+          ctx.beginPath();
+          ctx.moveTo(0, y * cellSize);
+          ctx.lineTo(width * cellSize, y * cellSize);
+          ctx.stroke();
+        }
       }
     }
 
@@ -626,7 +672,7 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     }
 
     ctx.restore();
-  }, [pattern, zoom, panOffset, showGrid, gridDivisions, getColor, getColorObject, getContrastColor, showSymbols, showCenterMarker, selection, shapeStart, shapeEnd, selectedColorId, activeTool, overlayImages, overlayImageElements, selectedOverlayId, isProgressMode, progressShadingColor, progressShadingOpacity]);
+  }, [pattern, zoom, panOffset, showGrid, gridDivisions, canvasStyle, canvasColor, getColor, getColorObject, getContrastColor, showSymbols, showCenterMarker, selection, shapeStart, shapeEnd, selectedColorId, activeTool, overlayImages, overlayImageElements, selectedOverlayId, isProgressMode, progressShadingColor, progressShadingOpacity]);
 
   // Draw horizontal ruler (top)
   const drawTopRuler = useCallback(() => {

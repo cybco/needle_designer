@@ -105,6 +105,8 @@ interface PatternState {
   panOffset: { x: number; y: number };
   showGrid: boolean;
   gridDivisions: number;
+  canvasStyle: 'grid' | 'canvas';
+  canvasColor: string;
   rulerUnit: RulerUnit;
 
   // Layer state
@@ -145,6 +147,8 @@ interface PatternState {
   setPanOffset: (offset: { x: number; y: number }) => void;
   toggleGrid: () => void;
   setGridDivisions: (divisions: number) => void;
+  setCanvasStyle: (style: 'grid' | 'canvas') => void;
+  setCanvasColor: (color: string) => void;
   setRulerUnit: (unit: RulerUnit) => void;
   setCurrentFilePath: (path: string | null) => void;
   markSaved: () => void;
@@ -331,6 +335,8 @@ export const usePatternStore = create<PatternState>((set, get) => {
   panOffset: { x: 0, y: 0 },
   showGrid: true,
   gridDivisions: 10,
+  canvasStyle: 'grid' as 'grid' | 'canvas',
+  canvasColor: 'white',
   rulerUnit: 'inches' as RulerUnit,
   activeLayerId: null,
   selection: null,
@@ -913,6 +919,14 @@ export const usePatternStore = create<PatternState>((set, get) => {
 
   setGridDivisions: (divisions) => {
     set({ gridDivisions: divisions });
+  },
+
+  setCanvasStyle: (style) => {
+    set({ canvasStyle: style });
+  },
+
+  setCanvasColor: (color) => {
+    set({ canvasColor: color });
   },
 
   setRulerUnit: (unit) => {

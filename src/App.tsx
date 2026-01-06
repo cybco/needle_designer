@@ -258,6 +258,8 @@ function App() {
     setProgressShadingColor,
     setProgressShadingOpacity,
     regenerateFileId,
+    canvasStyle,
+    setCanvasStyle,
   } = usePatternStore();
 
   const { currentSessionId, endSession } = useSessionHistoryStore();
@@ -346,6 +348,13 @@ function App() {
         }
       }
 
+      // Canvas style toggle: Ctrl+Shift+C
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        setCanvasStyle(canvasStyle === 'grid' ? 'canvas' : 'grid');
+        return;
+      }
+
       switch (e.key.toLowerCase()) {
         case 'p':
           setTool('pencil');
@@ -424,7 +433,7 @@ function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [zoom, activeTool, pattern, selection, activeLayerId, preferences.confirmLayerDelete, setTool, setZoom, removeLayer, clearSelection]);
+  }, [zoom, activeTool, pattern, selection, activeLayerId, preferences.confirmLayerDelete, setTool, setZoom, removeLayer, clearSelection, canvasStyle, setCanvasStyle]);
 
   // Add file to recent files list
   const addToRecentFiles = useCallback((filePath: string) => {
@@ -1453,6 +1462,14 @@ function App() {
               <span>
                 {pattern.layers.reduce((acc, l) => acc + l.stitches.length, 0)} stitches
               </span>
+              <span>|</span>
+              <button
+                onClick={() => setCanvasStyle(canvasStyle === 'grid' ? 'canvas' : 'grid')}
+                className="hover:text-blue-600 hover:underline cursor-pointer"
+                title="Toggle canvas style (Ctrl+Shift+C)"
+              >
+                View: {canvasStyle === 'grid' ? 'Grid' : 'Canvas'}
+              </button>
             </>
           )}
         </div>
