@@ -1,6 +1,7 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use image::{DynamicImage, GenericImageView, ImageFormat, Rgba, RgbaImage};
 use resvg;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 use screenshots::Screen;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -254,6 +255,140 @@ fn load_image(path: String) -> Result<ImageInfo, String> {
     })
 }
 
+/// Load image from base64 data URL (for iOS file input fallback)
+#[tauri::command]
+fn load_image_from_base64(data: String, filename: String) -> Result<ImageInfo, String> {
+    // Parse data URL: data:image/png;base64,xxxxx
+    let base64_data = if data.starts_with("data:") {
+        data.split(',')
+            .nth(1)
+            .ok_or("Invalid data URL format")?
+    } else {
+        &data
+    };
+
+    // Decode base64
+    let image_bytes = STANDARD
+        .decode(base64_data)
+        .map_err(|e| format!("Failed to decode base64: {}", e))?;
+
+    // Check if SVG by filename
+    let img = if filename.to_lowercase().ends_with(".svg") {
+        // For SVG, we need to render it
+        let svg_string = String::from_utf8(image_bytes)
+            .map_err(|e| format!("Failed to parse SVG as UTF-8: {}", e))?;
+
+        let tree = resvg::usvg::Tree::from_str(&svg_string, &resvg::usvg::Options::default())
+            .map_err(|e| format!("Failed to parse SVG: {}", e))?;
+
+        let size = tree.size();
+        let width = size.width().ceil() as u32;
+        let height = size.height().ceil() as u32;
+
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)
+            .ok_or("Failed to create pixmap")?;
+
+        resvg::render(&tree, resvg::tiny_skia::Transform::default(), &mut pixmap.as_mut());
+
+        let rgba_data = pixmap.data();
+        let mut img = RgbaImage::new(width, height);
+        for y in 0..height {
+            for x in 0..width {
+                let idx = ((y * width + x) * 4) as usize;
+                let a = rgba_data[idx + 3];
+                let (r, g, b) = if a > 0 {
+                    let a_f = a as f32 / 255.0;
+                    (
+                        (rgba_data[idx] as f32 / a_f).min(255.0) as u8,
+                        (rgba_data[idx + 1] as f32 / a_f).min(255.0) as u8,
+                        (rgba_data[idx + 2] as f32 / a_f).min(255.0) as u8,
+                    )
+                } else {
+                    (0, 0, 0)
+                };
+                img.put_pixel(x, y, Rgba([r, g, b, a]));
+            }
+        }
+        DynamicImage::ImageRgba8(img)
+    } else {
+        // Load regular image from bytes
+        image::load_from_memory(&image_bytes)
+            .map_err(|e| format!("Failed to load image from bytes: {}", e))?
+    };
+
+    let (width, height) = img.dimensions();
+
+    // Create a preview (max 400px)
+    let preview = create_preview(&img, 400);
+    let preview_base64 = image_to_base64(&preview)?;
+
+    Ok(ImageInfo {
+        width,
+        height,
+        preview_base64,
+    })
+}
+
+/// Load image from either path or base64 data URL
+fn load_image_from_path_or_data(path: &str) -> Result<DynamicImage, String> {
+    // Check if this is a data URL (base64)
+    if path.starts_with("data:") {
+        let base64_data = path.split(',')
+            .nth(1)
+            .ok_or("Invalid data URL format")?;
+
+        let image_bytes = STANDARD
+            .decode(base64_data)
+            .map_err(|e| format!("Failed to decode base64: {}", e))?;
+
+        // Check MIME type for SVG
+        if path.contains("image/svg") {
+            let svg_string = String::from_utf8(image_bytes)
+                .map_err(|e| format!("Failed to parse SVG as UTF-8: {}", e))?;
+
+            let tree = resvg::usvg::Tree::from_str(&svg_string, &resvg::usvg::Options::default())
+                .map_err(|e| format!("Failed to parse SVG: {}", e))?;
+
+            let size = tree.size();
+            let width = size.width().ceil() as u32;
+            let height = size.height().ceil() as u32;
+
+            let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)
+                .ok_or("Failed to create pixmap")?;
+
+            resvg::render(&tree, resvg::tiny_skia::Transform::default(), &mut pixmap.as_mut());
+
+            let rgba_data = pixmap.data();
+            let mut img = RgbaImage::new(width, height);
+            for y in 0..height {
+                for x in 0..width {
+                    let idx = ((y * width + x) * 4) as usize;
+                    let a = rgba_data[idx + 3];
+                    let (r, g, b) = if a > 0 {
+                        let a_f = a as f32 / 255.0;
+                        (
+                            (rgba_data[idx] as f32 / a_f).min(255.0) as u8,
+                            (rgba_data[idx + 1] as f32 / a_f).min(255.0) as u8,
+                            (rgba_data[idx + 2] as f32 / a_f).min(255.0) as u8,
+                        )
+                    } else {
+                        (0, 0, 0)
+                    };
+                    img.put_pixel(x, y, Rgba([r, g, b, a]));
+                }
+            }
+            Ok(DynamicImage::ImageRgba8(img))
+        } else {
+            image::load_from_memory(&image_bytes)
+                .map_err(|e| format!("Failed to load image from bytes: {}", e))
+        }
+    } else if is_svg_file(path) {
+        load_svg(path)
+    } else {
+        image::open(path).map_err(|e| format!("Failed to open image: {}", e))
+    }
+}
+
 #[tauri::command]
 fn process_image(
     path: String,
@@ -264,11 +399,7 @@ fn process_image(
     remove_background: bool,
     background_threshold: u8,
 ) -> Result<ProcessedImage, String> {
-    let img = if is_svg_file(&path) {
-        load_svg(&path)?
-    } else {
-        image::open(&path).map_err(|e| format!("Failed to open image: {}", e))?
-    };
+    let img = load_image_from_path_or_data(&path)?;
 
     // Resize to target dimensions
     let resized = img.resize_exact(
@@ -367,12 +498,8 @@ fn process_image_with_threads(
     thread_brand: String,
     color_match_algorithm: String,
 ) -> Result<ProcessedImageWithThreads, String> {
-    // Load image
-    let img = if is_svg_file(&path) {
-        load_svg(&path)?
-    } else {
-        image::open(&path).map_err(|e| format!("Failed to open image: {}", e))?
-    };
+    // Load image (supports both file paths and base64 data URLs)
+    let img = load_image_from_path_or_data(&path)?;
 
     // Resize to target dimensions
     let resized = img.resize_exact(
@@ -534,20 +661,105 @@ fn find_closest_color_idx(pixel: &Rgba<u8>, palette: &[Rgba<u8>]) -> usize {
 }
 
 #[tauri::command]
-fn save_project(path: String, project: NdpFile) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(&project)
-        .map_err(|e| format!("Failed to serialize project: {}", e))?;
+fn list_ndp_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    // Get the app's document directory
+    let doc_dir = app.path()
+        .document_dir()
+        .map_err(|e| format!("Failed to get documents directory: {}", e))?;
 
-    fs::write(&path, json)
-        .map_err(|e| format!("Failed to write file: {}", e))?;
+    // List all .ndp files in the directory
+    let mut files = Vec::new();
 
-    Ok(())
+    if let Ok(entries) = fs::read_dir(&doc_dir) {
+        for entry in entries.flatten() {
+            if let Some(name) = entry.file_name().to_str() {
+                if name.to_lowercase().ends_with(".ndp") {
+                    // Return filename without extension
+                    let name_without_ext = name.trim_end_matches(".ndp").trim_end_matches(".NDP");
+                    files.push(name_without_ext.to_string());
+                }
+            }
+        }
+    }
+
+    Ok(files)
 }
 
 #[tauri::command]
-fn open_project(path: String) -> Result<NdpFile, String> {
-    let contents = fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
+fn save_project(app: tauri::AppHandle, path: String, project: NdpFile) -> Result<String, String> {
+    let json = serde_json::to_string_pretty(&project)
+        .map_err(|e| format!("Failed to serialize project: {}", e))?;
+
+    // On iOS/mobile, save to the app's documents directory
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    let save_path = {
+        // Get the app's document directory
+        let doc_dir = app.path()
+            .document_dir()
+            .map_err(|e| format!("Failed to get documents directory: {}", e))?;
+
+        // Create the directory if it doesn't exist
+        fs::create_dir_all(&doc_dir)
+            .map_err(|e| format!("Failed to create documents directory: {}", e))?;
+
+        // Extract filename from path or use the provided path as filename
+        let filename = std::path::Path::new(&path)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| {
+                // Generate a filename from project name
+                let name = project.metadata.name.replace(' ', "_");
+                format!("{}.ndp", name)
+            });
+
+        doc_dir.join(filename)
+    };
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    let save_path = {
+        let _ = &app; // Suppress unused warning on desktop
+        std::path::PathBuf::from(&path)
+    };
+
+    fs::write(&save_path, json)
+        .map_err(|e| format!("Failed to write file: {} (path: {:?})", e, save_path))?;
+
+    // Return the actual path where the file was saved
+    Ok(save_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn open_project(app: tauri::AppHandle, path: String) -> Result<NdpFile, String> {
+    // On iOS/mobile, check the app's documents directory first
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    let read_path = {
+        let path_obj = std::path::Path::new(&path);
+
+        // If the path exists as-is, use it
+        if path_obj.exists() {
+            std::path::PathBuf::from(&path)
+        } else {
+            // Try in documents directory
+            let doc_dir = app.path()
+                .document_dir()
+                .map_err(|e| format!("Failed to get documents directory: {}", e))?;
+
+            let filename = path_obj.file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or(path.clone());
+
+            doc_dir.join(filename)
+        }
+    };
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    let read_path = {
+        let _ = &app; // Suppress unused warning on desktop
+        std::path::PathBuf::from(&path)
+    };
+
+    let contents = fs::read_to_string(&read_path)
+        .map_err(|e| format!("Failed to read file: {} (path: {:?})", e, read_path))?;
 
     let project: NdpFile = serde_json::from_str(&contents)
         .map_err(|e| format!("Failed to parse project file: {}", e))?;
@@ -575,6 +787,7 @@ fn get_save_path(default_name: String) -> Result<Option<String>, String> {
 }
 
 /// Get the color of the pixel at the specified screen coordinates
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[tauri::command]
 fn pick_screen_color(x: i32, y: i32) -> Result<[u8; 3], String> {
     // Get all screens
@@ -612,6 +825,7 @@ fn pick_screen_color(x: i32, y: i32) -> Result<[u8; 3], String> {
 }
 
 /// Capture the primary screen and return as base64 encoded PNG
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 #[tauri::command]
 fn capture_screen() -> Result<String, String> {
     let screens = Screen::all().map_err(|e| format!("Failed to get screens: {}", e))?;
@@ -1023,16 +1237,25 @@ fn load_session_history(app: tauri::AppHandle) -> Result<Option<String>, String>
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        builder = builder.plugin(tauri_plugin_window_state::Builder::new().build());
+    }
+
+    builder
         .setup(|app| {
-            // Ensure decorations are disabled (custom titlebar)
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.set_decorations(false);
+            // Ensure decorations are disabled (custom titlebar) - desktop only
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_decorations(false);
+                }
             }
             Ok(())
         })
@@ -1040,12 +1263,16 @@ pub fn run() {
             greet,
             create_new_project,
             load_image,
+            load_image_from_base64,
             process_image,
             process_image_with_threads,
+            list_ndp_files,
             save_project,
             open_project,
             save_pdf,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
             pick_screen_color,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
             capture_screen,
             save_session_history,
             load_session_history

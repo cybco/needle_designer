@@ -16,6 +16,7 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    host: true, // Listen on all network interfaces for mobile dev
     watch: {
       // Tell vite to ignore watching `src-tauri`
       ignored: ['**/src-tauri/**'],

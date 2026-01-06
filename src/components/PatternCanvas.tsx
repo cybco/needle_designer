@@ -18,6 +18,12 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
   const topRulerRef = useRef<HTMLCanvasElement>(null);
   const leftRulerRef = useRef<HTMLCanvasElement>(null);
   const rightRulerRef = useRef<HTMLCanvasElement>(null);
+  // Debounce ref for progress mode toggles (prevents double-toggle from touch + synthetic mouse)
+  const lastToggleRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  // Track if we're in a touch interaction to completely block mouse events
+  const isTouchActiveRef = useRef(false);
+  // Progress mode drag state: tracks the target completion state and last cell processed
+  const progressDragRef = useRef<{ targetState: boolean; lastCellX: number; lastCellY: number } | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [lastCell, setLastCell] = useState<{ x: number; y: number } | null>(null);
@@ -60,7 +66,8 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     updateOverlayPosition,
     updateOverlaySize,
     isProgressMode,
-    toggleStitchCompleted,
+    setStitchCompleted,
+    getStitchCompleted,
     progressShadingColor: storeShadingColor,
     progressShadingOpacity: storeShadingOpacity,
   } = usePatternStore();
@@ -1170,6 +1177,15 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     startScrollPos: number;
   } | null>(null);
 
+  // Touch state for mobile panning/pinch-zoom
+  const [touchState, setTouchState] = useState<{
+    isPanning: boolean;
+    lastTouchX: number;
+    lastTouchY: number;
+    initialPinchDistance: number | null;
+    initialZoom: number;
+  } | null>(null);
+
   // Handle scrollbar drag
   useEffect(() => {
     if (!scrollbarDrag) return;
@@ -1284,6 +1300,9 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!pattern) return;
 
+    // Skip mouse events if touch is active (prevents synthetic mouse events on iOS)
+    if (isTouchActiveRef.current) return;
+
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
 
@@ -1297,7 +1316,7 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       return;
     }
 
-    // Progress mode: clicking toggles stitch completion (when not panning)
+    // Progress mode: clicking/dragging toggles stitch completion (when not panning)
     if (isProgressMode) {
       const cellSize = CELL_SIZE * zoom;
       const cellX = Math.floor((x - panOffset.x) / cellSize);
@@ -1305,7 +1324,23 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
 
       // Check if within canvas bounds
       if (cellX >= 0 && cellX < pattern.canvas.width && cellY >= 0 && cellY < pattern.canvas.height) {
-        toggleStitchCompleted(cellX, cellY);
+        // Debounce: prevent double-toggle from touch + synthetic mouse events
+        const now = Date.now();
+        const last = lastToggleRef.current;
+        if (last && last.x === cellX && last.y === cellY && now - last.time < 500) {
+          // Same cell toggled within 500ms, skip
+          return;
+        }
+        lastToggleRef.current = { x: cellX, y: cellY, time: now };
+
+        // Determine target state: toggle the first cell, then apply same state to all dragged cells
+        const currentState = getStitchCompleted(cellX, cellY);
+        const targetState = !currentState;
+
+        // Start drag tracking
+        progressDragRef.current = { targetState, lastCellX: cellX, lastCellY: cellY };
+        setStitchCompleted(cellX, cellY, targetState);
+        setIsDrawing(true);
       }
       return;
     }
@@ -1440,6 +1475,55 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
 
     if (!pattern) return;
 
+    // Handle progress mode dragging
+    if (isProgressMode && isDrawing && progressDragRef.current) {
+      const cellSize = CELL_SIZE * zoom;
+      const cellX = Math.floor((x - panOffset.x) / cellSize);
+      const cellY = Math.floor((y - panOffset.y) / cellSize);
+
+      // Only update if we've moved to a new cell
+      if (cellX !== progressDragRef.current.lastCellX || cellY !== progressDragRef.current.lastCellY) {
+        // Use Bresenham's line algorithm to fill all cells between last and current
+        const x0 = progressDragRef.current.lastCellX;
+        const y0 = progressDragRef.current.lastCellY;
+        const x1 = cellX;
+        const y1 = cellY;
+
+        const dx = Math.abs(x1 - x0);
+        const dy = Math.abs(y1 - y0);
+        const sx = x0 < x1 ? 1 : -1;
+        const sy = y0 < y1 ? 1 : -1;
+        let err = dx - dy;
+        let cx = x0;
+        let cy = y0;
+
+        while (true) {
+          // Set this cell (skip the starting cell since it's already set)
+          if (cx !== x0 || cy !== y0) {
+            if (cx >= 0 && cx < pattern.canvas.width && cy >= 0 && cy < pattern.canvas.height) {
+              setStitchCompleted(cx, cy, progressDragRef.current.targetState);
+            }
+          }
+
+          if (cx === x1 && cy === y1) break;
+
+          const e2 = 2 * err;
+          if (e2 > -dy) {
+            err -= dy;
+            cx += sx;
+          }
+          if (e2 < dx) {
+            err += dx;
+            cy += sy;
+          }
+        }
+
+        progressDragRef.current.lastCellX = cellX;
+        progressDragRef.current.lastCellY = cellY;
+      }
+      return;
+    }
+
     // Handle overlay dragging/resizing
     if (activeTool === 'select' && isDrawing && overlayDragState && selectedOverlayId && selectedOverlay) {
       const cellSize = CELL_SIZE * zoom;
@@ -1567,6 +1651,11 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
   };
 
   const handleMouseUp = () => {
+    // Clear progress drag state
+    if (progressDragRef.current) {
+      progressDragRef.current = null;
+    }
+
     // Clear overlay drag state
     if (overlayDragState) {
       setOverlayDragState(null);
@@ -1714,6 +1803,525 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     setZoom(newZoom);
   };
 
+  // Touch event handlers for mobile panning and pinch-zoom
+  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (!pattern) return;
+
+    // Mark touch as active to block synthetic mouse events
+    isTouchActiveRef.current = true;
+    // Clear the flag after a delay to allow for any lingering synthetic events
+    setTimeout(() => { isTouchActiveRef.current = false; }, 500);
+
+    // Two-finger touch: prepare for pinch-zoom or two-finger pan
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const distance = Math.hypot(
+        touch2.clientX - touch1.clientX,
+        touch2.clientY - touch1.clientY
+      );
+      const centerX = (touch1.clientX + touch2.clientX) / 2;
+      const centerY = (touch1.clientY + touch2.clientY) / 2;
+
+      setTouchState({
+        isPanning: true,
+        lastTouchX: centerX,
+        lastTouchY: centerY,
+        initialPinchDistance: distance,
+        initialZoom: zoom,
+      });
+      return;
+    }
+
+    // Single finger touch
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
+
+      const x = touch.clientX - rect.left;
+      const y = touch.clientY - rect.top;
+
+      // In pan mode, start panning
+      if (activeTool === 'pan') {
+        setTouchState({
+          isPanning: true,
+          lastTouchX: touch.clientX,
+          lastTouchY: touch.clientY,
+          initialPinchDistance: null,
+          initialZoom: zoom,
+        });
+        return;
+      }
+
+      // In progress mode, toggle stitch completion and enable drag
+      if (isProgressMode) {
+        e.preventDefault(); // Prevent synthetic mouse event from firing
+        const cellSize = CELL_SIZE * zoom;
+        const cellX = Math.floor((x - panOffset.x) / cellSize);
+        const cellY = Math.floor((y - panOffset.y) / cellSize);
+
+        if (cellX >= 0 && cellX < pattern.canvas.width && cellY >= 0 && cellY < pattern.canvas.height) {
+          // Debounce: prevent double-toggle from touch + synthetic mouse events
+          const now = Date.now();
+          const last = lastToggleRef.current;
+          if (last && last.x === cellX && last.y === cellY && now - last.time < 500) {
+            // Same cell toggled within 500ms, skip
+            return;
+          }
+          lastToggleRef.current = { x: cellX, y: cellY, time: now };
+
+          // Determine target state: toggle the first cell, then apply same state to all dragged cells
+          const currentState = getStitchCompleted(cellX, cellY);
+          const targetState = !currentState;
+
+          // Start drag tracking
+          progressDragRef.current = { targetState, lastCellX: cellX, lastCellY: cellY };
+          setStitchCompleted(cellX, cellY, targetState);
+          setIsDrawing(true);
+        }
+        return;
+      }
+
+      // Select tool: handle resize handles, dragging, and selection
+      if (activeTool === 'select') {
+        // Check if touching overlay resize handle
+        const overlayHandle = getOverlayResizeHandle(x, y);
+        if (overlayHandle && selectedOverlay) {
+          e.preventDefault();
+          setOverlayDragState({
+            isDragging: false,
+            isResizing: true,
+            resizeHandle: overlayHandle,
+            startX: x,
+            startY: y,
+            startOverlayX: selectedOverlay.x,
+            startOverlayY: selectedOverlay.y,
+            startOverlayWidth: selectedOverlay.width,
+            startOverlayHeight: selectedOverlay.height,
+          });
+          setIsDrawing(true);
+          return;
+        }
+
+        // Check if touching inside selected overlay (for drag)
+        if (selectedOverlay && isPointInSelectedOverlay(x, y)) {
+          e.preventDefault();
+          setOverlayDragState({
+            isDragging: true,
+            isResizing: false,
+            resizeHandle: null,
+            startX: x,
+            startY: y,
+            startOverlayX: selectedOverlay.x,
+            startOverlayY: selectedOverlay.y,
+            startOverlayWidth: selectedOverlay.width,
+            startOverlayHeight: selectedOverlay.height,
+          });
+          setIsDrawing(true);
+          return;
+        }
+
+        // Check if touching any overlay (to select it)
+        const clickedOverlayId = getOverlayAtPoint(x, y);
+        if (clickedOverlayId) {
+          selectOverlay(clickedOverlayId);
+          return;
+        }
+
+        // If overlay is selected and we touch elsewhere, deselect it
+        if (selectedOverlayId) {
+          deselectOverlay();
+        }
+
+        // Check if touching a layer resize handle
+        const handle = getResizeHandleAt(x, y);
+        if (handle && selection) {
+          e.preventDefault();
+          const cell = canvasToCellUnbounded(x, y);
+          if (cell) {
+            startResize(handle, cell);
+            setIsDrawing(true);
+          }
+          return;
+        }
+
+        // Check if touching inside selection bounds (for drag)
+        if (selection && isPointInSelectionBounds(x, y)) {
+          e.preventDefault();
+          const cell = canvasToCellUnbounded(x, y);
+          if (cell) {
+            startDrag(cell);
+            setIsDrawing(true);
+          }
+          return;
+        }
+
+        // If there's a floating selection and we touched outside, commit it
+        if (selection?.floatingStitches) {
+          commitFloatingSelection();
+          return;
+        }
+
+        // Check if touching a layer's stitches (to select that layer)
+        const cell = canvasToCell(x, y);
+        if (cell) {
+          for (let i = pattern.layers.length - 1; i >= 0; i--) {
+            const layer = pattern.layers[i];
+            if (!layer.visible || layer.locked) continue;
+
+            const stitch = layer.stitches.find(s => s.x === cell.x && s.y === cell.y);
+            if (stitch) {
+              selectLayerForTransform(layer.id);
+              return;
+            }
+          }
+        }
+
+        // Touched on empty space - clear selection
+        clearSelection();
+        return;
+      }
+
+      // Drawing tools - handle pencil, eraser, fill, and shape tools
+      if (selectedColorId || activeTool === 'eraser') {
+        const cell = canvasToCell(x, y);
+        if (cell) {
+          if (activeTool === 'pencil' && selectedColorId) {
+            setStitch(cell.x, cell.y, selectedColorId);
+            setIsDrawing(true);
+            setLastCell(cell);
+            return;
+          } else if (activeTool === 'eraser') {
+            removeStitch(cell.x, cell.y);
+            setIsDrawing(true);
+            setLastCell(cell);
+            return;
+          } else if (activeTool === 'fill' && selectedColorId) {
+            fillArea(cell.x, cell.y, selectedColorId);
+            return;
+          } else if ((activeTool === 'line' || activeTool === 'rectangle' || activeTool === 'ellipse') && selectedColorId) {
+            // Start shape drawing
+            setShapeStart(cell);
+            setShapeEnd(cell);
+            setIsDrawing(true);
+            return;
+          }
+        }
+      }
+
+      // Default: start single-finger pan (for navigating when no drawing tool action)
+      setTouchState({
+        isPanning: true,
+        lastTouchX: touch.clientX,
+        lastTouchY: touch.clientY,
+        initialPinchDistance: null,
+        initialZoom: zoom,
+      });
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (!pattern) return;
+
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    // Two-finger: pinch-zoom and pan
+    if (e.touches.length === 2 && touchState && touchState.initialPinchDistance !== null) {
+      e.preventDefault();
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const distance = Math.hypot(
+        touch2.clientX - touch1.clientX,
+        touch2.clientY - touch1.clientY
+      );
+      const centerX = (touch1.clientX + touch2.clientX) / 2;
+      const centerY = (touch1.clientY + touch2.clientY) / 2;
+
+      // Calculate zoom change
+      const scale = distance / touchState.initialPinchDistance;
+      const newZoom = Math.max(0.1, Math.min(5, touchState.initialZoom * scale));
+
+      // Pan with the center of the two fingers
+      const dx = centerX - touchState.lastTouchX;
+      const dy = centerY - touchState.lastTouchY;
+
+      // Apply zoom change centered on pinch point
+      if (newZoom !== zoom) {
+        const pinchX = centerX - rect.left;
+        const pinchY = centerY - rect.top;
+
+        // Calculate the point in pattern space at the pinch center
+        const patternX = (pinchX - panOffset.x) / (CELL_SIZE * zoom);
+        const patternY = (pinchY - panOffset.y) / (CELL_SIZE * zoom);
+
+        // Calculate new pan offset to keep that pattern point at the pinch center
+        const newPanX = pinchX - patternX * CELL_SIZE * newZoom + dx;
+        const newPanY = pinchY - patternY * CELL_SIZE * newZoom + dy;
+
+        setPanOffset({ x: newPanX, y: newPanY });
+        setZoom(newZoom);
+      } else {
+        // Just pan
+        setPanOffset({ x: panOffset.x + dx, y: panOffset.y + dy });
+      }
+
+      setTouchState({
+        isPanning: touchState.isPanning,
+        lastTouchX: centerX,
+        lastTouchY: centerY,
+        initialPinchDistance: touchState.initialPinchDistance,
+        initialZoom: touchState.initialZoom,
+      });
+      return;
+    }
+
+    // Single finger operations
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      const x = touch.clientX - rect.left;
+      const y = touch.clientY - rect.top;
+
+      // Handle progress mode dragging
+      if (isProgressMode && isDrawing && progressDragRef.current) {
+        e.preventDefault();
+        const cellSize = CELL_SIZE * zoom;
+        const cellX = Math.floor((x - panOffset.x) / cellSize);
+        const cellY = Math.floor((y - panOffset.y) / cellSize);
+
+        // Only update if we've moved to a new cell
+        if (cellX !== progressDragRef.current.lastCellX || cellY !== progressDragRef.current.lastCellY) {
+          // Use Bresenham's line algorithm to fill all cells between last and current
+          const x0 = progressDragRef.current.lastCellX;
+          const y0 = progressDragRef.current.lastCellY;
+          const x1 = cellX;
+          const y1 = cellY;
+
+          const dx = Math.abs(x1 - x0);
+          const dy = Math.abs(y1 - y0);
+          const sx = x0 < x1 ? 1 : -1;
+          const sy = y0 < y1 ? 1 : -1;
+          let err = dx - dy;
+          let cx = x0;
+          let cy = y0;
+
+          while (true) {
+            // Set this cell (skip the starting cell since it's already set)
+            if (cx !== x0 || cy !== y0) {
+              if (cx >= 0 && cx < pattern.canvas.width && cy >= 0 && cy < pattern.canvas.height) {
+                setStitchCompleted(cx, cy, progressDragRef.current.targetState);
+              }
+            }
+
+            if (cx === x1 && cy === y1) break;
+
+            const e2 = 2 * err;
+            if (e2 > -dy) {
+              err -= dy;
+              cx += sx;
+            }
+            if (e2 < dx) {
+              err += dx;
+              cy += sy;
+            }
+          }
+
+          progressDragRef.current.lastCellX = cellX;
+          progressDragRef.current.lastCellY = cellY;
+        }
+        return;
+      }
+
+      // Handle overlay dragging/resizing
+      if (activeTool === 'select' && isDrawing && overlayDragState && selectedOverlayId && selectedOverlay) {
+        e.preventDefault();
+        const cellSize = CELL_SIZE * zoom;
+        const deltaX = (x - overlayDragState.startX) / cellSize;
+        const deltaY = (y - overlayDragState.startY) / cellSize;
+
+        if (overlayDragState.isDragging) {
+          updateOverlayPosition(
+            selectedOverlayId,
+            Math.round(overlayDragState.startOverlayX + deltaX),
+            Math.round(overlayDragState.startOverlayY + deltaY)
+          );
+        } else if (overlayDragState.isResizing && overlayDragState.resizeHandle) {
+          const handle = overlayDragState.resizeHandle;
+          let newX = overlayDragState.startOverlayX;
+          let newY = overlayDragState.startOverlayY;
+          let newWidth = overlayDragState.startOverlayWidth;
+          let newHeight = overlayDragState.startOverlayHeight;
+
+          const aspectRatio = selectedOverlay.naturalWidth / selectedOverlay.naturalHeight;
+
+          if (handle.includes('n')) {
+            newY = overlayDragState.startOverlayY + deltaY;
+            newHeight = overlayDragState.startOverlayHeight - deltaY;
+          }
+          if (handle.includes('s')) {
+            newHeight = overlayDragState.startOverlayHeight + deltaY;
+          }
+          if (handle.includes('w')) {
+            newX = overlayDragState.startOverlayX + deltaX;
+            newWidth = overlayDragState.startOverlayWidth - deltaX;
+          }
+          if (handle.includes('e')) {
+            newWidth = overlayDragState.startOverlayWidth + deltaX;
+          }
+
+          // Maintain aspect ratio for corner handles
+          if (newWidth >= 1 && newHeight >= 1) {
+            if (handle === 'n' || handle === 's') {
+              const adjustedWidth = newHeight * aspectRatio;
+              const widthDiff = adjustedWidth - overlayDragState.startOverlayWidth;
+              newWidth = adjustedWidth;
+              newX = overlayDragState.startOverlayX - widthDiff / 2;
+            } else if (handle === 'e' || handle === 'w') {
+              const adjustedHeight = newWidth / aspectRatio;
+              const heightDiff = adjustedHeight - overlayDragState.startOverlayHeight;
+              newHeight = adjustedHeight;
+              newY = overlayDragState.startOverlayY - heightDiff / 2;
+            } else {
+              const widthFromHeight = newHeight * aspectRatio;
+              const heightFromWidth = newWidth / aspectRatio;
+
+              if (Math.abs(deltaX) > Math.abs(deltaY)) {
+                newHeight = heightFromWidth;
+                if (handle.includes('n')) {
+                  newY = overlayDragState.startOverlayY + overlayDragState.startOverlayHeight - newHeight;
+                }
+              } else {
+                newWidth = widthFromHeight;
+                if (handle.includes('w')) {
+                  newX = overlayDragState.startOverlayX + overlayDragState.startOverlayWidth - newWidth;
+                }
+              }
+            }
+
+            updateOverlayPosition(selectedOverlayId, Math.round(newX), Math.round(newY));
+            updateOverlaySize(selectedOverlayId, Math.round(newWidth), Math.round(newHeight));
+          }
+        }
+        return;
+      }
+
+      // Handle layer selection dragging/resizing
+      if (activeTool === 'select' && isDrawing && selection) {
+        e.preventDefault();
+        const cell = canvasToCellUnbounded(x, y);
+        if (cell) {
+          if (selection.isResizing) {
+            updateResize(cell, false); // No shift key on touch
+          } else if (selection.isDragging) {
+            updateDrag(cell);
+          }
+        }
+        return;
+      }
+
+      // Handle drawing tools during touch drag
+      if (isDrawing) {
+        const cell = canvasToCell(x, y);
+
+        // Shape tools - update preview
+        if ((activeTool === 'line' || activeTool === 'rectangle' || activeTool === 'ellipse') && shapeStart && cell) {
+          e.preventDefault();
+          setShapeEnd(cell);
+          return;
+        }
+
+        // Pencil and eraser - continuous drawing
+        if (cell && (!lastCell || cell.x !== lastCell.x || cell.y !== lastCell.y)) {
+          if (activeTool === 'pencil' && selectedColorId) {
+            e.preventDefault();
+            setStitch(cell.x, cell.y, selectedColorId);
+            setLastCell(cell);
+            return;
+          } else if (activeTool === 'eraser') {
+            e.preventDefault();
+            removeStitch(cell.x, cell.y);
+            setLastCell(cell);
+            return;
+          }
+        }
+      }
+
+      // Single finger pan (when not doing drawing or select operations)
+      if (touchState && touchState.isPanning) {
+        const dx = touch.clientX - touchState.lastTouchX;
+        const dy = touch.clientY - touchState.lastTouchY;
+
+        setPanOffset({ x: panOffset.x + dx, y: panOffset.y + dy });
+
+        setTouchState({
+          isPanning: touchState.isPanning,
+          lastTouchX: touch.clientX,
+          lastTouchY: touch.clientY,
+          initialPinchDistance: touchState.initialPinchDistance,
+          initialZoom: touchState.initialZoom,
+        });
+      }
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    // Clear progress drag state
+    if (progressDragRef.current) {
+      progressDragRef.current = null;
+    }
+
+    // End overlay drag state
+    if (overlayDragState) {
+      setOverlayDragState(null);
+    }
+
+    // End layer selection drag/resize
+    if (activeTool === 'select' && selection) {
+      if (selection.isResizing) {
+        endResize();
+      } else if (selection.isDragging) {
+        endDrag();
+      }
+    }
+
+    // Finalize shape drawing
+    if (shapeStart && shapeEnd && selectedColorId) {
+      if (activeTool === 'line') {
+        drawLine(shapeStart.x, shapeStart.y, shapeEnd.x, shapeEnd.y, selectedColorId);
+      } else if (activeTool === 'rectangle') {
+        drawRectangle(shapeStart.x, shapeStart.y, shapeEnd.x, shapeEnd.y, selectedColorId, true);
+      } else if (activeTool === 'ellipse') {
+        drawEllipse(shapeStart.x, shapeStart.y, shapeEnd.x, shapeEnd.y, selectedColorId, true);
+      }
+    }
+
+    // Clear shape state
+    setShapeStart(null);
+    setShapeEnd(null);
+    setIsDrawing(false);
+    setLastCell(null);
+
+    // If no more touches, end touch state
+    if (e.touches.length === 0) {
+      setTouchState(null);
+      return;
+    }
+
+    // If switching from two fingers to one, reset touch state for single-finger pan
+    if (e.touches.length === 1 && touchState) {
+      const touch = e.touches[0];
+      setTouchState({
+        isPanning: true,
+        lastTouchX: touch.clientX,
+        lastTouchY: touch.clientY,
+        initialPinchDistance: null,
+        initialZoom: zoom,
+      });
+    }
+  };
+
   if (!pattern) {
     return (
       <div className="flex-1 flex items-center justify-center bg-gray-100 text-gray-500">
@@ -1774,7 +2382,10 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseLeave}
             onWheel={handleWheel}
-            className="absolute inset-0"
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            className="absolute inset-0 touch-none"
             style={{ cursor: getCursor() }}
           />
         </div>

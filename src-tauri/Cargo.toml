@@ -24,6 +24,8 @@ serde_json = "1"
 image = "0.25"
 base64 = "0.22"
 resvg = "0.44"
+
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 screenshots = "0.8"
 
 [profile.release]

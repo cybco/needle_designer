@@ -268,8 +268,13 @@ function App() {
   }, []);
 
   // Show window after React has mounted (prevents white flash on startup)
+  // Only on desktop - mobile doesn't have this API
   useEffect(() => {
     const showWindow = async () => {
+      // Skip on mobile/iOS - window API not available
+      const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+      if (isMobile) return;
+
       try {
         const appWindow = getCurrentWindow();
         await appWindow.show();
@@ -281,7 +286,12 @@ function App() {
   }, []);
 
   // Handle window close with unsaved changes check
+  // Only on desktop - mobile doesn't have this API
   useEffect(() => {
+    // Skip on mobile/iOS - window API not available
+    const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    if (isMobile) return;
+
     let unlisten: (() => void) | undefined;
 
     const setupCloseHandler = async () => {
@@ -318,6 +328,53 @@ function App() {
       }
     };
   }, []);
+
+  // State for existing file names (fetched from documents directory)
+  const [existingFileNames, setExistingFileNames] = useState<string[]>([]);
+
+  // Fetch existing NDP files from documents directory
+  const refreshExistingFiles = useCallback(async () => {
+    try {
+      const files = await invoke<string[]>('list_ndp_files');
+      // Decode URI components in case of encoded characters
+      const decodedFiles = files.map(f => decodeURIComponent(f));
+      setExistingFileNames(decodedFiles);
+    } catch (error) {
+      console.error('Failed to list NDP files:', error);
+      // Fall back to extracting from recent files
+      const namesFromRecent = recentFiles.map(filePath => {
+        const fileName = filePath.split(/[/\\]/).pop() || '';
+        return decodeURIComponent(fileName.replace(/\.ndp$/i, ''));
+      });
+      setExistingFileNames(namesFromRecent);
+    }
+  }, [recentFiles]);
+
+  // Get next available pattern name based on existing files in directory
+  const getNextPatternName = useCallback(() => {
+    const baseName = 'My Pattern';
+
+    // Use existing file names from documents directory
+    const existingNames = existingFileNames;
+
+    // Check if base name exists
+    if (!existingNames.includes(baseName)) {
+      return baseName;
+    }
+
+    // Find next available number
+    let num = 2;
+    while (existingNames.includes(`${baseName} ${num}`)) {
+      num++;
+    }
+    return `${baseName} ${num}`;
+  }, [existingFileNames]);
+
+  // Helper to show new project dialog after refreshing file list
+  const showNewProject = useCallback(async () => {
+    await refreshExistingFiles();
+    setShowNewProjectDialog(true);
+  }, [refreshExistingFiles]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -405,7 +462,7 @@ function App() {
         case 'n':
           if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
-            setShowNewProjectDialog(true);
+            showNewProject();
           }
           break;
       }
@@ -424,7 +481,7 @@ function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [zoom, activeTool, pattern, selection, activeLayerId, preferences.confirmLayerDelete, setTool, setZoom, removeLayer, clearSelection]);
+  }, [zoom, activeTool, pattern, selection, activeLayerId, preferences.confirmLayerDelete, setTool, setZoom, removeLayer, clearSelection, showNewProject]);
 
   // Add file to recent files list
   const addToRecentFiles = useCallback((filePath: string) => {
@@ -436,30 +493,6 @@ function App() {
       return updated;
     });
   }, []);
-
-  // Get next available pattern name based on recent files
-  const getNextPatternName = useCallback(() => {
-    const baseName = 'My Pattern';
-
-    // Extract pattern names from recent file paths
-    const existingNames = recentFiles.map(filePath => {
-      // Get filename without extension
-      const fileName = filePath.split(/[/\\]/).pop() || '';
-      return fileName.replace(/\.ndp$/i, '');
-    });
-
-    // Check if base name exists
-    if (!existingNames.includes(baseName)) {
-      return baseName;
-    }
-
-    // Find next available number
-    let num = 2;
-    while (existingNames.includes(`${baseName} ${num}`)) {
-      num++;
-    }
-    return `${baseName} ${num}`;
-  }, [recentFiles]);
 
   // Convert pattern to NDP file format
   const patternToNdp = useCallback((p: Pattern): NdpFile => {
@@ -642,11 +675,12 @@ function App() {
       }
 
       const ndpFile = patternToNdp(pattern);
-      await invoke('save_project', { path: filePath, project: ndpFile });
+      // save_project returns the actual path where the file was saved (may differ on iOS)
+      const savedPath = await invoke<string>('save_project', { path: filePath, project: ndpFile });
 
-      setCurrentFilePath(filePath);
+      setCurrentFilePath(savedPath);
       markSaved();
-      addToRecentFiles(filePath);
+      addToRecentFiles(savedPath);
     } catch (error) {
       console.error('Failed to save:', error);
       alert(`Failed to save project: ${error}`);
@@ -676,11 +710,12 @@ function App() {
 
       // Create NDP with the new fileId
       const ndpFile = patternToNdp({ ...pattern, fileId: newFileId });
-      await invoke('save_project', { path: result, project: ndpFile });
+      // save_project returns the actual path where the file was saved (may differ on iOS)
+      const savedPath = await invoke<string>('save_project', { path: result, project: ndpFile });
 
-      setCurrentFilePath(result);
+      setCurrentFilePath(savedPath);
       markSaved();
-      addToRecentFiles(result);
+      addToRecentFiles(savedPath);
     } catch (error) {
       console.error('Failed to save:', error);
       alert(`Failed to save project: ${error}`);
@@ -1029,7 +1064,7 @@ function App() {
               {showFileMenu && (
                 <div className="absolute top-full left-0 mt-1 bg-gray-700 rounded shadow-lg py-1 min-w-40 z-50">
                   <button
-                    onClick={() => { setShowNewProjectDialog(true); setShowFileMenu(false); }}
+                    onClick={() => { showNewProject(); setShowFileMenu(false); }}
                     className="w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors"
                   >
                     New <span className="text-gray-400 text-xs float-right">Ctrl+N</span>
@@ -1060,10 +1095,10 @@ function App() {
                             key={index}
                             onClick={() => { openFilePath(filePath); setShowFileMenu(false); setShowRecentMenu(false); }}
                             className="w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors truncate"
-                            title={filePath}
+                            title={decodeURIComponent(filePath)}
                           >
-                            {filePath.split(/[/\\]/).pop()}
-                            <span className="block text-xs text-gray-400 truncate">{filePath}</span>
+                            {decodeURIComponent(filePath.split(/[/\\]/).pop() || '')}
+                            <span className="block text-xs text-gray-400 truncate">{decodeURIComponent(filePath)}</span>
                           </button>
                         ))}
                         <div className="border-t border-gray-600 my-1" />
@@ -1276,7 +1311,7 @@ function App() {
           {pattern && (
             <span className="text-sm text-gray-300">
               {currentFilePath
-                ? currentFilePath.split(/[/\\]/).pop()
+                ? decodeURIComponent(currentFilePath.split(/[/\\]/).pop() || '')
                 : pattern.name}
               {hasUnsavedChanges ? ' *' : ''} - {pattern.canvas.width} x {pattern.canvas.height}
             </span>
@@ -1367,7 +1402,7 @@ function App() {
               </p>
 
               <button
-                onClick={() => setShowNewProjectDialog(true)}
+                onClick={() => showNewProject()}
                 className="px-8 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-lg font-medium"
               >
                 Create New Pattern
@@ -1393,10 +1428,10 @@ function App() {
                         </svg>
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium text-gray-800 truncate">
-                            {filePath.split(/[/\\]/).pop()}
+                            {decodeURIComponent(filePath.split(/[/\\]/).pop() || '')}
                           </p>
                           <p className="text-xs text-gray-500 truncate">
-                            {filePath}
+                            {decodeURIComponent(filePath)}
                           </p>
                         </div>
                       </button>
@@ -1528,7 +1563,7 @@ function App() {
         onSave={handleUnsavedSave}
         onDontSave={handleUnsavedDontSave}
         onCancel={handleUnsavedCancel}
-        fileName={currentFilePath?.split(/[/\\]/).pop() || pattern?.name || 'Untitled'}
+        fileName={currentFilePath ? decodeURIComponent(currentFilePath.split(/[/\\]/).pop() || '') : pattern?.name || 'Untitled'}
       />
 
       {/* Color Match Dialog */}

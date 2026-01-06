@@ -202,6 +202,8 @@ interface PatternState {
   toggleProgressMode: () => void;
   setProgressMode: (enabled: boolean) => void;
   toggleStitchCompleted: (x: number, y: number) => void;
+  setStitchCompleted: (x: number, y: number, completed: boolean) => void;
+  getStitchCompleted: (x: number, y: number) => boolean;
   setProgressShadingColor: (color: [number, number, number]) => void;
   setProgressShadingOpacity: (opacity: number) => void;
 }
@@ -1879,6 +1881,61 @@ export const usePatternStore = create<PatternState>((set, get) => {
         return;
       }
     }
+  },
+
+  setStitchCompleted: (x, y, completed) => {
+    const { pattern } = get();
+    if (!pattern) return;
+
+    // Find the stitch at this position across all layers (top to bottom)
+    for (let i = pattern.layers.length - 1; i >= 0; i--) {
+      const layer = pattern.layers[i];
+      if (!layer.visible) continue;
+
+      const stitchIndex = layer.stitches.findIndex(s => s.x === x && s.y === y);
+      if (stitchIndex !== -1) {
+        // Only update if the state is different
+        if (layer.stitches[stitchIndex].completed === completed) return;
+
+        const updatedStitches = [...layer.stitches];
+        updatedStitches[stitchIndex] = {
+          ...updatedStitches[stitchIndex],
+          completed,
+        };
+
+        const updatedLayers = [...pattern.layers];
+        updatedLayers[i] = {
+          ...layer,
+          stitches: updatedStitches,
+        };
+
+        set({
+          pattern: {
+            ...pattern,
+            layers: updatedLayers,
+          },
+          hasUnsavedChanges: true,
+        });
+        return;
+      }
+    }
+  },
+
+  getStitchCompleted: (x, y) => {
+    const { pattern } = get();
+    if (!pattern) return false;
+
+    // Find the stitch at this position across all layers (top to bottom)
+    for (let i = pattern.layers.length - 1; i >= 0; i--) {
+      const layer = pattern.layers[i];
+      if (!layer.visible) continue;
+
+      const stitch = layer.stitches.find(s => s.x === x && s.y === y);
+      if (stitch) {
+        return stitch.completed || false;
+      }
+    }
+    return false;
   },
 
   setProgressShadingColor: (color) => {
