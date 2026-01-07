@@ -77,6 +77,15 @@ interface NdpFile {
       color_id: string;
       completed: boolean;
     }>;
+    metadata?: {
+      type: 'text';
+      text: string;
+      fontFamily: string;
+      fontWeight: number;
+      italic: boolean;
+      colorId: string;
+      boldness: number;
+    };
   }>;
   overlays?: NdpOverlayImage[];
   zoom?: number;
@@ -178,6 +187,7 @@ function App() {
   const [showTextEditor, setShowTextEditor] = useState(false);
   const [showFontBrowser, setShowFontBrowser] = useState(false);
   const [showBitmapFontEditor, setShowBitmapFontEditor] = useState(false);
+  const [editingTextLayerId, setEditingTextLayerId] = useState<string | null>(null);
 
   // Ref to store the tool before space-bar pan (to restore on release)
   const toolBeforePanRef = useRef<string | null>(null);
@@ -248,6 +258,8 @@ function App() {
     setMaxHistorySize,
     setRulerUnit,
     importAsLayer,
+    updateLayerWithText,
+    getLayerBounds,
     removeLayer,
     clearSelection,
     selectLayerForTransform,
@@ -543,6 +555,15 @@ function App() {
           color_id: s.colorId,
           completed: s.completed,
         })),
+        metadata: l.metadata ? {
+          type: l.metadata.type,
+          text: l.metadata.text,
+          fontFamily: l.metadata.fontFamily,
+          fontWeight: l.metadata.fontWeight,
+          italic: l.metadata.italic,
+          colorId: l.metadata.colorId,
+          boldness: l.metadata.boldness,
+        } : undefined,
       })),
       overlays: overlayImages.length > 0 ? overlayImages.map((o) => ({
         id: o.id,
@@ -595,6 +616,15 @@ function App() {
           colorId: s.color_id,
           completed: s.completed,
         })),
+        metadata: l.metadata ? {
+          type: l.metadata.type as 'text',
+          text: l.metadata.text,
+          fontFamily: l.metadata.fontFamily,
+          fontWeight: l.metadata.fontWeight,
+          italic: l.metadata.italic,
+          colorId: l.metadata.colorId,
+          boldness: l.metadata.boldness,
+        } : undefined,
       })),
     };
   }, []);
@@ -971,7 +1001,7 @@ function App() {
     return () => clearInterval(autoSaveTimer);
   }, [preferences.autoSaveMinutes, pattern, currentFilePath, hasUnsavedChanges, handleSave]);
 
-  // Handle text confirm - create a new layer with the text
+  // Handle text confirm - create a new layer with the text or update existing text layer
   const handleTextConfirm = useCallback((
     stitches: Stitch[],
     width: number,
@@ -981,6 +1011,27 @@ function App() {
   ) => {
     if (stitches.length === 0) return;
 
+    // EDIT MODE: Update existing layer in place
+    if (editingTextLayerId && metadata) {
+      const bounds = getLayerBounds(editingTextLayerId);
+      const offsetX = bounds?.x || 0;
+      const offsetY = bounds?.y || 0;
+
+      const positionedStitches = stitches.map(s => ({
+        ...s,
+        x: s.x + offsetX,
+        y: s.y + offsetY,
+      }));
+
+      updateLayerWithText(editingTextLayerId, positionedStitches, metadata);
+      setEditingTextLayerId(null);
+
+      // Re-select the layer to update selection bounds
+      selectLayerForTransform(editingTextLayerId);
+      return;
+    }
+
+    // CREATE MODE: Add new layer
     // Get unique colors from the stitches
     const colorIds = new Set(stitches.map(s => s.colorId));
     let colors = pattern?.colorPalette.filter(c => colorIds.has(c.id)) || [];
@@ -1012,7 +1063,18 @@ function App() {
     if (newLayerId) {
       selectLayerForTransform(newLayerId);
     }
-  }, [pattern, importAsLayer, setTool, selectLayerForTransform]);
+  }, [pattern, editingTextLayerId, getLayerBounds, updateLayerWithText, importAsLayer, setTool, selectLayerForTransform]);
+
+  // Handle editing an existing text layer
+  const handleEditTextLayer = useCallback((layerId: string) => {
+    const layer = pattern?.layers.find(l => l.id === layerId);
+    if (layer?.metadata?.type === 'text') {
+      setEditingTextLayerId(layerId);
+      setSelectedFont(layer.metadata.fontFamily);
+      setSelectedFontWeight(layer.metadata.fontWeight);
+      setShowTextEditor(true);
+    }
+  }, [pattern]);
 
   // Handle font selection from browser
   const handleFontSelect = useCallback((fontFamily: string, weight: number) => {
@@ -1427,7 +1489,7 @@ function App() {
               <ProgressTrackingPanel />
             ) : (
               <div className="w-64 flex flex-col border-l border-gray-300 overflow-hidden">
-                <LayerPanel />
+                <LayerPanel onEditTextLayer={handleEditTextLayer} />
                 <ColorPalette showSymbols={preferences.showSymbols} />
               </div>
             )}
@@ -1564,7 +1626,10 @@ function App() {
       {/* Text Tool Dialogs */}
       <TextEditorDialog
         isOpen={showTextEditor}
-        onClose={() => setShowTextEditor(false)}
+        onClose={() => {
+          setShowTextEditor(false);
+          setEditingTextLayerId(null);
+        }}
         onConfirm={handleTextConfirm}
         colorPalette={pattern?.colorPalette || []}
         initialColorId={selectedColorId || 'color-1'}
@@ -1572,6 +1637,17 @@ function App() {
         selectedFont={selectedFont}
         selectedWeight={selectedFontWeight}
         onWeightChange={setSelectedFontWeight}
+        editMode={!!editingTextLayerId}
+        initialMetadata={
+          editingTextLayerId
+            ? pattern?.layers.find(l => l.id === editingTextLayerId)?.metadata as TextLayerMetadata | undefined
+            : undefined
+        }
+        initialHeight={
+          editingTextLayerId
+            ? getLayerBounds(editingTextLayerId)?.height
+            : undefined
+        }
       />
 
       <FontBrowserDialog

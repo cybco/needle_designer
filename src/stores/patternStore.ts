@@ -178,6 +178,9 @@ interface PatternState {
   // Import as layer
   importAsLayer: (name: string, colors: Color[], stitches: Stitch[], metadata?: LayerMetadata) => void;
 
+  // Update existing text layer with new content
+  updateLayerWithText: (layerId: string, stitches: Stitch[], metadata: TextLayerMetadata) => void;
+
   // Symbol assignment actions
   updateColorSymbol: (colorId: string, symbol: string) => void;
   autoAssignSymbols: (mode?: 'usage' | 'lightness' | 'sequential') => void;
@@ -303,6 +306,7 @@ function clonePattern(pattern: Pattern): Pattern {
     layers: pattern.layers.map(l => ({
       ...l,
       stitches: l.stitches.map(s => ({ ...s })),
+      metadata: l.metadata ? { ...l.metadata } : undefined,
     })),
   };
 }
@@ -1113,7 +1117,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
 
     const updatedLayers = pattern.layers
       .filter(l => l.id !== sourceLayerId)
-      .map(l => l.id === targetLayerId ? { ...l, stitches: mergedStitches } : l);
+      .map(l => l.id === targetLayerId ? { ...l, stitches: mergedStitches, metadata: undefined } : l);
 
     // Update active layer if source was active
     let newActiveLayerId = activeLayerId;
@@ -1238,6 +1242,46 @@ export const usePatternStore = create<PatternState>((set, get) => {
         layers: [...pattern.layers, newLayer],
       },
       activeLayerId: newLayerId,
+      hasUnsavedChanges: true,
+    });
+  },
+
+  // Update existing text layer with new content
+  updateLayerWithText: (layerId, stitches, metadata) => {
+    const { pattern } = get();
+    if (!pattern) return;
+
+    const layerIndex = pattern.layers.findIndex(l => l.id === layerId);
+    if (layerIndex === -1) return;
+
+    pushToHistory();
+
+    const updatedLayers = [...pattern.layers];
+    updatedLayers[layerIndex] = {
+      ...pattern.layers[layerIndex],
+      stitches,
+      metadata,
+    };
+
+    // Recalculate selection bounds if this layer is selected
+    const { selection } = get();
+    let newSelection = selection;
+    if (selection?.layerId === layerId) {
+      const bounds = calculateLayerBounds(stitches);
+      if (bounds) {
+        newSelection = {
+          ...selection,
+          bounds,
+        };
+      }
+    }
+
+    set({
+      pattern: {
+        ...pattern,
+        layers: updatedLayers,
+      },
+      selection: newSelection,
       hasUnsavedChanges: true,
     });
   },

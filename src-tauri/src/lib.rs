@@ -71,6 +71,24 @@ pub struct Color {
     pub symbol: Option<String>,
 }
 
+/// Layer metadata for special layer types (e.g., text layers)
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(tag = "type")]
+pub enum LayerMetadata {
+    #[serde(rename = "text")]
+    Text {
+        text: String,
+        #[serde(rename = "fontFamily")]
+        font_family: String,
+        #[serde(rename = "fontWeight")]
+        font_weight: u32,
+        italic: bool,
+        #[serde(rename = "colorId")]
+        color_id: String,
+        boldness: f64,
+    },
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Layer {
     pub id: String,
@@ -78,6 +96,8 @@ pub struct Layer {
     pub visible: bool,
     pub locked: bool,
     pub stitches: Vec<Stitch>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<LayerMetadata>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -168,6 +188,7 @@ fn create_new_project(
             visible: true,
             locked: false,
             stitches: vec![],
+            metadata: None,
         }],
         overlays: None,
         zoom: Some(1.0),

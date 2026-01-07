@@ -18,6 +18,10 @@ interface TextEditorDialogProps {
   selectedFont: string;
   selectedWeight: number;
   onWeightChange: (weight: number) => void;
+  // Edit mode props
+  editMode?: boolean;
+  initialMetadata?: TextLayerMetadata;
+  initialHeight?: number;
 }
 
 export function TextEditorDialog({
@@ -30,6 +34,9 @@ export function TextEditorDialog({
   selectedFont,
   selectedWeight,
   onWeightChange,
+  editMode = false,
+  initialMetadata,
+  initialHeight,
 }: TextEditorDialogProps) {
   // Default values for reset
   const DEFAULT_FONT_SIZE = 24;
@@ -63,20 +70,45 @@ export function TextEditorDialog({
     onWeightChange(400); // Reset to regular weight
   };
 
-  // Reset state when dialog opens
+  // Reset state when dialog opens (or pre-fill in edit mode)
   useEffect(() => {
     if (isOpen) {
-      // Use initialColorId if it exists in palette, otherwise use first color, otherwise use a placeholder
-      const validColorId = colorPalette.find(c => c.id === initialColorId)
-        ? initialColorId
-        : colorPalette.length > 0
-          ? colorPalette[0].id
-          : '__black__';
-      setSelectedColorId(validColorId);
-      setFontSizeInput('24'); // Reset to default
-      setFontSize(24);
+      if (editMode && initialMetadata) {
+        // Edit mode: pre-fill with existing text layer data
+        setText(initialMetadata.text);
+        setItalic(initialMetadata.italic);
+        setBoldness(initialMetadata.boldness);
+
+        // Use layer height if available, otherwise use default
+        const height = initialHeight ?? DEFAULT_FONT_SIZE;
+        setFontSize(height);
+        setFontSizeInput(String(height));
+
+        // Use the stored color ID
+        const validColorId = colorPalette.find(c => c.id === initialMetadata.colorId)
+          ? initialMetadata.colorId
+          : colorPalette.length > 0
+            ? colorPalette[0].id
+            : '__black__';
+        setSelectedColorId(validColorId);
+      } else {
+        // New text: reset to defaults
+        setText('');
+        setItalic(DEFAULT_ITALIC);
+        setBoldness(DEFAULT_BOLDNESS);
+        setFontSize(DEFAULT_FONT_SIZE);
+        setFontSizeInput(String(DEFAULT_FONT_SIZE));
+
+        // Use initialColorId if it exists in palette, otherwise use first color, otherwise use a placeholder
+        const validColorId = colorPalette.find(c => c.id === initialColorId)
+          ? initialColorId
+          : colorPalette.length > 0
+            ? colorPalette[0].id
+            : '__black__';
+        setSelectedColorId(validColorId);
+      }
     }
-  }, [isOpen, initialColorId, colorPalette]);
+  }, [isOpen, initialColorId, colorPalette, editMode, initialMetadata, initialHeight]);
 
   // Get current color RGB - default to black if no color selected
   const currentColor = colorPalette.find(c => c.id === selectedColorId);
@@ -263,7 +295,7 @@ export function TextEditorDialog({
       <div className="bg-white rounded-lg shadow-xl w-[600px] max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">Add Text</h2>
+          <h2 className="text-lg font-semibold text-gray-900">{editMode ? 'Edit Text' : 'Add Text'}</h2>
           <button
             onClick={handleClose}
             className="text-gray-400 hover:text-gray-600 text-xl"
@@ -491,7 +523,7 @@ export function TextEditorDialog({
             disabled={!previewData || previewData.stitches.length === 0}
             className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
           >
-            Add Text
+            {editMode ? 'Update Text' : 'Add Text'}
           </button>
         </div>
       </div>

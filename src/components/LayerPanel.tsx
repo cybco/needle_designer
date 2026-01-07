@@ -1,7 +1,11 @@
 import { useState } from 'react';
 import { usePatternStore } from '../stores/patternStore';
 
-export function LayerPanel() {
+interface LayerPanelProps {
+  onEditTextLayer?: (layerId: string) => void;
+}
+
+export function LayerPanel({ onEditTextLayer }: LayerPanelProps) {
   const {
     pattern,
     activeLayerId,
@@ -260,7 +264,7 @@ export function LayerPanel() {
               </button>
 
               {/* Layer Name */}
-              <div className="flex-1 min-w-0">
+              <div className="flex-1 min-w-0 flex items-center gap-1">
                 {editingLayerId === layer.id ? (
                   <input
                     type="text"
@@ -272,16 +276,43 @@ export function LayerPanel() {
                     className="w-full px-1 py-0.5 text-xs border border-blue-400 rounded focus:outline-none"
                   />
                 ) : (
-                  <span
-                    onDoubleClick={() => handleStartRename(layer.id, layer.name)}
-                    className={`block truncate text-xs ${
-                      isActive ? 'font-medium text-blue-700' : 'text-gray-700'
-                    }`}
-                  >
-                    {layer.name}
-                  </span>
+                  <>
+                    <span
+                      onDoubleClick={() => {
+                        if (layer.metadata?.type === 'text' && onEditTextLayer) {
+                          onEditTextLayer(layer.id);
+                        } else {
+                          handleStartRename(layer.id, layer.name);
+                        }
+                      }}
+                      className={`block truncate text-xs ${
+                        isActive ? 'font-medium text-blue-700' : 'text-gray-700'
+                      }`}
+                    >
+                      {layer.name}
+                    </span>
+                    {layer.metadata?.type === 'text' && (
+                      <span className="text-[10px] px-1 py-0.5 bg-blue-100 text-blue-600 rounded" title="Text Layer">
+                        T
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
+
+              {/* Edit Text Button (only for text layers) */}
+              {layer.metadata?.type === 'text' && onEditTextLayer && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEditTextLayer(layer.id);
+                  }}
+                  className="w-5 h-5 flex items-center justify-center text-xs text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded"
+                  title="Edit Text"
+                >
+                  ✎
+                </button>
+              )}
 
               {/* Layer Actions */}
               <div className="flex items-center gap-0.5">
