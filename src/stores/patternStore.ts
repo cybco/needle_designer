@@ -207,8 +207,10 @@ interface PatternState {
   setProgressShadingOpacity: (opacity: number) => void;
 }
 
-// Default colors for new patterns (empty - user adds colors as needed)
-const defaultColors: Color[] = [];
+// Default colors for new patterns
+const defaultColors: Color[] = [
+  { id: 'color-black', name: 'Black', rgb: [0, 0, 0] },
+];
 
 // Helper function to calculate layer bounding box
 function calculateLayerBounds(stitches: Stitch[]): { x: number; y: number; width: number; height: number } | null {

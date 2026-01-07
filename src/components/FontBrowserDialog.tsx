@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { bundledFonts, isFontLoaded } from '../data/bundledFonts';
 import { googleFonts, loadGoogleFont, parseVariantWeight } from '../data/googleFonts';
+import { pixelFonts, loadPixelFont, isPixelFontLoaded } from '../data/pixelFonts';
+import { bitmapFonts, isBitmapFont } from '../data/bitmapFonts';
 
 interface FontBrowserDialogProps {
   isOpen: boolean;
@@ -10,8 +12,8 @@ interface FontBrowserDialogProps {
   currentWeight: number;
 }
 
-type Tab = 'bundled' | 'google' | 'recent';
-type Category = 'all' | 'serif' | 'sans-serif' | 'display' | 'handwriting' | 'monospace';
+type Tab = 'bundled' | 'bitmap' | 'pixel' | 'google' | 'recent';
+type Category = 'all' | 'serif' | 'sans-serif' | 'display' | 'handwriting' | 'monospace' | 'pixel';
 
 const RECENT_FONTS_KEY = 'needle-designer-recent-fonts';
 const DOWNLOADED_FONTS_KEY = 'needle-designer-downloaded-fonts';
@@ -108,7 +110,7 @@ function FontCard({ family, category, weight, isAvailable, isDownloading, isSele
         )}
       </div>
       <div className="text-xs text-gray-500 mt-1">
-        {category} - {weight}
+        {category} - {weight >= 700 ? 'Bold' : 'Regular'}
       </div>
     </div>
   );
@@ -142,10 +144,18 @@ export function FontBrowserDialog({
     }
   }, [isOpen, currentFont, currentWeight]);
 
-  // Check if font is available (bundled or downloaded)
+  // Check if font is available (bundled, bitmap, pixel, or downloaded)
   const isFontAvailable = useCallback((family: string): boolean => {
     // Bundled fonts are always available
     if (bundledFonts.some(f => f.family === family)) {
+      return true;
+    }
+    // Bitmap fonts are always available (data is bundled)
+    if (isBitmapFont(family)) {
+      return true;
+    }
+    // Check if it's a pixel font that's loaded
+    if (pixelFonts.some(f => f.family === family) && isPixelFontLoaded(family)) {
       return true;
     }
     // Check if downloaded
@@ -167,8 +177,13 @@ export function FontBrowserDialog({
     setDownloadingFonts(prev => new Set(prev).add(family));
 
     try {
-      // Load the font from Google Fonts
-      loadGoogleFont(family, weight);
+      // Check if it's a pixel font and load accordingly
+      const isPixel = pixelFonts.some(f => f.family === family);
+      if (isPixel) {
+        loadPixelFont(family, weight);
+      } else {
+        loadGoogleFont(family, weight);
+      }
 
       // Wait for font to load (with timeout)
       const maxWait = 10000; // 10 seconds
@@ -246,6 +261,12 @@ export function FontBrowserDialog({
     const bundled = bundledFonts.find(f => f.family === family);
     if (bundled) return bundled.weights;
 
+    // Bitmap fonts only have one weight (400)
+    if (isBitmapFont(family)) return [400];
+
+    const pixel = pixelFonts.find(f => f.family === family);
+    if (pixel) return pixel.weights;
+
     const google = googleFonts.find(f => f.family === family);
     if (google) {
       const weights = new Set<number>();
@@ -301,6 +322,26 @@ export function FontBrowserDialog({
               }`}
             >
               Bundled ({bundledFonts.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('bitmap')}
+              className={`px-4 py-2 text-sm font-medium border-b-2 ${
+                activeTab === 'bitmap'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Bitmap ({bitmapFonts.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('pixel')}
+              className={`px-4 py-2 text-sm font-medium border-b-2 ${
+                activeTab === 'pixel'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Pixel ({pixelFonts.length})
             </button>
             <button
               onClick={() => setActiveTab('google')}
@@ -376,33 +417,95 @@ export function FontBrowserDialog({
             </div>
           )}
 
-          {activeTab === 'google' && (
-            <div className="grid grid-cols-2 gap-3">
-              {filteredGoogleFonts.map((font) => {
-                const defaultWeight = font.variants.includes('regular') ? 400 : parseVariantWeight(font.variants[0]);
-                const available = isFontAvailable(font.family);
-                const downloading = downloadingFonts.has(font.family);
-                return (
+          {activeTab === 'bitmap' && (
+            <div>
+              <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <p className="text-sm text-green-800">
+                  <strong>Pixel-Perfect Fonts:</strong> These fonts use pre-rendered bitmap data for guaranteed crisp rendering at small sizes. Perfect for needlepoint text.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {bitmapFonts.map((font) => (
                   <FontCard
                     key={font.family}
                     family={font.family}
-                    category={font.category}
-                    weight={defaultWeight}
-                    isAvailable={available}
-                    isDownloading={downloading}
+                    category="bitmap"
+                    weight={400}
+                    isAvailable={true}
+                    isDownloading={false}
                     isSelected={selectedFont === font.family}
-                    onClick={() => handleSelectFont(font.family, defaultWeight)}
+                    onClick={() => handleSelectFont(font.family, 400)}
                   />
-                );
-              })}
-              {filteredGoogleFonts.length === 0 && (
-                <p className="col-span-2 text-center text-gray-500 py-8">No fonts match your search</p>
-              )}
-              {filteredGoogleFonts.length === 100 && (
-                <p className="col-span-2 text-center text-gray-400 text-sm py-2">
-                  Showing first 100 results. Use search to find more.
+                ))}
+                {bitmapFonts.length === 0 && (
+                  <p className="col-span-2 text-center text-gray-500 py-8">No bitmap fonts available</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'pixel' && (
+            <div>
+              <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <p className="text-sm text-amber-800">
+                  These fonts have a retro/pixelated style. For best results, use sizes 16 or larger. Very small sizes (under 12) may not render clearly.
                 </p>
-              )}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {pixelFonts.map((font) => {
+                  const available = isPixelFontLoaded(font.family) || downloadedFonts.has(font.family);
+                  const downloading = downloadingFonts.has(font.family);
+                  return (
+                    <FontCard
+                      key={font.family}
+                      family={font.family}
+                      category={font.category}
+                      weight={font.weights.includes(selectedWeight) ? selectedWeight : font.weights[0]}
+                      isAvailable={available}
+                      isDownloading={downloading}
+                      isSelected={selectedFont === font.family}
+                      onClick={() => handleSelectFont(font.family, font.weights.includes(selectedWeight) ? selectedWeight : font.weights[0])}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'google' && (
+            <div>
+              <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <p className="text-sm text-amber-800">
+                  Note: Google Fonts are designed for screen display and may not render optimally at small stitch sizes. For best results under 20 stitches, try the Pixel fonts tab.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {filteredGoogleFonts.map((font) => {
+                  const defaultWeight = font.variants.includes('regular') ? 400 : parseVariantWeight(font.variants[0]);
+                  const available = isFontAvailable(font.family);
+                  const downloading = downloadingFonts.has(font.family);
+                  return (
+                    <FontCard
+                      key={font.family}
+                      family={font.family}
+                      category={font.category}
+                      weight={defaultWeight}
+                      isAvailable={available}
+                      isDownloading={downloading}
+                      isSelected={selectedFont === font.family}
+                      onClick={() => handleSelectFont(font.family, defaultWeight)}
+                    />
+                  );
+                })}
+                {filteredGoogleFonts.length === 0 && (
+                  <p className="col-span-2 text-center text-gray-500 py-8">No fonts match your search</p>
+                )}
+                {filteredGoogleFonts.length === 100 && (
+                  <p className="col-span-2 text-center text-gray-400 text-sm py-2">
+                    Showing first 100 results. Use search to find more.
+                  </p>
+                )}
+              </div>
             </div>
           )}
 
@@ -411,11 +514,17 @@ export function FontBrowserDialog({
               {recentFonts.map((font) => {
                 const available = isFontAvailable(font.family);
                 const downloading = downloadingFonts.has(font.family);
+                // Find category from bitmap fonts, pixel fonts, bundled fonts, or google fonts
+                const bitmapFont = bitmapFonts.find(b => b.family === font.family);
+                const pixelFont = pixelFonts.find(p => p.family === font.family);
+                const bundledFont = bundledFonts.find(b => b.family === font.family);
+                const googleFont = googleFonts.find(g => g.family === font.family);
+                const category = bitmapFont?.category || pixelFont?.category || bundledFont?.category || googleFont?.category || 'sans-serif';
                 return (
                   <FontCard
                     key={font.family}
                     family={font.family}
-                    category={googleFonts.find(g => g.family === font.family)?.category || 'sans-serif'}
+                    category={category}
                     weight={font.weight}
                     isAvailable={available}
                     isDownloading={downloading}
@@ -463,7 +572,7 @@ export function FontBrowserDialog({
                 className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 {getAvailableWeights(selectedFont).map((w) => (
-                  <option key={w} value={w}>{w}</option>
+                  <option key={w} value={w}>{w >= 700 ? 'Bold' : 'Regular'}</option>
                 ))}
               </select>
             </div>

@@ -1,21 +1,25 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Stitch, Color } from '../stores/patternStore';
 import { bundledFonts, waitForFont } from '../data/bundledFonts';
+import { isBitmapFont, bitmapFonts } from '../data/bitmapFonts';
+import { renderBitmapText } from '../data/bitmapFontRenderer';
 
 interface TextEditorDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (stitches: Stitch[], width: number, height: number) => void;
+  onConfirm: (stitches: Stitch[], width: number, height: number, colorToAdd?: Color) => void;
   colorPalette: Color[];
   initialColorId: string;
   onOpenFontBrowser: () => void;
   selectedFont: string;
   selectedWeight: number;
+  onWeightChange: (weight: number) => void;
 }
 
 // Convert text to stitches using canvas rendering
 // targetHeight is the desired height in stitches
-function textToStitches(
+// Uses direct pixel rendering at target size to leverage browser font hinting
+function textToStitchesRegular(
   text: string,
   fontFamily: string,
   targetHeight: number,
@@ -23,130 +27,102 @@ function textToStitches(
   italic: boolean,
   colorId: string
 ): { stitches: Stitch[]; width: number; height: number } {
-  if (!text.trim()) {
-    return { stitches: [], width: 0, height: 0 };
-  }
-
-  // Render at a high resolution first, then scale to target height
-  // Use a large base font size for quality
-  const baseFontSize = Math.max(100, targetHeight * 10);
-
   // Create temporary canvas
   const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d')!;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
 
-  // Set up font
-  const fontStyle = `${italic ? 'italic ' : ''}${fontWeight} ${baseFontSize}px "${fontFamily}"`;
+  // Render directly at target pixel size - let the browser's font hinting do the work
+  // This produces much better results at small sizes than downscaling
+  const fontSize = targetHeight;
+
+  // Set up font - use pixel units directly
+  const fontStyle = `${italic ? 'italic ' : ''}${fontWeight} ${fontSize}px "${fontFamily}"`;
   ctx.font = fontStyle;
 
   // Handle multiline text
   const lines = text.split('\n');
-  const lineHeight = Math.ceil(baseFontSize * 1.2);
+  const lineHeight = Math.ceil(fontSize * 1.2);
 
-  // Measure all lines to find actual bounding box (accounts for ascenders/descenders that extend beyond em-square)
+  // Measure text to determine canvas size
   let maxWidth = 0;
-  let maxAscent = 0;
-  let maxDescent = 0;
   let maxLeft = 0;
 
   for (const line of lines) {
     const metrics = ctx.measureText(line);
     maxWidth = Math.max(maxWidth, Math.ceil(metrics.width));
-
-    // Use actual bounding box if available (modern browsers)
-    if (metrics.actualBoundingBoxAscent !== undefined) {
-      maxAscent = Math.max(maxAscent, Math.ceil(metrics.actualBoundingBoxAscent));
-      maxDescent = Math.max(maxDescent, Math.ceil(metrics.actualBoundingBoxDescent));
+    if (metrics.actualBoundingBoxLeft !== undefined) {
       maxLeft = Math.max(maxLeft, Math.ceil(metrics.actualBoundingBoxLeft));
     }
   }
 
-  // Fallback padding if bounding box metrics not available
-  const padding = Math.max(4, Math.ceil(baseFontSize * 0.2));
-  const topPadding = maxAscent > 0 ? Math.ceil(maxAscent * 0.3) + 2 : padding;
-  const leftPadding = maxLeft > 0 ? maxLeft + 2 : padding;
+  // Add padding for italic slant and glyph overflow
+  const italicExtra = italic ? Math.ceil(fontSize * 0.4) : 0;
+  const padding = Math.max(2, Math.ceil(fontSize * 0.3));
+  const leftPadding = padding + italicExtra + maxLeft;
 
   const totalHeight = lineHeight * lines.length;
 
-  // Size canvas with adequate padding for glyphs that extend beyond em-square
-  canvas.width = maxWidth + leftPadding + padding;
-  canvas.height = totalHeight + topPadding + padding;
+  // Size canvas - add extra padding to ensure nothing is clipped
+  canvas.width = Math.ceil(maxWidth) + leftPadding + padding + italicExtra;
+  canvas.height = totalHeight + padding * 2;
 
-  // Clear and redraw
+  // Disable image smoothing for crisp pixel rendering
+  ctx.imageSmoothingEnabled = false;
+
+  // Clear canvas
   ctx.fillStyle = 'white';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Render text
+  // Re-set font after canvas resize (canvas resize clears context state)
   ctx.font = fontStyle;
   ctx.fillStyle = 'black';
   ctx.textBaseline = 'top';
+  ctx.imageSmoothingEnabled = false;
 
+  // Render text at integer pixel positions for best hinting
   for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], leftPadding, topPadding + i * lineHeight);
+    ctx.fillText(lines[i], Math.round(leftPadding), Math.round(padding + i * lineHeight));
   }
 
   // Get pixel data
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-  // Convert to stitches (any pixel that's not white becomes a stitch)
-  const rawStitches: { x: number; y: number }[] = [];
+  // Find bounding box and collect filled pixels
+  let minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
+  const filledPixels: { x: number; y: number }[] = [];
+
   for (let y = 0; y < canvas.height; y++) {
     for (let x = 0; x < canvas.width; x++) {
       const i = (y * canvas.width + x) * 4;
-      const r = imageData.data[i];
-      const g = imageData.data[i + 1];
-      const b = imageData.data[i + 2];
+      const brightness = (imageData.data[i] + imageData.data[i + 1] + imageData.data[i + 2]) / 3;
 
-      // Check if pixel is dark enough (text is rendered in black on white)
-      const brightness = (r + g + b) / 3;
-      if (brightness < 200) { // threshold for anti-aliased edges
-        rawStitches.push({ x, y });
+      // Use threshold to convert anti-aliased pixels to binary
+      // Lower threshold (< 180) captures more of the glyph including anti-aliased edges
+      if (brightness < 180) {
+        filledPixels.push({ x, y });
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
       }
     }
   }
 
-  if (rawStitches.length === 0) {
+  if (filledPixels.length === 0) {
     return { stitches: [], width: 0, height: 0 };
   }
 
-  // Find bounding box of actual stitches to trim empty space
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const s of rawStitches) {
-    minX = Math.min(minX, s.x);
-    minY = Math.min(minY, s.y);
-    maxX = Math.max(maxX, s.x);
-    maxY = Math.max(maxY, s.y);
-  }
+  // Calculate dimensions from bounding box
+  const finalWidth = maxX - minX + 1;
+  const finalHeight = maxY - minY + 1;
 
-  const rawWidth = maxX - minX + 1;
-  const rawHeight = maxY - minY + 1;
-
-  // Calculate scale factor to match target height
-  const scale = targetHeight / rawHeight;
-  const finalWidth = Math.round(rawWidth * scale);
-  const finalHeight = targetHeight;
-
-  // Scale the stitches to target size
-  // Create a 2D grid to accumulate scaled stitch positions
-  const grid: boolean[][] = Array(finalHeight).fill(null).map(() => Array(finalWidth).fill(false));
-
-  for (const s of rawStitches) {
-    const scaledX = Math.floor((s.x - minX) * scale);
-    const scaledY = Math.floor((s.y - minY) * scale);
-    if (scaledX >= 0 && scaledX < finalWidth && scaledY >= 0 && scaledY < finalHeight) {
-      grid[scaledY][scaledX] = true;
-    }
-  }
-
-  // Convert grid to stitches
-  const stitches: Stitch[] = [];
-  for (let y = 0; y < finalHeight; y++) {
-    for (let x = 0; x < finalWidth; x++) {
-      if (grid[y][x]) {
-        stitches.push({ x, y, colorId, completed: false });
-      }
-    }
-  }
+  // Convert to stitches, normalized to origin (0,0)
+  const stitches: Stitch[] = filledPixels.map(p => ({
+    x: p.x - minX,
+    y: p.y - minY,
+    colorId,
+    completed: false,
+  }));
 
   return { stitches, width: finalWidth, height: finalHeight };
 }
@@ -160,6 +136,7 @@ export function TextEditorDialog({
   onOpenFontBrowser,
   selectedFont,
   selectedWeight,
+  onWeightChange,
 }: TextEditorDialogProps) {
   const [text, setText] = useState('');
   const [fontSize, setFontSize] = useState(24);
@@ -173,15 +150,24 @@ export function TextEditorDialog({
   // Reset state when dialog opens
   useEffect(() => {
     if (isOpen) {
-      setSelectedColorId(initialColorId);
+      // Use initialColorId if it exists in palette, otherwise use first color, otherwise use a placeholder
+      const validColorId = colorPalette.find(c => c.id === initialColorId)
+        ? initialColorId
+        : colorPalette.length > 0
+          ? colorPalette[0].id
+          : '__black__';
+      setSelectedColorId(validColorId);
       setFontSizeInput('24'); // Reset to default
       setFontSize(24);
     }
-  }, [isOpen, initialColorId]);
+  }, [isOpen, initialColorId, colorPalette]);
 
-  // Get current color RGB
+  // Get current color RGB - default to black if no color selected
   const currentColor = colorPalette.find(c => c.id === selectedColorId);
   const colorRgb: [number, number, number] = currentColor?.rgb ?? [0, 0, 0];
+
+  // Effective color ID to use (for stitches) - if using placeholder, we'll need to add black to palette
+  const effectiveColorId = currentColor ? selectedColorId : '__black__';
 
   // Load the selected font
   useEffect(() => {
@@ -193,16 +179,32 @@ export function TextEditorDialog({
     loadFont();
   }, [selectedFont, selectedWeight]);
 
+  // Check if current font is a bitmap font
+  const isBitmap = isBitmapFont(selectedFont);
+
   // Generate preview when text or settings change
   const generatePreview = useCallback(() => {
-    if (!text.trim() || !fontLoaded) {
+    if (!text.trim()) {
       setPreviewData(null);
       return;
     }
 
-    const data = textToStitches(text, selectedFont, fontSize, selectedWeight, italic, selectedColorId);
+    // Use bitmap renderer for bitmap fonts (no font loading needed)
+    if (isBitmapFont(selectedFont)) {
+      const data = renderBitmapText(text, selectedFont, fontSize, effectiveColorId);
+      setPreviewData(data);
+      return;
+    }
+
+    // For other fonts, wait for font to load
+    if (!fontLoaded) {
+      setPreviewData(null);
+      return;
+    }
+
+    const data = textToStitchesRegular(text, selectedFont, fontSize, selectedWeight, italic, effectiveColorId);
     setPreviewData(data);
-  }, [text, selectedFont, fontSize, selectedWeight, italic, selectedColorId, fontLoaded]);
+  }, [text, selectedFont, fontSize, selectedWeight, italic, effectiveColorId, fontLoaded]);
 
   useEffect(() => {
     const debounce = setTimeout(generatePreview, 150);
@@ -249,7 +251,13 @@ export function TextEditorDialog({
 
   const handleConfirm = () => {
     if (previewData && previewData.stitches.length > 0) {
-      onConfirm(previewData.stitches, previewData.width, previewData.height);
+      // If no color was available in palette, add black
+      const colorToAdd: Color | undefined = !currentColor ? {
+        id: '__black__',
+        name: 'Black',
+        rgb: [0, 0, 0],
+      } : undefined;
+      onConfirm(previewData.stitches, previewData.width, previewData.height, colorToAdd);
       setText('');
       onClose();
     }
@@ -264,6 +272,7 @@ export function TextEditorDialog({
 
   const currentFontData = bundledFonts.find(f => f.family === selectedFont);
   const isBundledFont = !!currentFontData;
+  const currentBitmapFont = bitmapFonts.find(f => f.family === selectedFont);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -307,7 +316,8 @@ export function TextEditorDialog({
                   style={{ fontFamily: `"${selectedFont}", sans-serif` }}
                 >
                   {selectedFont}
-                  {!fontLoaded && <span className="text-gray-400 ml-2">(loading...)</span>}
+                  {!isBitmap && !fontLoaded && <span className="text-gray-400 ml-2">(loading...)</span>}
+                  {currentBitmapFont && <span className="text-xs text-green-600 ml-2">(pixel-perfect)</span>}
                   {isBundledFont && <span className="text-xs text-green-600 ml-2">(available)</span>}
                 </div>
                 <button
@@ -360,16 +370,18 @@ export function TextEditorDialog({
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Weight
-              </label>
-              <div className="px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-600">
-                {selectedWeight}
-              </div>
-            </div>
-
             <div className="flex items-center gap-2 pt-6">
+              <button
+                onClick={() => onWeightChange(selectedWeight >= 700 ? 400 : 700)}
+                className={`w-10 h-10 flex items-center justify-center rounded border ${
+                  selectedWeight >= 700
+                    ? 'bg-blue-500 text-white border-blue-500'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                }`}
+                title={selectedWeight >= 700 ? 'Bold' : 'Regular'}
+              >
+                <span className="font-bold">B</span>
+              </button>
               <button
                 onClick={() => setItalic(!italic)}
                 className={`w-10 h-10 flex items-center justify-center rounded border ${

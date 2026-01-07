@@ -8,6 +8,7 @@ import { NewProjectDialog } from './components/NewProjectDialog';
 import { ImportImageDialog } from './components/ImportImageDialog';
 import { TextEditorDialog } from './components/TextEditorDialog';
 import { FontBrowserDialog } from './components/FontBrowserDialog';
+import { BitmapFontEditor } from './components/BitmapFontEditor';
 import { DeleteLayerDialog } from './components/DeleteLayerDialog';
 import { ExportPdfDialog } from './components/ExportPdfDialog';
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog';
@@ -176,6 +177,7 @@ function App() {
   // Text tool state
   const [showTextEditor, setShowTextEditor] = useState(false);
   const [showFontBrowser, setShowFontBrowser] = useState(false);
+  const [showBitmapFontEditor, setShowBitmapFontEditor] = useState(false);
 
   // Ref to store the tool before space-bar pan (to restore on release)
   const toolBeforePanRef = useRef<string | null>(null);
@@ -463,6 +465,14 @@ function App() {
           if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
             showNewProject();
+          }
+          break;
+        case 'f':
+        case 'F':
+          // Ctrl+Shift+F opens bitmap font editor (dev tool)
+          if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+            e.preventDefault();
+            setShowBitmapFontEditor(true);
           }
           break;
       }
@@ -962,12 +972,17 @@ function App() {
   }, [preferences.autoSaveMinutes, pattern, currentFilePath, hasUnsavedChanges, handleSave]);
 
   // Handle text confirm - create a new layer with the text
-  const handleTextConfirm = useCallback((stitches: Stitch[], width: number, height: number) => {
+  const handleTextConfirm = useCallback((stitches: Stitch[], width: number, height: number, colorToAdd?: { id: string; name: string; rgb: [number, number, number] }) => {
     if (stitches.length === 0) return;
 
     // Get unique colors from the stitches
     const colorIds = new Set(stitches.map(s => s.colorId));
-    const colors = pattern?.colorPalette.filter(c => colorIds.has(c.id)) || [];
+    let colors = pattern?.colorPalette.filter(c => colorIds.has(c.id)) || [];
+
+    // If a new color needs to be added (e.g., black when palette was empty)
+    if (colorToAdd) {
+      colors = [...colors, colorToAdd];
+    }
 
     // Create a new layer with the text - position at center of canvas
     const offsetX = pattern ? Math.floor((pattern.canvas.width - width) / 2) : 0;
@@ -1199,6 +1214,27 @@ function App() {
                     >
                       Move to Center
                     </button>
+                    <div className="border-t border-gray-600 my-1" />
+                    {/* Advanced Submenu */}
+                    <div className="relative group">
+                      <button
+                        className="w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors flex items-center justify-between"
+                      >
+                        Advanced
+                        <span className="text-gray-400">▶</span>
+                      </button>
+                      {/* Invisible bridge to prevent gap between menu and submenu */}
+                      <div className="absolute left-full top-0 w-2 h-full hidden group-hover:block" />
+                      <div className="absolute left-full top-0 ml-1 bg-gray-700 rounded shadow-lg py-1 min-w-[180px] z-50 hidden group-hover:block">
+                        <button
+                          onClick={() => { setShowBitmapFontEditor(true); setShowToolsMenu(false); }}
+                          className="w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors"
+                        >
+                          Font Creator
+                          <span className="block text-xs text-gray-400">Ctrl+Shift+F</span>
+                        </button>
+                      </div>
+                    </div>
                 </div>
               )}
             </div>
@@ -1529,6 +1565,7 @@ function App() {
         onOpenFontBrowser={() => setShowFontBrowser(true)}
         selectedFont={selectedFont}
         selectedWeight={selectedFontWeight}
+        onWeightChange={setSelectedFontWeight}
       />
 
       <FontBrowserDialog
@@ -1537,6 +1574,12 @@ function App() {
         onSelectFont={handleFontSelect}
         currentFont={selectedFont}
         currentWeight={selectedFontWeight}
+      />
+
+      {/* Bitmap Font Editor - Dev Tool (Ctrl+Shift+F) */}
+      <BitmapFontEditor
+        isOpen={showBitmapFontEditor}
+        onClose={() => setShowBitmapFontEditor(false)}
       />
 
       {/* Delete Layer Confirmation Dialog */}
