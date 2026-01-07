@@ -1,9 +1,16 @@
-// DEV TOOL ONLY - Bitmap Font Editor
-// This component is for creating/editing bitmap font glyph data
-// Access via Ctrl+Shift+F in development mode
+// Font Creator - Create and edit custom bitmap fonts
+// Access via Ctrl+Shift+F or Tools menu
 
 import { useState, useCallback, useEffect } from 'react';
 import { bitmapFonts } from '../data/bitmapFonts';
+import {
+  getCustomFonts,
+  getCustomFont,
+  saveGlyphToFont,
+  saveCustomFont,
+  deleteCustomFont,
+  CustomFont,
+} from '../data/customFonts';
 
 interface BitmapFontEditorProps {
   isOpen: boolean;
@@ -139,11 +146,15 @@ function getCharTemplate(char: string, height: number): { width: number; pixels:
 
 export function BitmapFontEditor({ isOpen, onClose }: BitmapFontEditorProps) {
   // Font management
-  const [selectedFontName, setSelectedFontName] = useState(() =>
-    bitmapFonts.length > 0 ? bitmapFonts[0].family : 'New Font'
-  );
+  const [customFonts, setCustomFonts] = useState<CustomFont[]>(() => getCustomFonts());
+  const [selectedFontName, setSelectedFontName] = useState(() => {
+    const custom = getCustomFonts();
+    if (custom.length > 0) return custom[0].family;
+    return 'My Font';
+  });
   const [newFontName, setNewFontName] = useState('');
   const [showNewFontInput, setShowNewFontInput] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<string | null>(null);
 
   // Character editing
   const [selectedChar, setSelectedChar] = useState('A');
@@ -156,16 +167,43 @@ export function BitmapFontEditor({ isOpen, onClose }: BitmapFontEditorProps) {
   const [drawMode, setDrawMode] = useState<'draw' | 'erase'>('draw');
   const [exportedCode, setExportedCode] = useState('');
   const [importCode, setImportCode] = useState('');
+  // Track all modified glyphs: char -> { width, height, pixels }
+  const [modifiedGlyphs, setModifiedGlyphs] = useState<Record<string, { width: number; height: number; pixels: boolean[][] }>>({});
 
-  // Get available fonts (existing + ability to create new)
-  const existingFonts = bitmapFonts.map(f => f.family);
+  // Refresh custom fonts list
+  const refreshCustomFonts = useCallback(() => {
+    setCustomFonts(getCustomFonts());
+  }, []);
+
+  // Get available fonts (custom fonts for editing)
+  const customFontNames = customFonts.map(f => f.family);
+  const builtInFontNames = bitmapFonts.map(f => f.family);
+  const existingFonts = [...customFontNames, ...builtInFontNames];
+  const isCustomFont = customFontNames.includes(selectedFontName);
+
+  // Store current glyph to modified list when it changes
+  const storeCurrentGlyph = useCallback(() => {
+    setModifiedGlyphs(prev => ({
+      ...prev,
+      [selectedChar]: { width: gridWidth, height: gridHeight, pixels: pixels.map(row => [...row]) }
+    }));
+  }, [selectedChar, gridWidth, gridHeight, pixels]);
 
   // Load existing glyph data when font or character changes
   useEffect(() => {
-    const font = bitmapFonts.find(f => f.family === selectedFontName);
-    if (font) {
-      // Try to find glyph in any available size
-      for (const sizeData of font.sizes) {
+    // First check if we have unsaved modifications for this character
+    if (modifiedGlyphs[selectedChar]) {
+      const modified = modifiedGlyphs[selectedChar];
+      setGridWidth(modified.width);
+      setGridHeight(modified.height);
+      setPixels(modified.pixels.map(row => [...row]));
+      return;
+    }
+
+    // Check custom fonts
+    const customFont = getCustomFont(selectedFontName);
+    if (customFont) {
+      for (const sizeData of customFont.sizes) {
         if (sizeData.glyphs[selectedChar]) {
           const glyph = sizeData.glyphs[selectedChar];
           setGridWidth(glyph.width);
@@ -177,6 +215,23 @@ export function BitmapFontEditor({ isOpen, onClose }: BitmapFontEditorProps) {
         }
       }
     }
+
+    // Then check built-in bitmap fonts
+    const builtInFont = bitmapFonts.find(f => f.family === selectedFontName);
+    if (builtInFont) {
+      for (const sizeData of builtInFont.sizes) {
+        if (sizeData.glyphs[selectedChar]) {
+          const glyph = sizeData.glyphs[selectedChar];
+          setGridWidth(glyph.width);
+          setGridHeight(glyph.pixels.length);
+          setPixels(glyph.pixels.map(row =>
+            row.split('').map(c => c === '1')
+          ));
+          return;
+        }
+      }
+    }
+
     // No existing data - use template as starting point (default 8px height)
     const template = getCharTemplate(selectedChar, 8);
     if (template) {
@@ -188,7 +243,7 @@ export function BitmapFontEditor({ isOpen, onClose }: BitmapFontEditorProps) {
       setGridHeight(8);
       setPixels(Array(8).fill(null).map(() => Array(gridWidth).fill(false)));
     }
-  }, [selectedChar, selectedFontName]);
+  }, [selectedChar, selectedFontName, modifiedGlyphs]);
 
   const handleWidthChange = (newWidth: number) => {
     setGridWidth(newWidth);
@@ -239,17 +294,33 @@ export function BitmapFontEditor({ isOpen, onClose }: BitmapFontEditorProps) {
   };
 
   const handleMouseUp = () => {
+    if (isDrawing) {
+      // Store the current glyph when done drawing
+      storeCurrentGlyph();
+    }
     setIsDrawing(false);
   };
 
   // Clear grid
   const clearGrid = () => {
-    setPixels(Array(gridHeight).fill(null).map(() => Array(gridWidth).fill(false)));
+    const newPixels = Array(gridHeight).fill(null).map(() => Array(gridWidth).fill(false));
+    setPixels(newPixels);
+    setModifiedGlyphs(prev => ({
+      ...prev,
+      [selectedChar]: { width: gridWidth, height: gridHeight, pixels: newPixels }
+    }));
   };
 
   // Invert grid
   const invertGrid = () => {
-    setPixels(prev => prev.map(row => row.map(p => !p)));
+    setPixels(prev => {
+      const newPixels = prev.map(row => row.map(p => !p));
+      setModifiedGlyphs(prevMod => ({
+        ...prevMod,
+        [selectedChar]: { width: gridWidth, height: gridHeight, pixels: newPixels }
+      }));
+      return newPixels;
+    });
   };
 
   // Load template for current character at current grid height
@@ -258,15 +329,86 @@ export function BitmapFontEditor({ isOpen, onClose }: BitmapFontEditorProps) {
     if (template) {
       setGridWidth(template.width);
       setPixels(template.pixels);
+      setModifiedGlyphs(prev => ({
+        ...prev,
+        [selectedChar]: { width: template.width, height: gridHeight, pixels: template.pixels }
+      }));
     }
   };
 
   // Create new font
   const handleCreateFont = () => {
     if (newFontName.trim()) {
-      setSelectedFontName(newFontName.trim());
+      const fontName = newFontName.trim();
+      // Create empty font in storage
+      saveCustomFont({
+        family: fontName,
+        description: 'Custom font',
+        category: 'custom',
+        sizes: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      refreshCustomFonts();
+      setSelectedFontName(fontName);
       setNewFontName('');
       setShowNewFontInput(false);
+      setSaveStatus('Font created!');
+      setTimeout(() => setSaveStatus(null), 2000);
+    }
+  };
+
+  // Save font - saves all templates plus any modifications
+  const handleSave = () => {
+    const height = gridHeight;
+    let savedCount = 0;
+
+    // First save all default templates
+    for (const char of DEFAULT_CHARS) {
+      const template = getCharTemplate(char, height);
+      if (template) {
+        const pixelStrings = template.pixels.map(row =>
+          row.map(p => p ? '1' : '0').join('')
+        );
+        saveGlyphToFont(selectedFontName, char, {
+          width: template.width,
+          pixels: pixelStrings,
+        }, height);
+        savedCount++;
+      }
+    }
+
+    // Then overwrite with any modified glyphs (including current)
+    const allModified = {
+      ...modifiedGlyphs,
+      [selectedChar]: { width: gridWidth, height: gridHeight, pixels: pixels.map(row => [...row]) }
+    };
+
+    for (const [char, glyph] of Object.entries(allModified)) {
+      const pixelStrings = glyph.pixels.map(row =>
+        row.map(p => p ? '1' : '0').join('')
+      );
+      saveGlyphToFont(selectedFontName, char, {
+        width: glyph.width,
+        pixels: pixelStrings,
+      }, glyph.height);
+    }
+
+    refreshCustomFonts();
+    setModifiedGlyphs({});
+    setSaveStatus('Changes saved');
+    setTimeout(() => setSaveStatus(null), 2000);
+  };
+
+  // Delete current font
+  const handleDeleteFont = () => {
+    if (confirm(`Delete font "${selectedFontName}"? This cannot be undone.`)) {
+      deleteCustomFont(selectedFontName);
+      refreshCustomFonts();
+      const remaining = getCustomFonts();
+      setSelectedFontName(remaining.length > 0 ? remaining[0].family : 'My Font');
+      setSaveStatus('Font deleted');
+      setTimeout(() => setSaveStatus(null), 2000);
     }
   };
 
@@ -327,8 +469,13 @@ export function BitmapFontEditor({ isOpen, onClose }: BitmapFontEditorProps) {
             const cleanRow = row.replace(/'/g, '');
             return cleanRow.split('').map(c => c === '1');
           });
-          setGridWidth(newPixels[0]?.length ?? 5);
+          const newWidth = newPixels[0]?.length ?? 5;
+          setGridWidth(newWidth);
           setPixels(newPixels);
+          setModifiedGlyphs(prev => ({
+            ...prev,
+            [selectedChar]: { width: newWidth, height: newPixels.length, pixels: newPixels }
+          }));
         }
       }
     } catch (e) {
@@ -352,7 +499,7 @@ export function BitmapFontEditor({ isOpen, onClose }: BitmapFontEditorProps) {
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <span className="text-xs px-2 py-1 bg-yellow-200 text-yellow-800 rounded font-mono">DEV TOOL</span>
-              <h2 className="text-lg font-semibold text-gray-900">Bitmap Font Editor</h2>
+              <h2 className="text-lg font-semibold text-gray-900">Font Creator</h2>
             </div>
 
             {/* Font Selector */}
@@ -363,9 +510,18 @@ export function BitmapFontEditor({ isOpen, onClose }: BitmapFontEditorProps) {
                 onChange={(e) => setSelectedFontName(e.target.value)}
                 className="px-2 py-1 border border-gray-300 rounded text-sm"
               >
-                {existingFonts.map(name => (
-                  <option key={name} value={name}>{name}</option>
-                ))}
+                {customFontNames.length > 0 && (
+                  <optgroup label="My Fonts">
+                    {customFontNames.map(name => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </optgroup>
+                )}
+                <optgroup label="Built-in Fonts">
+                  {builtInFontNames.map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </optgroup>
                 {!existingFonts.includes(selectedFontName) && (
                   <option value={selectedFontName}>{selectedFontName} (new)</option>
                 )}
@@ -376,16 +532,42 @@ export function BitmapFontEditor({ isOpen, onClose }: BitmapFontEditorProps) {
               >
                 + New
               </button>
+              {isCustomFont && (
+                <button
+                  onClick={handleDeleteFont}
+                  className="px-2 py-1 text-sm bg-red-500 text-white rounded hover:bg-red-600"
+                  title="Delete this font"
+                >
+                  Delete
+                </button>
+              )}
             </div>
 
           </div>
 
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-xl"
-          >
-            ×
-          </button>
+          {/* Save Button and Status */}
+          <div className="flex items-center gap-3">
+            {saveStatus && (
+              <span className="text-sm text-green-600 font-medium">{saveStatus}</span>
+            )}
+            {Object.keys(modifiedGlyphs).length > 0 && !saveStatus && (
+              <span className="text-sm text-orange-500">
+                {Object.keys(modifiedGlyphs).length} unsaved glyph{Object.keys(modifiedGlyphs).length > 1 ? 's' : ''}
+              </span>
+            )}
+            <button
+              onClick={handleSave}
+              className="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600 font-medium"
+            >
+              Save
+            </button>
+            <button
+              onClick={onClose}
+              className="px-3 py-1 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+            >
+              Close
+            </button>
+          </div>
         </div>
 
         {/* New Font Name Input */}

@@ -17,7 +17,7 @@ import { SymbolAssignmentDialog } from './components/SymbolAssignmentDialog';
 import { OverlayImageDialog } from './components/OverlayImageDialog';
 import { UploadImageDialog } from './components/UploadImageDialog';
 import { ToggleSwitch } from './components/ToggleSwitch';
-import { usePatternStore, Pattern, RulerUnit, Stitch } from './stores/patternStore';
+import { usePatternStore, Pattern, RulerUnit, Stitch, TextLayerMetadata } from './stores/patternStore';
 import { useSessionHistoryStore } from './stores/sessionHistoryStore';
 import { loadBundledFonts } from './data/bundledFonts';
 import { invoke } from '@tauri-apps/api/core';
@@ -972,7 +972,13 @@ function App() {
   }, [preferences.autoSaveMinutes, pattern, currentFilePath, hasUnsavedChanges, handleSave]);
 
   // Handle text confirm - create a new layer with the text
-  const handleTextConfirm = useCallback((stitches: Stitch[], width: number, height: number, colorToAdd?: { id: string; name: string; rgb: [number, number, number] }) => {
+  const handleTextConfirm = useCallback((
+    stitches: Stitch[],
+    width: number,
+    height: number,
+    colorToAdd?: { id: string; name: string; rgb: [number, number, number] },
+    metadata?: TextLayerMetadata
+  ) => {
     if (stitches.length === 0) return;
 
     // Get unique colors from the stitches
@@ -996,7 +1002,7 @@ function App() {
 
     // Generate a unique layer name
     const layerName = `Text ${new Date().toLocaleTimeString()}`;
-    importAsLayer(layerName, colors, positionedStitches);
+    importAsLayer(layerName, colors, positionedStitches, metadata);
 
     // Switch to select tool and select the new layer for transformation
     setTool('select');
@@ -1574,6 +1580,7 @@ function App() {
         onSelectFont={handleFontSelect}
         currentFont={selectedFont}
         currentWeight={selectedFontWeight}
+        onOpenFontCreator={() => setShowBitmapFontEditor(true)}
       />
 
       {/* Bitmap Font Editor - Dev Tool (Ctrl+Shift+F) */}

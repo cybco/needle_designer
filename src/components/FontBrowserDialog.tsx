@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { bundledFonts, isFontLoaded } from '../data/bundledFonts';
 import { googleFonts, loadGoogleFont, parseVariantWeight } from '../data/googleFonts';
-import { pixelFonts, loadPixelFont, isPixelFontLoaded } from '../data/pixelFonts';
-import { bitmapFonts, isBitmapFont } from '../data/bitmapFonts';
+import { getCustomFonts, deleteCustomFont, CustomFont } from '../data/customFonts';
 
 interface FontBrowserDialogProps {
   isOpen: boolean;
@@ -10,10 +9,11 @@ interface FontBrowserDialogProps {
   onSelectFont: (fontFamily: string, weight: number) => void;
   currentFont: string;
   currentWeight: number;
+  onOpenFontCreator?: () => void;
 }
 
-type Tab = 'bundled' | 'bitmap' | 'pixel' | 'google' | 'recent';
-type Category = 'all' | 'serif' | 'sans-serif' | 'display' | 'handwriting' | 'monospace' | 'pixel';
+type Tab = 'myfonts' | 'google' | 'recent';
+type Category = 'all' | 'serif' | 'sans-serif' | 'display' | 'handwriting' | 'monospace';
 
 const RECENT_FONTS_KEY = 'needle-designer-recent-fonts';
 const DOWNLOADED_FONTS_KEY = 'needle-designer-downloaded-fonts';
@@ -38,6 +38,11 @@ function addRecentFont(family: string, weight: number): void {
   const recent = getRecentFonts().filter(f => f.family !== family);
   recent.unshift({ family, weight, timestamp: Date.now() });
   localStorage.setItem(RECENT_FONTS_KEY, JSON.stringify(recent.slice(0, MAX_RECENT_FONTS)));
+}
+
+function removeRecentFont(family: string): void {
+  const recent = getRecentFonts().filter(f => f.family !== family);
+  localStorage.setItem(RECENT_FONTS_KEY, JSON.stringify(recent));
 }
 
 // Track downloaded fonts in localStorage
@@ -116,14 +121,44 @@ function FontCard({ family, category, weight, isAvailable, isDownloading, isSele
   );
 }
 
+// Small preview renderer for custom bitmap font glyphs
+function BitmapGlyphPreview({ pixels, width, height }: { pixels: string[]; width: number; height: number }) {
+  const scale = Math.max(1, Math.floor(28 / height)); // Scale to fit ~28px height
+
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: `repeat(${width}, ${scale}px)`,
+        gap: 0,
+      }}
+    >
+      {pixels.map((row, y) =>
+        row.split('').map((char, x) => (
+          <div
+            key={`${x}-${y}`}
+            style={{
+              width: scale,
+              height: scale,
+              backgroundColor: char === '1' ? '#374151' : 'transparent',
+            }}
+          />
+        ))
+      )}
+    </div>
+  );
+}
+
 export function FontBrowserDialog({
   isOpen,
   onClose,
   onSelectFont,
   currentFont,
   currentWeight,
+  onOpenFontCreator,
 }: FontBrowserDialogProps) {
-  const [activeTab, setActiveTab] = useState<Tab>('bundled');
+  const [customFonts, setCustomFonts] = useState<CustomFont[]>([]);
+  const [activeTab, setActiveTab] = useState<Tab>('recent');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<Category>('all');
   const [selectedFont, setSelectedFont] = useState<string>(currentFont);
@@ -136,31 +171,33 @@ export function FontBrowserDialog({
   // Load state from localStorage when dialog opens
   useEffect(() => {
     if (isOpen) {
+      const custom = getCustomFonts();
+      setCustomFonts(custom);
       setRecentFonts(getRecentFonts());
       setDownloadedFonts(getDownloadedFonts());
       setSelectedFont(currentFont);
       setSelectedWeight(currentWeight);
       setIsConfirming(false);
+      // Switch to My Fonts tab if there are custom fonts and current font is a custom one
+      if (custom.some(f => f.family === currentFont)) {
+        setActiveTab('myfonts');
+      }
     }
   }, [isOpen, currentFont, currentWeight]);
 
-  // Check if font is available (bundled, bitmap, pixel, or downloaded)
+  // Check if font is available (bundled, downloaded, or custom)
   const isFontAvailable = useCallback((family: string): boolean => {
     // Bundled fonts are always available
     if (bundledFonts.some(f => f.family === family)) {
       return true;
     }
-    // Bitmap fonts are always available (data is bundled)
-    if (isBitmapFont(family)) {
-      return true;
-    }
-    // Check if it's a pixel font that's loaded
-    if (pixelFonts.some(f => f.family === family) && isPixelFontLoaded(family)) {
+    // Custom fonts are always available (stored locally)
+    if (customFonts.some(f => f.family === family)) {
       return true;
     }
     // Check if downloaded
     return downloadedFonts.has(family);
-  }, [downloadedFonts]);
+  }, [downloadedFonts, customFonts]);
 
   // Download a font
   const downloadFont = useCallback(async (family: string, weight: number): Promise<boolean> => {
@@ -177,13 +214,7 @@ export function FontBrowserDialog({
     setDownloadingFonts(prev => new Set(prev).add(family));
 
     try {
-      // Check if it's a pixel font and load accordingly
-      const isPixel = pixelFonts.some(f => f.family === family);
-      if (isPixel) {
-        loadPixelFont(family, weight);
-      } else {
-        loadGoogleFont(family, weight);
-      }
+      loadGoogleFont(family, weight);
 
       // Wait for font to load (with timeout)
       const maxWait = 10000; // 10 seconds
@@ -261,12 +292,6 @@ export function FontBrowserDialog({
     const bundled = bundledFonts.find(f => f.family === family);
     if (bundled) return bundled.weights;
 
-    // Bitmap fonts only have one weight (400)
-    if (isBitmapFont(family)) return [400];
-
-    const pixel = pixelFonts.find(f => f.family === family);
-    if (pixel) return pixel.weights;
-
     const google = googleFonts.find(f => f.family === family);
     if (google) {
       const weights = new Set<number>();
@@ -288,7 +313,6 @@ export function FontBrowserDialog({
     });
   };
 
-  const filteredBundledFonts = filterFonts(bundledFonts);
   const filteredGoogleFonts = filterFonts(googleFonts).slice(0, 100); // Limit for performance
 
   if (!isOpen) return null;
@@ -298,7 +322,7 @@ export function FontBrowserDialog({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-[800px] max-h-[90vh] flex flex-col">
+      <div className="bg-white rounded-lg shadow-xl w-[800px] h-[700px] flex flex-col">
         {/* Header */}
         <div className="p-4 border-b border-gray-200 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900">Choose Font</h2>
@@ -314,34 +338,14 @@ export function FontBrowserDialog({
         <div className="border-b border-gray-200">
           <div className="flex">
             <button
-              onClick={() => setActiveTab('bundled')}
+              onClick={() => setActiveTab('recent')}
               className={`px-4 py-2 text-sm font-medium border-b-2 ${
-                activeTab === 'bundled'
+                activeTab === 'recent'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
-              Bundled ({bundledFonts.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('bitmap')}
-              className={`px-4 py-2 text-sm font-medium border-b-2 ${
-                activeTab === 'bitmap'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              Bitmap ({bitmapFonts.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('pixel')}
-              className={`px-4 py-2 text-sm font-medium border-b-2 ${
-                activeTab === 'pixel'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              Pixel ({pixelFonts.length})
+              Recent
             </button>
             <button
               onClick={() => setActiveTab('google')}
@@ -354,20 +358,20 @@ export function FontBrowserDialog({
               Google Fonts ({googleFonts.length})
             </button>
             <button
-              onClick={() => setActiveTab('recent')}
+              onClick={() => setActiveTab('myfonts')}
               className={`px-4 py-2 text-sm font-medium border-b-2 ${
-                activeTab === 'recent'
+                activeTab === 'myfonts'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
             >
-              Recent ({recentFonts.length})
+              My Fonts ({customFonts.length})
             </button>
           </div>
         </div>
 
         {/* Search and Filter */}
-        {activeTab !== 'recent' && (
+        {activeTab === 'google' && (
           <div className="p-4 border-b border-gray-200 flex gap-4">
             <div className="flex-1">
               <input
@@ -397,88 +401,108 @@ export function FontBrowserDialog({
 
         {/* Font List */}
         <div className="flex-1 overflow-y-auto p-4">
-          {activeTab === 'bundled' && (
-            <div className="grid grid-cols-2 gap-3">
-              {filteredBundledFonts.map((font) => (
-                <FontCard
-                  key={font.family}
-                  family={font.family}
-                  category={font.category}
-                  weight={font.weights.includes(selectedWeight) ? selectedWeight : font.weights[0]}
-                  isAvailable={true}
-                  isDownloading={false}
-                  isSelected={selectedFont === font.family}
-                  onClick={() => handleSelectFont(font.family, font.weights.includes(selectedWeight) ? selectedWeight : font.weights[0])}
-                />
-              ))}
-              {filteredBundledFonts.length === 0 && (
-                <p className="col-span-2 text-center text-gray-500 py-8">No fonts match your search</p>
+          {activeTab === 'myfonts' && (
+            <div>
+              {customFonts.length === 0 ? (
+                <div className="text-center py-12">
+                  <p className="text-gray-500 mb-4">No custom fonts yet</p>
+                  {onOpenFontCreator && (
+                    <div className="flex items-center justify-center gap-2">
+                      <span className="text-xs px-2 py-1 bg-yellow-200 text-yellow-800 rounded font-mono">DEV TOOL</span>
+                      <button
+                        onClick={() => {
+                          onClose();
+                          onOpenFontCreator();
+                        }}
+                        className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
+                      >
+                        Open Font Creator
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  {onOpenFontCreator && (
+                    <div className="mb-4 flex items-center gap-2">
+                      <span className="text-xs px-2 py-1 bg-yellow-200 text-yellow-800 rounded font-mono">DEV TOOL</span>
+                      <button
+                        onClick={() => {
+                          onClose();
+                          onOpenFontCreator();
+                        }}
+                        className="px-3 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600"
+                      >
+                        Open Font Creator
+                      </button>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-3">
+                  {customFonts.map((font) => {
+                    // Get available heights from the font
+                    const heights = font.sizes.map(s => s.height);
+                    const displayHeight = heights[0] || 8;
+                    const glyphCount = font.sizes.reduce((sum, s) => sum + Object.keys(s.glyphs).length, 0);
+
+                    return (
+                      <div
+                        key={font.family}
+                        onClick={() => {
+                          setSelectedFont(font.family);
+                          setSelectedWeight(400);
+                        }}
+                        className={`p-3 border rounded-lg cursor-pointer transition-all ${
+                          selectedFont === font.family
+                            ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200'
+                            : 'border-gray-200 hover:border-gray-400 hover:bg-gray-50'
+                        }`}
+                      >
+                        {/* Render a preview using actual glyph data */}
+                        <div className="h-8 mb-2 flex items-center overflow-hidden">
+                          {font.sizes[0]?.glyphs['A'] ? (
+                            <BitmapGlyphPreview
+                              pixels={font.sizes[0].glyphs['A'].pixels}
+                              width={font.sizes[0].glyphs['A'].width}
+                              height={font.sizes[0].height}
+                            />
+                          ) : (
+                            <span className="text-gray-400 text-sm">{font.family}</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-gray-700 truncate">{font.family}</span>
+                          <span className="text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">bitmap</span>
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1 flex justify-between">
+                          <span>{glyphCount} glyphs</span>
+                          <span>Height: {displayHeight}px</span>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (confirm(`Delete "${font.family}"?`)) {
+                              deleteCustomFont(font.family);
+                              setCustomFonts(getCustomFonts());
+                              if (selectedFont === font.family) {
+                                setSelectedFont(bundledFonts[0]?.family || '');
+                              }
+                            }
+                          }}
+                          className="mt-2 text-xs text-red-500 hover:text-red-700"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    );
+                  })}
+                  </div>
+                </div>
               )}
-            </div>
-          )}
-
-          {activeTab === 'bitmap' && (
-            <div>
-              <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-                <p className="text-sm text-green-800">
-                  <strong>Pixel-Perfect Fonts:</strong> These fonts use pre-rendered bitmap data for guaranteed crisp rendering at small sizes. Perfect for needlepoint text.
-                </p>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                {bitmapFonts.map((font) => (
-                  <FontCard
-                    key={font.family}
-                    family={font.family}
-                    category="bitmap"
-                    weight={400}
-                    isAvailable={true}
-                    isDownloading={false}
-                    isSelected={selectedFont === font.family}
-                    onClick={() => handleSelectFont(font.family, 400)}
-                  />
-                ))}
-                {bitmapFonts.length === 0 && (
-                  <p className="col-span-2 text-center text-gray-500 py-8">No bitmap fonts available</p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'pixel' && (
-            <div>
-              <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                <p className="text-sm text-amber-800">
-                  These fonts have a retro/pixelated style. For best results, use sizes 16 or larger. Very small sizes (under 12) may not render clearly.
-                </p>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                {pixelFonts.map((font) => {
-                  const available = isPixelFontLoaded(font.family) || downloadedFonts.has(font.family);
-                  const downloading = downloadingFonts.has(font.family);
-                  return (
-                    <FontCard
-                      key={font.family}
-                      family={font.family}
-                      category={font.category}
-                      weight={font.weights.includes(selectedWeight) ? selectedWeight : font.weights[0]}
-                      isAvailable={available}
-                      isDownloading={downloading}
-                      isSelected={selectedFont === font.family}
-                      onClick={() => handleSelectFont(font.family, font.weights.includes(selectedWeight) ? selectedWeight : font.weights[0])}
-                    />
-                  );
-                })}
-              </div>
             </div>
           )}
 
           {activeTab === 'google' && (
             <div>
-              <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                <p className="text-sm text-amber-800">
-                  Note: Google Fonts are designed for screen display and may not render optimally at small stitch sizes. For best results under 20 stitches, try the Pixel fonts tab.
-                </p>
-              </div>
               <div className="grid grid-cols-2 gap-3">
                 {filteredGoogleFonts.map((font) => {
                   const defaultWeight = font.variants.includes('regular') ? 400 : parseVariantWeight(font.variants[0]);
@@ -511,31 +535,53 @@ export function FontBrowserDialog({
 
           {activeTab === 'recent' && (
             <div className="grid grid-cols-2 gap-3">
+              {/* Recent fonts first */}
               {recentFonts.map((font) => {
                 const available = isFontAvailable(font.family);
                 const downloading = downloadingFonts.has(font.family);
-                // Find category from bitmap fonts, pixel fonts, bundled fonts, or google fonts
-                const bitmapFont = bitmapFonts.find(b => b.family === font.family);
-                const pixelFont = pixelFonts.find(p => p.family === font.family);
                 const bundledFont = bundledFonts.find(b => b.family === font.family);
                 const googleFont = googleFonts.find(g => g.family === font.family);
-                const category = bitmapFont?.category || pixelFont?.category || bundledFont?.category || googleFont?.category || 'sans-serif';
+                const category = bundledFont?.category || googleFont?.category || 'sans-serif';
                 return (
+                  <div key={font.family} className="relative">
+                    <FontCard
+                      family={font.family}
+                      category={category}
+                      weight={font.weight}
+                      isAvailable={available}
+                      isDownloading={downloading}
+                      isSelected={selectedFont === font.family}
+                      onClick={() => handleSelectFont(font.family, font.weight)}
+                    />
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeRecentFont(font.family);
+                        setRecentFonts(getRecentFonts());
+                      }}
+                      className="absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded-full bg-gray-200 hover:bg-red-500 hover:text-white text-gray-500 text-xs"
+                      title="Remove from recent"
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+              {/* Bundled fonts (excluding ones already in recent) */}
+              {bundledFonts
+                .filter(font => !recentFonts.some(r => r.family === font.family))
+                .map((font) => (
                   <FontCard
                     key={font.family}
                     family={font.family}
-                    category={category}
-                    weight={font.weight}
-                    isAvailable={available}
-                    isDownloading={downloading}
+                    category={font.category}
+                    weight={font.weights.includes(selectedWeight) ? selectedWeight : font.weights[0]}
+                    isAvailable={true}
+                    isDownloading={false}
                     isSelected={selectedFont === font.family}
-                    onClick={() => handleSelectFont(font.family, font.weight)}
+                    onClick={() => handleSelectFont(font.family, font.weights.includes(selectedWeight) ? selectedWeight : font.weights[0])}
                   />
-                );
-              })}
-              {recentFonts.length === 0 && (
-                <p className="col-span-2 text-center text-gray-500 py-8">No recently used fonts</p>
-              )}
+                ))}
             </div>
           )}
         </div>

@@ -5,6 +5,7 @@ import {
   getNextAvailableSymbol,
   assignMissingSymbols,
 } from '../utils/symbolAssignment';
+import { renderTextToStitches } from '../utils/textToStitches';
 
 // Generate a unique file ID for session history tracking
 export function generateFileId(): string {
@@ -28,12 +29,26 @@ export interface Stitch {
   completed: boolean;
 }
 
+// Metadata stored with text layers for re-rendering on resize
+export interface TextLayerMetadata {
+  type: 'text';
+  text: string;
+  fontFamily: string;
+  fontWeight: number;
+  italic: boolean;
+  colorId: string;
+  boldness: number;
+}
+
+export type LayerMetadata = TextLayerMetadata; // Extensible for other layer types
+
 export interface Layer {
   id: string;
   name: string;
   visible: boolean;
   locked: boolean;
   stitches: Stitch[];
+  metadata?: LayerMetadata; // Optional metadata for special layer types
 }
 
 export interface CanvasConfig {
@@ -161,7 +176,7 @@ interface PatternState {
   duplicateLayer: (layerId: string) => void;
 
   // Import as layer
-  importAsLayer: (name: string, colors: Color[], stitches: Stitch[]) => void;
+  importAsLayer: (name: string, colors: Color[], stitches: Stitch[], metadata?: LayerMetadata) => void;
 
   // Symbol assignment actions
   updateColorSymbol: (colorId: string, symbol: string) => void;
@@ -1153,7 +1168,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
   },
 
   // Import as layer
-  importAsLayer: (name, colors, stitches) => {
+  importAsLayer: (name, colors, stitches, metadata) => {
     const { pattern } = get();
     if (!pattern) return;
 
@@ -1205,6 +1220,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
       visible: true,
       locked: false,
       stitches: remappedStitches,
+      metadata,
     };
 
     console.log('importAsLayer:', {
@@ -1547,15 +1563,48 @@ export const usePatternStore = create<PatternState>((set, get) => {
     const { pattern, selection } = get();
     if (!pattern || !selection || !selection.isResizing || !selection.originalBounds || !selection.originalStitches) return;
 
-    // Resample stitches to new bounds
-    const resampledStitches = resampleStitches(
-      selection.originalStitches,
-      selection.originalBounds,
-      selection.bounds
-    );
+    // Get layer to check for text metadata
+    const layer = pattern.layers.find(l => l.id === selection.layerId);
+    const textMetadata = layer?.metadata?.type === 'text' ? layer.metadata : null;
 
-    // Recalculate bounds after resample
-    const newBounds = calculateLayerBounds(resampledStitches);
+    let finalStitches: Stitch[];
+    let updatedMetadata = layer?.metadata;
+
+    // For text layers, re-render at the new size for best quality
+    if (textMetadata && selection.bounds.height !== selection.originalBounds.height) {
+      const newTargetHeight = selection.bounds.height;
+
+      // Re-render text at new size
+      const rendered = renderTextToStitches({
+        text: textMetadata.text,
+        fontFamily: textMetadata.fontFamily,
+        fontWeight: textMetadata.fontWeight,
+        italic: textMetadata.italic,
+        targetHeight: newTargetHeight,
+        colorId: textMetadata.colorId,
+        boldness: textMetadata.boldness,
+      });
+
+      // Position the new stitches at the selection bounds position
+      finalStitches = rendered.stitches.map(s => ({
+        ...s,
+        x: s.x + selection.bounds.x,
+        y: s.y + selection.bounds.y,
+      }));
+
+      // Update metadata with new dimensions would happen automatically
+      // since the metadata stores parameters, not cached results
+    } else {
+      // For non-text layers or when only moving (not resizing), use resample
+      finalStitches = resampleStitches(
+        selection.originalStitches,
+        selection.originalBounds,
+        selection.bounds
+      );
+    }
+
+    // Recalculate bounds after transform
+    const newBounds = calculateLayerBounds(finalStitches);
 
     // For floating selections, just update the floating stitches without modifying layers
     if (selection.floatingStitches) {
@@ -1568,7 +1617,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
           dragStart: null,
           originalBounds: null,
           originalStitches: null,
-          floatingStitches: resampledStitches,
+          floatingStitches: finalStitches,
         } : null,
       });
       return;
@@ -1580,7 +1629,8 @@ export const usePatternStore = create<PatternState>((set, get) => {
     const updatedLayers = [...pattern.layers];
     updatedLayers[layerIndex] = {
       ...pattern.layers[layerIndex],
-      stitches: resampledStitches,
+      stitches: finalStitches,
+      metadata: updatedMetadata,
     };
 
     set({

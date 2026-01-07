@@ -1,130 +1,23 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Stitch, Color } from '../stores/patternStore';
 import { bundledFonts, waitForFont } from '../data/bundledFonts';
-import { isBitmapFont, bitmapFonts } from '../data/bitmapFonts';
-import { renderBitmapText } from '../data/bitmapFontRenderer';
+import {
+  generateTextPreview,
+  TextLayerMetadata,
+  createTextLayerMetadata,
+} from '../utils/textToStitches';
+import { getCustomFont } from '../data/customFonts';
 
 interface TextEditorDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (stitches: Stitch[], width: number, height: number, colorToAdd?: Color) => void;
+  onConfirm: (stitches: Stitch[], width: number, height: number, colorToAdd?: Color, metadata?: TextLayerMetadata) => void;
   colorPalette: Color[];
   initialColorId: string;
   onOpenFontBrowser: () => void;
   selectedFont: string;
   selectedWeight: number;
   onWeightChange: (weight: number) => void;
-}
-
-// Convert text to stitches using canvas rendering
-// targetHeight is the desired height in stitches
-// Uses direct pixel rendering at target size to leverage browser font hinting
-function textToStitchesRegular(
-  text: string,
-  fontFamily: string,
-  targetHeight: number,
-  fontWeight: number,
-  italic: boolean,
-  colorId: string
-): { stitches: Stitch[]; width: number; height: number } {
-  // Create temporary canvas
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-
-  // Render directly at target pixel size - let the browser's font hinting do the work
-  // This produces much better results at small sizes than downscaling
-  const fontSize = targetHeight;
-
-  // Set up font - use pixel units directly
-  const fontStyle = `${italic ? 'italic ' : ''}${fontWeight} ${fontSize}px "${fontFamily}"`;
-  ctx.font = fontStyle;
-
-  // Handle multiline text
-  const lines = text.split('\n');
-  const lineHeight = Math.ceil(fontSize * 1.2);
-
-  // Measure text to determine canvas size
-  let maxWidth = 0;
-  let maxLeft = 0;
-
-  for (const line of lines) {
-    const metrics = ctx.measureText(line);
-    maxWidth = Math.max(maxWidth, Math.ceil(metrics.width));
-    if (metrics.actualBoundingBoxLeft !== undefined) {
-      maxLeft = Math.max(maxLeft, Math.ceil(metrics.actualBoundingBoxLeft));
-    }
-  }
-
-  // Add padding for italic slant and glyph overflow
-  const italicExtra = italic ? Math.ceil(fontSize * 0.4) : 0;
-  const padding = Math.max(2, Math.ceil(fontSize * 0.3));
-  const leftPadding = padding + italicExtra + maxLeft;
-
-  const totalHeight = lineHeight * lines.length;
-
-  // Size canvas - add extra padding to ensure nothing is clipped
-  canvas.width = Math.ceil(maxWidth) + leftPadding + padding + italicExtra;
-  canvas.height = totalHeight + padding * 2;
-
-  // Disable image smoothing for crisp pixel rendering
-  ctx.imageSmoothingEnabled = false;
-
-  // Clear canvas
-  ctx.fillStyle = 'white';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  // Re-set font after canvas resize (canvas resize clears context state)
-  ctx.font = fontStyle;
-  ctx.fillStyle = 'black';
-  ctx.textBaseline = 'top';
-  ctx.imageSmoothingEnabled = false;
-
-  // Render text at integer pixel positions for best hinting
-  for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], Math.round(leftPadding), Math.round(padding + i * lineHeight));
-  }
-
-  // Get pixel data
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-  // Find bounding box and collect filled pixels
-  let minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
-  const filledPixels: { x: number; y: number }[] = [];
-
-  for (let y = 0; y < canvas.height; y++) {
-    for (let x = 0; x < canvas.width; x++) {
-      const i = (y * canvas.width + x) * 4;
-      const brightness = (imageData.data[i] + imageData.data[i + 1] + imageData.data[i + 2]) / 3;
-
-      // Use threshold to convert anti-aliased pixels to binary
-      // Lower threshold (< 180) captures more of the glyph including anti-aliased edges
-      if (brightness < 180) {
-        filledPixels.push({ x, y });
-        minX = Math.min(minX, x);
-        minY = Math.min(minY, y);
-        maxX = Math.max(maxX, x);
-        maxY = Math.max(maxY, y);
-      }
-    }
-  }
-
-  if (filledPixels.length === 0) {
-    return { stitches: [], width: 0, height: 0 };
-  }
-
-  // Calculate dimensions from bounding box
-  const finalWidth = maxX - minX + 1;
-  const finalHeight = maxY - minY + 1;
-
-  // Convert to stitches, normalized to origin (0,0)
-  const stitches: Stitch[] = filledPixels.map(p => ({
-    x: p.x - minX,
-    y: p.y - minY,
-    colorId,
-    completed: false,
-  }));
-
-  return { stitches, width: finalWidth, height: finalHeight };
 }
 
 export function TextEditorDialog({
@@ -138,14 +31,37 @@ export function TextEditorDialog({
   selectedWeight,
   onWeightChange,
 }: TextEditorDialogProps) {
+  // Default values for reset
+  const DEFAULT_FONT_SIZE = 24;
+  const DEFAULT_BOLDNESS = 0.5;
+  const DEFAULT_ITALIC = false;
+
   const [text, setText] = useState('');
-  const [fontSize, setFontSize] = useState(24);
-  const [fontSizeInput, setFontSizeInput] = useState('24'); // Local string for free typing
-  const [italic, setItalic] = useState(false);
+  const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
+  const [fontSizeInput, setFontSizeInput] = useState(String(DEFAULT_FONT_SIZE));
+  const [italic, setItalic] = useState(DEFAULT_ITALIC);
+  const [boldness, setBoldness] = useState(DEFAULT_BOLDNESS);
   const [selectedColorId, setSelectedColorId] = useState(initialColorId);
-  const [previewData, setPreviewData] = useState<{ stitches: Stitch[]; width: number; height: number } | null>(null);
+  const [previewData, setPreviewData] = useState<{
+    stitches: Stitch[];
+    width: number;
+    height: number;
+    highResCanvas?: HTMLCanvasElement;
+    gridWidth: number;
+    gridHeight: number;
+  } | null>(null);
   const [fontLoaded, setFontLoaded] = useState(false);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
+  const fontSampleCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Reset to defaults
+  const handleReset = () => {
+    setFontSize(DEFAULT_FONT_SIZE);
+    setFontSizeInput(String(DEFAULT_FONT_SIZE));
+    setItalic(DEFAULT_ITALIC);
+    setBoldness(DEFAULT_BOLDNESS);
+    onWeightChange(400); // Reset to regular weight
+  };
 
   // Reset state when dialog opens
   useEffect(() => {
@@ -179,9 +95,6 @@ export function TextEditorDialog({
     loadFont();
   }, [selectedFont, selectedWeight]);
 
-  // Check if current font is a bitmap font
-  const isBitmap = isBitmapFont(selectedFont);
-
   // Generate preview when text or settings change
   const generatePreview = useCallback(() => {
     if (!text.trim()) {
@@ -189,63 +102,122 @@ export function TextEditorDialog({
       return;
     }
 
-    // Use bitmap renderer for bitmap fonts (no font loading needed)
-    if (isBitmapFont(selectedFont)) {
-      const data = renderBitmapText(text, selectedFont, fontSize, effectiveColorId);
-      setPreviewData(data);
-      return;
-    }
-
-    // For other fonts, wait for font to load
+    // Wait for font to load
     if (!fontLoaded) {
       setPreviewData(null);
       return;
     }
 
-    const data = textToStitchesRegular(text, selectedFont, fontSize, selectedWeight, italic, effectiveColorId);
-    setPreviewData(data);
-  }, [text, selectedFont, fontSize, selectedWeight, italic, effectiveColorId, fontLoaded]);
+    // Use unified renderer for all fonts
+    const preview = generateTextPreview({
+      text,
+      fontFamily: selectedFont,
+      fontWeight: selectedWeight,
+      italic,
+      targetHeight: fontSize,
+      colorId: effectiveColorId,
+      boldness,
+    });
+
+    setPreviewData({
+      stitches: preview.stitches,
+      width: preview.gridWidth,
+      height: preview.gridHeight,
+      highResCanvas: preview.highResCanvas,
+      gridWidth: preview.gridWidth,
+      gridHeight: preview.gridHeight,
+    });
+  }, [text, selectedFont, fontSize, selectedWeight, italic, boldness, effectiveColorId, fontLoaded]);
 
   useEffect(() => {
     const debounce = setTimeout(generatePreview, 150);
     return () => clearTimeout(debounce);
   }, [generatePreview]);
 
-  // Draw preview on canvas
+  // Draw font sample canvas - shows high-res text (readable)
+  useEffect(() => {
+    const canvas = fontSampleCanvasRef.current;
+    if (!canvas || !previewData?.highResCanvas) return;
+
+    const ctx = canvas.getContext('2d')!;
+    const { highResCanvas } = previewData;
+
+    if (highResCanvas.width === 0 || highResCanvas.height === 0) return;
+
+    // Fit within sample area
+    const maxWidth = 540;
+    const maxHeight = 80;
+    const scale = Math.min(maxWidth / highResCanvas.width, maxHeight / highResCanvas.height, 1);
+
+    canvas.width = Math.ceil(highResCanvas.width * scale);
+    canvas.height = Math.ceil(highResCanvas.height * scale);
+
+    // Clear with white background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Draw high-res text
+    ctx.drawImage(highResCanvas, 0, 0, canvas.width, canvas.height);
+  }, [previewData]);
+
+  // Draw preview on canvas - shows stitch grid only (no high-res text)
   useEffect(() => {
     const canvas = previewCanvasRef.current;
     if (!canvas || !previewData) return;
 
     const ctx = canvas.getContext('2d')!;
-    const cellSize = Math.min(4, Math.max(1, Math.floor(200 / Math.max(previewData.width, previewData.height))));
+    const { gridWidth, gridHeight, stitches } = previewData;
 
-    canvas.width = previewData.width * cellSize;
-    canvas.height = previewData.height * cellSize;
+    // Calculate display size - fit within preview area
+    const maxDisplaySize = 280;
+    const aspectRatio = gridWidth / gridHeight;
+    let displayWidth: number, displayHeight: number;
 
-    // Clear
+    if (aspectRatio > 1) {
+      displayWidth = Math.min(maxDisplaySize, gridWidth * 10);
+      displayHeight = displayWidth / aspectRatio;
+    } else {
+      displayHeight = Math.min(maxDisplaySize, gridHeight * 10);
+      displayWidth = displayHeight * aspectRatio;
+    }
+
+    canvas.width = Math.ceil(displayWidth);
+    canvas.height = Math.ceil(displayHeight);
+
+    // Clear with light gray background
     ctx.fillStyle = '#f3f4f6';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Draw grid
+    const cellWidth = canvas.width / gridWidth;
+    const cellHeight = canvas.height / gridHeight;
+
+    // Draw stitch grid
     ctx.strokeStyle = '#e5e7eb';
     ctx.lineWidth = 0.5;
-    for (let x = 0; x <= previewData.width; x++) {
+
+    for (let x = 0; x <= gridWidth; x++) {
       ctx.beginPath();
-      ctx.moveTo(x * cellSize, 0);
-      ctx.lineTo(x * cellSize, canvas.height);
-      ctx.stroke();
-    }
-    for (let y = 0; y <= previewData.height; y++) {
-      ctx.beginPath();
-      ctx.moveTo(0, y * cellSize);
-      ctx.lineTo(canvas.width, y * cellSize);
+      ctx.moveTo(x * cellWidth, 0);
+      ctx.lineTo(x * cellWidth, canvas.height);
       ctx.stroke();
     }
 
-    // Draw stitches
+    for (let y = 0; y <= gridHeight; y++) {
+      ctx.beginPath();
+      ctx.moveTo(0, y * cellHeight);
+      ctx.lineTo(canvas.width, y * cellHeight);
+      ctx.stroke();
+    }
+
+    // Draw filled stitch cells
     ctx.fillStyle = `rgb(${colorRgb[0]}, ${colorRgb[1]}, ${colorRgb[2]})`;
-    for (const stitch of previewData.stitches) {
-      ctx.fillRect(stitch.x * cellSize, stitch.y * cellSize, cellSize, cellSize);
+    for (const stitch of stitches) {
+      ctx.fillRect(
+        stitch.x * cellWidth,
+        stitch.y * cellHeight,
+        cellWidth,
+        cellHeight
+      );
     }
   }, [previewData, colorRgb]);
 
@@ -257,7 +229,19 @@ export function TextEditorDialog({
         name: 'Black',
         rgb: [0, 0, 0],
       } : undefined;
-      onConfirm(previewData.stitches, previewData.width, previewData.height, colorToAdd);
+
+      // Create metadata for re-rendering on resize
+      const metadata = createTextLayerMetadata({
+        text,
+        fontFamily: selectedFont,
+        fontWeight: selectedWeight,
+        italic,
+        targetHeight: fontSize,
+        colorId: effectiveColorId,
+        boldness,
+      });
+
+      onConfirm(previewData.stitches, previewData.width, previewData.height, colorToAdd, metadata);
       setText('');
       onClose();
     }
@@ -272,7 +256,7 @@ export function TextEditorDialog({
 
   const currentFontData = bundledFonts.find(f => f.family === selectedFont);
   const isBundledFont = !!currentFontData;
-  const currentBitmapFont = bitmapFonts.find(f => f.family === selectedFont);
+  const isCustomFont = !!getCustomFont(selectedFont);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -316,9 +300,8 @@ export function TextEditorDialog({
                   style={{ fontFamily: `"${selectedFont}", sans-serif` }}
                 >
                   {selectedFont}
-                  {!isBitmap && !fontLoaded && <span className="text-gray-400 ml-2">(loading...)</span>}
-                  {currentBitmapFont && <span className="text-xs text-green-600 ml-2">(pixel-perfect)</span>}
-                  {isBundledFont && <span className="text-xs text-green-600 ml-2">(available)</span>}
+                  {!fontLoaded && <span className="text-gray-400 ml-2">(loading...)</span>}
+                  {isBundledFont && fontLoaded && <span className="text-xs text-green-600 ml-2">(available)</span>}
                 </div>
                 <button
                   onClick={onOpenFontBrowser}
@@ -330,11 +313,11 @@ export function TextEditorDialog({
             </div>
           </div>
 
-          {/* Size and Style */}
-          <div className="flex items-center gap-4">
+          {/* Size, Style, and Thickness - all on one row */}
+          <div className="flex items-end gap-4 flex-wrap">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Size (stitches tall)
+                Stitch Height
               </label>
               <input
                 type="text"
@@ -342,10 +325,8 @@ export function TextEditorDialog({
                 value={fontSizeInput}
                 onChange={(e) => {
                   const val = e.target.value;
-                  // Allow typing any digits
                   if (val === '' || /^\d+$/.test(val)) {
                     setFontSizeInput(val);
-                    // Update fontSize if valid number for live preview
                     const num = parseInt(val);
                     if (!isNaN(num) && num >= 1) {
                       setFontSize(num);
@@ -353,7 +334,6 @@ export function TextEditorDialog({
                   }
                 }}
                 onBlur={() => {
-                  // Validate and clamp on blur
                   const num = parseInt(fontSizeInput);
                   if (isNaN(num) || num < 8) {
                     setFontSize(8);
@@ -366,34 +346,64 @@ export function TextEditorDialog({
                     setFontSizeInput(String(num));
                   }
                 }}
-                className="w-24 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-20 px-2 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-center"
               />
             </div>
 
-            <div className="flex items-center gap-2 pt-6">
-              <button
-                onClick={() => onWeightChange(selectedWeight >= 700 ? 400 : 700)}
-                className={`w-10 h-10 flex items-center justify-center rounded border ${
-                  selectedWeight >= 700
-                    ? 'bg-blue-500 text-white border-blue-500'
-                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                }`}
-                title={selectedWeight >= 700 ? 'Bold' : 'Regular'}
-              >
-                <span className="font-bold">B</span>
-              </button>
-              <button
-                onClick={() => setItalic(!italic)}
-                className={`w-10 h-10 flex items-center justify-center rounded border ${
-                  italic
-                    ? 'bg-blue-500 text-white border-blue-500'
-                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Italic"
-              >
-                <span className="italic font-serif">I</span>
-              </button>
-            </div>
+            {/* Hide Bold, Italic, Thickness for custom bitmap fonts */}
+            {!isCustomFont && (
+              <>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => onWeightChange(selectedWeight >= 700 ? 400 : 700)}
+                    className={`w-10 h-10 flex items-center justify-center rounded border ${
+                      selectedWeight >= 700
+                        ? 'bg-blue-500 text-white border-blue-500'
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                    }`}
+                    title={selectedWeight >= 700 ? 'Bold' : 'Regular'}
+                  >
+                    <span className="font-bold">B</span>
+                  </button>
+                  <button
+                    onClick={() => setItalic(!italic)}
+                    className={`w-10 h-10 flex items-center justify-center rounded border ${
+                      italic
+                        ? 'bg-blue-500 text-white border-blue-500'
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                    }`}
+                    title="Italic"
+                  >
+                    <span className="italic font-serif">I</span>
+                  </button>
+                </div>
+
+                <div className="flex-1 min-w-[140px]">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Thickness
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={boldness * 100}
+                      onChange={(e) => setBoldness(parseInt(e.target.value) / 100)}
+                      className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                    />
+                    <span className="text-xs text-gray-500 w-8">{Math.round(boldness * 100)}%</span>
+                  </div>
+                </div>
+              </>
+            )}
+
+            <button
+              onClick={handleReset}
+              className="px-3 py-2 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md border border-gray-300"
+              title="Reset to defaults"
+            >
+              Reset
+            </button>
           </div>
 
           {/* Color Selection */}
@@ -424,17 +434,36 @@ export function TextEditorDialog({
             )}
           </div>
 
-          {/* Preview */}
+          {/* Font Sample - shows readable high-res text */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Preview
+              Font Sample
             </label>
-            <div className="border border-gray-300 rounded-md p-2 bg-gray-50 min-h-[120px] flex items-center justify-center overflow-auto">
+            <div className="border border-gray-300 rounded-md p-3 bg-white h-[80px] flex items-center justify-center overflow-hidden">
+              {previewData?.highResCanvas ? (
+                <canvas
+                  ref={fontSampleCanvasRef}
+                  className="max-w-full max-h-full"
+                />
+              ) : (
+                <p className="text-gray-400 text-sm">
+                  {text.trim() ? 'Loading...' : 'Enter text to see font sample'}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Stitch Preview */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Stitch Preview
+            </label>
+            <div className="border border-gray-300 rounded-md p-2 bg-gray-50 h-[180px] flex items-center justify-center overflow-hidden">
               {previewData && previewData.stitches.length > 0 ? (
-                <div className="text-center">
+                <div className="text-center h-full flex flex-col items-center justify-center">
                   <canvas
                     ref={previewCanvasRef}
-                    className="border border-gray-200 mx-auto"
+                    className="border border-gray-200 mx-auto max-w-full max-h-[140px]"
                   />
                   <p className="text-xs text-gray-500 mt-2">
                     {previewData.width} x {previewData.height} stitches ({previewData.stitches.length} total)
