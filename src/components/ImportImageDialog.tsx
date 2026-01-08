@@ -261,10 +261,15 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
     // Only auto-generate if enabled
     if (!autoGeneratePreview) return;
 
+    // Calculate debounce based on target size - larger images need more time
+    // to prevent rapid re-processing that causes "not responding"
+    const pixelCount = targetWidth * targetHeight;
+    const debounceMs = pixelCount > 40000 ? 800 : pixelCount > 10000 ? 500 : 300;
+
     // Set new timer for debounced preview
     previewTimerRef.current = setTimeout(() => {
       generateLivePreview();
-    }, 300);
+    }, debounceMs);
 
     return () => {
       if (previewTimerRef.current) {
@@ -430,7 +435,7 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
   };
 
   const handleProcessImage = () => {
-    if (!imagePath || isProcessing) return;
+    if (!imagePath || isProcessing || isGeneratingPreview) return;
 
     // Cancel any pending preview generation
     if (previewTimerRef.current) {
@@ -516,21 +521,17 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
     });
   };
 
-  const handleImport = () => {
+  const handleImport = async () => {
     if (!processedImage) {
       console.error('handleImport called but processedImage is null');
       return;
     }
 
-    console.log('Importing pattern:', {
-      width: processedImage.width,
-      height: processedImage.height,
-      pixelRows: processedImage.pixels?.length,
-      firstRowLength: processedImage.pixels?.[0]?.length,
-      colors: processedImage.colors?.length,
-      samplePixels: processedImage.pixels?.[0]?.slice(0, 5),
-      sampleColorIds: processedImage.colors?.slice(0, 3).map(c => c.id),
-    });
+    // Set processing state and allow UI to update before heavy work
+    setIsProcessing(true);
+    await new Promise(resolve => requestAnimationFrame(resolve));
+
+    // Debug logging removed for performance - was causing UI blocking
 
     // Check if colors already have thread info (from Rust-side processing)
     const hasThreadInfo = processedImage.colors.some(c =>
@@ -616,41 +617,41 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
       finalColorIdMap = new Map(colors.map(c => [c.id, c.id]));
     }
 
-    console.log('Color mapping:', {
-      hasThreadInfo,
-      finalColorIdMapSize: finalColorIdMap.size,
-      mapEntries: Array.from(finalColorIdMap.entries()).slice(0, 5),
-    });
-
     // Convert pixel data to stitches with remapped color IDs
+    // Process in chunks to prevent UI blocking for large images
     const stitches: Stitch[] = [];
     let emptyPixels = 0;
     let mappedPixels = 0;
     let unmappedPixels = 0;
-    for (let y = 0; y < processedImage.pixels.length; y++) {
-      for (let x = 0; x < processedImage.pixels[y].length; x++) {
-        const oldColorId = processedImage.pixels[y][x];
-        if (oldColorId) {
-          const newColorId = finalColorIdMap.get(oldColorId) || oldColorId;
-          if (finalColorIdMap.has(oldColorId)) {
-            mappedPixels++;
+
+    const totalRows = processedImage.pixels.length;
+    const chunkSize = 20; // Process 20 rows at a time for better UI responsiveness
+
+    for (let startY = 0; startY < totalRows; startY += chunkSize) {
+      const endY = Math.min(startY + chunkSize, totalRows);
+
+      for (let y = startY; y < endY; y++) {
+        for (let x = 0; x < processedImage.pixels[y].length; x++) {
+          const oldColorId = processedImage.pixels[y][x];
+          if (oldColorId) {
+            const newColorId = finalColorIdMap.get(oldColorId) || oldColorId;
+            if (finalColorIdMap.has(oldColorId)) {
+              mappedPixels++;
+            } else {
+              unmappedPixels++;
+            }
+            stitches.push({ x, y, colorId: newColorId, completed: false });
           } else {
-            unmappedPixels++;
+            emptyPixels++;
           }
-          stitches.push({ x, y, colorId: newColorId, completed: false });
-        } else {
-          emptyPixels++;
         }
       }
-    }
 
-    console.log('Stitch creation:', {
-      stitches: stitches.length,
-      colors: colors.length,
-      emptyPixels,
-      mappedPixels,
-      unmappedPixels,
-    });
+      // Yield to UI every chunk for large images
+      if (totalRows > 100 && startY + chunkSize < totalRows) {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    }
 
     // Import based on mode
     if (importMode === 'add-layer' && pattern) {
@@ -661,6 +662,7 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
       importPattern(patternName, processedImage.width, processedImage.height, meshCount, colors, stitches);
     }
 
+    setIsProcessing(false);
     onClose();
   };
 
@@ -1206,9 +1208,10 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
             {step === 'preview' && (
               <button
                 onClick={handleImport}
-                className="px-4 py-2 text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors"
+                disabled={isProcessing}
+                className="px-4 py-2 text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors disabled:opacity-50"
               >
-                Import Pattern
+                {isProcessing ? 'Importing...' : 'Import Pattern'}
               </button>
             )}
           </div>
@@ -1280,9 +1283,10 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
             {step === 'preview' && (
               <button
                 onClick={handleImport}
-                className="px-4 py-2 text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors"
+                disabled={isProcessing}
+                className="px-4 py-2 text-white bg-green-600 hover:bg-green-700 rounded-md transition-colors disabled:opacity-50"
               >
-                Import Pattern
+                {isProcessing ? 'Importing...' : 'Import Pattern'}
               </button>
             )}
           </div>

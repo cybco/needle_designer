@@ -73,6 +73,11 @@ export type Tool = 'pencil' | 'eraser' | 'fill' | 'pan' | 'select' | 'areaselect
 
 export type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
+export type AnchorPosition =
+  | 'top-left' | 'top' | 'top-right'
+  | 'left' | 'center' | 'right'
+  | 'bottom-left' | 'bottom' | 'bottom-right';
+
 export type RulerUnit = 'inches' | 'mm' | 'squares';
 
 export interface SelectionState {
@@ -259,6 +264,9 @@ interface PatternState {
 
   // Color swap action
   swapColorOnLayer: (fromColorId: string, toColorId: string) => void;
+
+  // Canvas resize action
+  resizeCanvas: (newWidth: number, newHeight: number, newMeshCount: number, anchor: AnchorPosition) => void;
 }
 
 // Default colors for new patterns
@@ -345,6 +353,87 @@ function clonePattern(pattern: Pattern): Pattern {
       metadata: l.metadata ? { ...l.metadata } : undefined,
     })),
   };
+}
+
+// Helper to get anchor offset value for a given axis
+// Returns: -1 (start), 0 (center), 1 (end)
+function getAnchorValue(anchor: AnchorPosition, axis: 'x' | 'y'): number {
+  const xValues: Record<AnchorPosition, number> = {
+    'top-left': -1, 'top': 0, 'top-right': 1,
+    'left': -1, 'center': 0, 'right': 1,
+    'bottom-left': -1, 'bottom': 0, 'bottom-right': 1,
+  };
+  const yValues: Record<AnchorPosition, number> = {
+    'top-left': -1, 'top': -1, 'top-right': -1,
+    'left': 0, 'center': 0, 'right': 0,
+    'bottom-left': 1, 'bottom': 1, 'bottom-right': 1,
+  };
+  return axis === 'x' ? xValues[anchor] : yValues[anchor];
+}
+
+// Calculate coordinate offset based on anchor position
+function calculateAnchorOffset(oldSize: number, newSize: number, anchorValue: number): number {
+  const diff = newSize - oldSize;
+  if (anchorValue === -1) return 0;           // Anchor at start, extend/clip at end
+  if (anchorValue === 1) return diff;         // Anchor at end, extend/clip at start
+  return Math.floor(diff / 2);                // Center anchor, extend/clip equally
+}
+
+// Transform stitches for canvas resize based on anchor position
+function transformStitchesForCanvasResize(
+  stitches: Stitch[],
+  oldWidth: number,
+  oldHeight: number,
+  newWidth: number,
+  newHeight: number,
+  anchor: AnchorPosition
+): Stitch[] {
+  const offsetX = calculateAnchorOffset(oldWidth, newWidth, getAnchorValue(anchor, 'x'));
+  const offsetY = calculateAnchorOffset(oldHeight, newHeight, getAnchorValue(anchor, 'y'));
+
+  return stitches
+    .map(s => ({
+      ...s,
+      x: s.x + offsetX,
+      y: s.y + offsetY,
+    }))
+    .filter(s =>
+      s.x >= 0 && s.x < newWidth &&
+      s.y >= 0 && s.y < newHeight
+    );
+}
+
+// Detect how many stitches will be clipped during canvas resize
+export function detectClippedContent(
+  layers: Layer[],
+  oldWidth: number,
+  oldHeight: number,
+  newWidth: number,
+  newHeight: number,
+  anchor: AnchorPosition
+): { stitchesClipped: number; layersAffected: string[] } {
+  const offsetX = calculateAnchorOffset(oldWidth, newWidth, getAnchorValue(anchor, 'x'));
+  const offsetY = calculateAnchorOffset(oldHeight, newHeight, getAnchorValue(anchor, 'y'));
+
+  let totalClipped = 0;
+  const affectedLayers: string[] = [];
+
+  for (const layer of layers) {
+    let layerClipped = 0;
+    for (const stitch of layer.stitches) {
+      const newX = stitch.x + offsetX;
+      const newY = stitch.y + offsetY;
+      if (newX < 0 || newX >= newWidth || newY < 0 || newY >= newHeight) {
+        layerClipped++;
+      }
+    }
+    if (layerClipped > 0) {
+      totalClipped += layerClipped;
+      affectedLayers.push(layer.name);
+    }
+  }
+
+  return { stitchesClipped: totalClipped, layersAffected: affectedLayers };
 }
 
 export const usePatternStore = create<PatternState>((set, get) => {
@@ -2855,6 +2944,43 @@ export const usePatternStore = create<PatternState>((set, get) => {
         layers: updatedLayers,
       },
       hasUnsavedChanges: true,
+    });
+  },
+
+  resizeCanvas: (newWidth, newHeight, newMeshCount, anchor) => {
+    const { pattern } = get();
+    if (!pattern) return;
+
+    pushToHistory();
+
+    const oldWidth = pattern.canvas.width;
+    const oldHeight = pattern.canvas.height;
+
+    // Transform all layers
+    const transformedLayers = pattern.layers.map(layer => ({
+      ...layer,
+      stitches: transformStitchesForCanvasResize(
+        layer.stitches,
+        oldWidth,
+        oldHeight,
+        newWidth,
+        newHeight,
+        anchor
+      ),
+    }));
+
+    set({
+      pattern: {
+        ...pattern,
+        canvas: {
+          width: newWidth,
+          height: newHeight,
+          meshCount: newMeshCount,
+        },
+        layers: transformedLayers,
+      },
+      hasUnsavedChanges: true,
+      selection: null, // Clear any active selection
     });
   },
 };

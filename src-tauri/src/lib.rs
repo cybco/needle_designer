@@ -460,7 +460,16 @@ fn process_image(
         })
         .collect();
 
-    // Create pixel map
+    // Build palette cache for O(1) lookups (instead of O(palette_size) per pixel)
+    // Maps RGB bytes -> color_id
+    let palette_cache: HashMap<[u8; 3], String> = palette
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| !is_transparent(c))
+        .map(|(i, c)| ([c[0], c[1], c[2]], format!("color-{}", i + 1)))
+        .collect();
+
+    // Create pixel map using O(1) cache lookups
     let mut pixels: Vec<Vec<String>> = Vec::with_capacity(target_height as usize);
     for y in 0..target_height {
         let mut row: Vec<String> = Vec::with_capacity(target_width as usize);
@@ -469,12 +478,18 @@ fn process_image(
             if is_transparent(pixel) || (remove_background && is_background(pixel, background_threshold)) {
                 row.push("".to_string()); // Empty = no stitch
             } else {
-                // Find matching color in palette
-                let color_idx = find_closest_color(pixel, &palette);
-                if color_idx < colors.len() {
-                    row.push(colors[color_idx].id.clone());
+                // Use cached lookup (O(1)) instead of find_closest_color (O(palette_size))
+                let rgb_key = [pixel[0], pixel[1], pixel[2]];
+                if let Some(color_id) = palette_cache.get(&rgb_key) {
+                    row.push(color_id.clone());
                 } else {
-                    row.push("".to_string());
+                    // Fallback for edge cases (shouldn't happen with proper dithering)
+                    let color_idx = find_closest_color(pixel, &palette);
+                    if color_idx < colors.len() {
+                        row.push(colors[color_idx].id.clone());
+                    } else {
+                        row.push("".to_string());
+                    }
                 }
             }
         }
@@ -611,7 +626,21 @@ fn process_image_with_threads(
         }
     }
 
-    // Create pixel map with thread-matched colors
+    // Build palette cache for O(1) lookups (instead of O(palette_size) per pixel)
+    // Maps RGB bytes -> color_id (thread-matched)
+    let palette_cache: HashMap<[u8; 3], String> = palette
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| {
+            if is_transparent(c) {
+                None
+            } else {
+                color_id_map.get(&i).map(|id| ([c[0], c[1], c[2]], id.clone()))
+            }
+        })
+        .collect();
+
+    // Create pixel map with thread-matched colors using O(1) cache lookups
     let mut pixels: Vec<Vec<String>> = Vec::with_capacity(target_height as usize);
     for y in 0..target_height {
         let mut row: Vec<String> = Vec::with_capacity(target_width as usize);
@@ -620,12 +649,18 @@ fn process_image_with_threads(
             if is_transparent(pixel) || (remove_background && is_background(pixel, background_threshold)) {
                 row.push(String::new()); // Empty = no stitch
             } else {
-                // Find matching color in original palette
-                let color_idx = find_closest_color_idx(pixel, &palette);
-                if let Some(color_id) = color_id_map.get(&color_idx) {
+                // Use cached lookup (O(1)) instead of find_closest_color_idx (O(palette_size))
+                let rgb_key = [pixel[0], pixel[1], pixel[2]];
+                if let Some(color_id) = palette_cache.get(&rgb_key) {
                     row.push(color_id.clone());
                 } else {
-                    row.push(String::new());
+                    // Fallback for edge cases
+                    let color_idx = find_closest_color_idx(pixel, &palette);
+                    if let Some(color_id) = color_id_map.get(&color_idx) {
+                        row.push(color_id.clone());
+                    } else {
+                        row.push(String::new());
+                    }
                 }
             }
         }

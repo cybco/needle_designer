@@ -383,6 +383,31 @@ export function AreaSelectIcon({ className }: { className?: string }) {
   );
 }
 
+// Center View icon SVG (crosshair with center point)
+export function CenterViewIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {/* Outer circle */}
+      <circle cx="12" cy="12" r="9" />
+      {/* Crosshair lines */}
+      <path d="M12 3v4" />
+      <path d="M12 17v4" />
+      <path d="M3 12h4" />
+      <path d="M17 12h4" />
+      {/* Center dot */}
+      <circle cx="12" cy="12" r="2" fill="currentColor" />
+    </svg>
+  );
+}
+
 const DEFAULT_VISIBILITY: ToolVisibility = {
   pencil: true,
   eraser: true,
@@ -415,11 +440,12 @@ const DEFAULT_VISIBILITY: ToolVisibility = {
 interface ToolbarProps {
   onTextToolClick?: () => void;
   onFitToCanvas?: () => void;
+  onMoveToCenter?: () => void;
   onPreviewClick?: () => void;
   toolVisibility?: ToolVisibility;
 }
 
-export function Toolbar({ onTextToolClick, onFitToCanvas, onPreviewClick, toolVisibility = DEFAULT_VISIBILITY }: ToolbarProps) {
+export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPreviewClick, toolVisibility = DEFAULT_VISIBILITY }: ToolbarProps) {
   const {
     pattern,
     activeTool,
@@ -490,6 +516,13 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onPreviewClick, toolVi
               onClick={setTool}
             />
           )}
+          <button
+            onClick={onMoveToCenter}
+            className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200"
+            title="Move to Center"
+          >
+            <CenterViewIcon />
+          </button>
           {toolVisibility.pencil && (
             <ToolButton
               tool="pencil"

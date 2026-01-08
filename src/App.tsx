@@ -17,6 +17,7 @@ import { SymbolAssignmentDialog } from './components/SymbolAssignmentDialog';
 import { OverlayImageDialog } from './components/OverlayImageDialog';
 import { UploadImageDialog } from './components/UploadImageDialog';
 import { PreviewCanvasDialog } from './components/PreviewCanvasDialog';
+import { CanvasLayoutDialog } from './components/CanvasLayoutDialog';
 import { ToggleSwitch } from './components/ToggleSwitch';
 import { usePatternStore, Pattern, RulerUnit, Stitch, TextLayerMetadata } from './stores/patternStore';
 import { useSessionHistoryStore } from './stores/sessionHistoryStore';
@@ -251,6 +252,9 @@ function App() {
 
   // Preview canvas dialog state
   const [showPreviewDialog, setShowPreviewDialog] = useState(false);
+
+  // Canvas layout dialog state
+  const [showCanvasLayoutDialog, setShowCanvasLayoutDialog] = useState(false);
 
   const {
     pattern,
@@ -1329,11 +1333,11 @@ function App() {
                     </button>
                     <div className="border-t border-gray-600 my-1" />
                     <button
-                      onClick={() => { handleMoveToCenter(); setShowToolsMenu(false); }}
+                      onClick={() => { setShowCanvasLayoutDialog(true); setShowToolsMenu(false); }}
                       disabled={!pattern}
                       className={`w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors ${!pattern ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
-                      Move to Center
+                      Canvas Layout
                     </button>
                     <div className="border-t border-gray-600 my-1" />
                     {/* Advanced Submenu */}
@@ -1531,7 +1535,7 @@ function App() {
           <>
             {/* Left Toolbar - hidden in progress mode */}
             {!isProgressMode && (
-              <Toolbar onTextToolClick={() => setShowTextEditor(true)} onFitToCanvas={handleFitToCanvas} onPreviewClick={() => setShowPreviewDialog(true)} toolVisibility={preferences.toolVisibility} />
+              <Toolbar onTextToolClick={() => setShowTextEditor(true)} onFitToCanvas={handleFitToCanvas} onMoveToCenter={handleMoveToCenter} onPreviewClick={() => setShowPreviewDialog(true)} toolVisibility={preferences.toolVisibility} />
             )}
 
             {/* Canvas Area */}
@@ -1779,6 +1783,12 @@ function App() {
       {showPreviewDialog && (
         <PreviewCanvasDialog onClose={() => setShowPreviewDialog(false)} />
       )}
+
+      {/* Canvas Layout Dialog */}
+      <CanvasLayoutDialog
+        isOpen={showCanvasLayoutDialog}
+        onClose={() => setShowCanvasLayoutDialog(false)}
+      />
 
       {/* Toolbar Visibility Dialog */}
       {showToolbarVisibilityDialog && (

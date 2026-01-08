@@ -9,7 +9,7 @@ interface ConfigState {
 export const useConfigStore = create<ConfigState>()(
   persist(
     (set) => ({
-      autoGeneratePreview: true,
+      autoGeneratePreview: false, // Disabled by default to prevent "not responding" on large images
       setAutoGeneratePreview: (value) => set({ autoGeneratePreview: value }),
     }),
     {
