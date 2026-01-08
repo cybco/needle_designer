@@ -65,7 +65,7 @@ export interface Pattern {
   layers: Layer[];
 }
 
-export type Tool = 'pencil' | 'eraser' | 'fill' | 'pan' | 'select' | 'text' | 'line' | 'rectangle' | 'ellipse';
+export type Tool = 'pencil' | 'eraser' | 'fill' | 'pan' | 'select' | 'areaselect' | 'text' | 'line' | 'rectangle' | 'ellipse' | 'colorswap';
 
 export type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
@@ -82,6 +82,11 @@ export interface SelectionState {
   originalStitches: Stitch[] | null;
   // Floating stitches are new content not yet added to any layer (e.g., text being placed)
   floatingStitches: Stitch[] | null;
+  // Area selection fields
+  selectionType: 'layer' | 'area';
+  selectedStitches?: Stitch[];  // Stitches within area selection
+  isSelectingArea?: boolean;    // True while dragging to create area selection
+  selectionStart?: { x: number; y: number };  // Start point of rectangle drag
 }
 
 export interface OverlayImage {
@@ -173,6 +178,7 @@ interface PatternState {
   toggleLayerLock: (layerId: string) => void;
   reorderLayer: (layerId: string, direction: 'up' | 'down') => void;
   mergeLayers: (sourceLayerId: string, targetLayerId: string) => void;
+  mergeAllLayers: () => void;
   duplicateLayer: (layerId: string) => void;
 
   // Import as layer
@@ -202,6 +208,15 @@ interface PatternState {
   commitFloatingSelection: () => void;
   cancelFloatingSelection: () => void;
 
+  // Area selection actions
+  startAreaSelection: (point: { x: number; y: number }) => void;
+  updateAreaSelection: (point: { x: number; y: number }) => void;
+  endAreaSelection: () => void;
+  duplicateSelection: () => void;
+  moveSelection: () => void;
+  deleteSelection: () => void;
+  selectionToNewLayer: () => void;
+
   // Overlay image actions
   addOverlayImage: (dataUrl: string, naturalWidth: number, naturalHeight: number, name?: string) => void;
   setOverlayImages: (overlays: OverlayImage[]) => void;
@@ -223,6 +238,9 @@ interface PatternState {
   getStitchCompleted: (x: number, y: number) => boolean;
   setProgressShadingColor: (color: [number, number, number]) => void;
   setProgressShadingOpacity: (opacity: number) => void;
+
+  // Color swap action
+  swapColorOnLayer: (fromColorId: string, toColorId: string) => void;
 }
 
 // Default colors for new patterns
@@ -1139,6 +1157,47 @@ export const usePatternStore = create<PatternState>((set, get) => {
     });
   },
 
+  mergeAllLayers: () => {
+    const { pattern, selection } = get();
+    if (!pattern || pattern.layers.length <= 1) return;
+
+    pushToHistory();
+
+    // Merge all stitches into one, with later layers (higher index) taking precedence
+    const stitchMap = new Map<string, Stitch>();
+    for (const layer of pattern.layers) {
+      for (const stitch of layer.stitches) {
+        stitchMap.set(`${stitch.x},${stitch.y}`, stitch);
+      }
+    }
+
+    const mergedStitches = Array.from(stitchMap.values());
+
+    // Keep the first layer as the merged result
+    const firstLayer = pattern.layers[0];
+    const mergedLayer: Layer = {
+      id: firstLayer.id,
+      name: 'Merged',
+      visible: true,
+      locked: false,
+      stitches: mergedStitches,
+      metadata: undefined, // Clear metadata since this is now a combined layer
+    };
+
+    // Clear selection if it was on a layer that no longer exists
+    const newSelection = selection?.layerId === firstLayer.id ? selection : null;
+
+    set({
+      pattern: {
+        ...pattern,
+        layers: [mergedLayer],
+      },
+      activeLayerId: firstLayer.id,
+      selection: newSelection,
+      hasUnsavedChanges: true,
+    });
+  },
+
   duplicateLayer: (layerId) => {
     const { pattern } = get();
     if (!pattern) return;
@@ -1377,6 +1436,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
         originalBounds: null,
         originalStitches: null,
         floatingStitches: null,
+        selectionType: 'layer',
       },
     });
   },
@@ -1733,6 +1793,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
         originalBounds: null,
         originalStitches: null,
         floatingStitches: positionedStitches,
+        selectionType: 'layer',
       },
       activeTool: 'select', // Switch to select tool for positioning
     });
@@ -1771,6 +1832,204 @@ export const usePatternStore = create<PatternState>((set, get) => {
     const { selection } = get();
     if (!selection || !selection.floatingStitches) return;
     set({ selection: null });
+  },
+
+  // Area selection actions
+  startAreaSelection: (point) => {
+    const { pattern, activeLayerId } = get();
+    if (!pattern) return;
+
+    set({
+      selection: {
+        layerId: activeLayerId || pattern.layers[0]?.id || '',
+        bounds: { x: point.x, y: point.y, width: 0, height: 0 },
+        isDragging: false,
+        isResizing: false,
+        resizeHandle: null,
+        dragStart: null,
+        originalBounds: null,
+        originalStitches: null,
+        floatingStitches: null,
+        selectionType: 'area',
+        isSelectingArea: true,
+        selectionStart: point,
+      },
+    });
+  },
+
+  updateAreaSelection: (point) => {
+    const { selection } = get();
+    if (!selection || !selection.isSelectingArea || !selection.selectionStart) return;
+
+    const startX = selection.selectionStart.x;
+    const startY = selection.selectionStart.y;
+
+    // Calculate bounds from start to current point (handle negative directions)
+    const minX = Math.min(startX, point.x);
+    const minY = Math.min(startY, point.y);
+    const maxX = Math.max(startX, point.x);
+    const maxY = Math.max(startY, point.y);
+
+    set({
+      selection: {
+        ...selection,
+        bounds: {
+          x: minX,
+          y: minY,
+          width: maxX - minX + 1,
+          height: maxY - minY + 1,
+        },
+      },
+    });
+  },
+
+  endAreaSelection: () => {
+    const { pattern, selection } = get();
+    if (!pattern || !selection || !selection.isSelectingArea) return;
+
+    // Extract stitches within bounds from all visible layers
+    const { bounds } = selection;
+    const stitchMap = new Map<string, Stitch>();
+
+    // Process layers from bottom to top (higher index = on top, overwrites)
+    for (const layer of pattern.layers) {
+      if (!layer.visible) continue;
+
+      for (const stitch of layer.stitches) {
+        if (
+          stitch.x >= bounds.x &&
+          stitch.x < bounds.x + bounds.width &&
+          stitch.y >= bounds.y &&
+          stitch.y < bounds.y + bounds.height
+        ) {
+          stitchMap.set(`${stitch.x},${stitch.y}`, { ...stitch });
+        }
+      }
+    }
+
+    const selectedStitches = Array.from(stitchMap.values());
+
+    // If no stitches selected, clear selection
+    if (selectedStitches.length === 0) {
+      set({ selection: null });
+      return;
+    }
+
+    set({
+      selection: {
+        ...selection,
+        isSelectingArea: false,
+        selectedStitches,
+      },
+    });
+  },
+
+  duplicateSelection: () => {
+    const { selection } = get();
+    if (selection?.selectionType !== 'area' || !selection.selectedStitches?.length) return;
+
+    // Create floating selection with the same stitches
+    // User can then drag to reposition before committing
+    set({
+      selection: {
+        ...selection,
+        floatingStitches: selection.selectedStitches.map(s => ({ ...s })),
+        selectedStitches: undefined,
+        isSelectingArea: false,
+      },
+    });
+  },
+
+  moveSelection: () => {
+    const { pattern, selection } = get();
+    if (!pattern || selection?.selectionType !== 'area' || !selection.selectedStitches?.length) return;
+
+    pushToHistory();
+
+    // Create set of positions to remove from layers
+    const toRemove = new Set(
+      selection.selectedStitches.map(s => `${s.x},${s.y}`)
+    );
+
+    // Remove from all layers
+    const updatedLayers = pattern.layers.map(layer => ({
+      ...layer,
+      stitches: layer.stitches.filter(s => !toRemove.has(`${s.x},${s.y}`)),
+    }));
+
+    // Create floating selection with the stitches (user can reposition)
+    set({
+      pattern: { ...pattern, layers: updatedLayers },
+      selection: {
+        ...selection,
+        floatingStitches: selection.selectedStitches.map(s => ({ ...s })),
+        selectedStitches: undefined,
+        isSelectingArea: false,
+      },
+      hasUnsavedChanges: true,
+    });
+  },
+
+  deleteSelection: () => {
+    const { pattern, selection } = get();
+    if (!pattern || selection?.selectionType !== 'area' || !selection.selectedStitches?.length) return;
+
+    pushToHistory();
+
+    // Create set of positions to delete
+    const toDelete = new Set(
+      selection.selectedStitches.map(s => `${s.x},${s.y}`)
+    );
+
+    // Remove from all layers
+    const updatedLayers = pattern.layers.map(layer => ({
+      ...layer,
+      stitches: layer.stitches.filter(s => !toDelete.has(`${s.x},${s.y}`)),
+    }));
+
+    set({
+      pattern: { ...pattern, layers: updatedLayers },
+      selection: null,
+      hasUnsavedChanges: true,
+    });
+  },
+
+  selectionToNewLayer: () => {
+    const { pattern, selection } = get();
+    if (!pattern || selection?.selectionType !== 'area' || !selection.selectedStitches?.length) return;
+
+    pushToHistory();
+
+    // Create set of positions to move
+    const toMove = new Set(
+      selection.selectedStitches.map(s => `${s.x},${s.y}`)
+    );
+
+    // Remove from existing layers
+    const updatedLayers = pattern.layers.map(layer => ({
+      ...layer,
+      stitches: layer.stitches.filter(s => !toMove.has(`${s.x},${s.y}`)),
+    }));
+
+    // Create new layer with selected stitches
+    const newLayerId = `layer-${Date.now()}`;
+    const newLayer: Layer = {
+      id: newLayerId,
+      name: 'Selection',
+      visible: true,
+      locked: false,
+      stitches: selection.selectedStitches.map(s => ({ ...s })),
+    };
+
+    set({
+      pattern: {
+        ...pattern,
+        layers: [...updatedLayers, newLayer],
+      },
+      activeLayerId: newLayerId,
+      selection: null,
+      hasUnsavedChanges: true,
+    });
   },
 
   // Overlay image actions
@@ -2026,6 +2285,45 @@ export const usePatternStore = create<PatternState>((set, get) => {
 
   setProgressShadingOpacity: (opacity) => {
     set({ progressShadingOpacity: Math.max(0, Math.min(100, opacity)) });
+  },
+
+  swapColorOnLayer: (fromColorId, toColorId) => {
+    const { pattern, activeLayerId } = get();
+    if (!pattern || !activeLayerId) return;
+    if (fromColorId === toColorId) return;
+
+    const layerIndex = pattern.layers.findIndex(l => l.id === activeLayerId);
+    if (layerIndex === -1) return;
+
+    const activeLayer = pattern.layers[layerIndex];
+    if (activeLayer.locked) return;
+
+    // Check if any stitches have the fromColorId
+    const hasMatchingStitches = activeLayer.stitches.some(s => s.colorId === fromColorId);
+    if (!hasMatchingStitches) return;
+
+    pushToHistory();
+
+    // Update all stitches with the fromColorId to toColorId
+    const updatedStitches = activeLayer.stitches.map(s =>
+      s.colorId === fromColorId
+        ? { ...s, colorId: toColorId }
+        : s
+    );
+
+    const updatedLayers = [...pattern.layers];
+    updatedLayers[layerIndex] = {
+      ...activeLayer,
+      stitches: updatedStitches,
+    };
+
+    set({
+      pattern: {
+        ...pattern,
+        layers: updatedLayers,
+      },
+      hasUnsavedChanges: true,
+    });
   },
 };
 });

@@ -6,8 +6,10 @@ export interface ToolVisibility {
   pencil: boolean;
   eraser: boolean;
   fill: boolean;
+  colorswap: boolean;
   pan: boolean;
   select: boolean;
+  areaselect: boolean;
   text: boolean;
   line: boolean;
   rectangle: boolean;
@@ -143,12 +145,58 @@ export function EraserIcon({ className }: { className?: string }) {
   );
 }
 
+// Color Swap icon SVG (two color squares with swap arrows)
+export function ColorSwapIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+    >
+      {/* First color square (top-left) */}
+      <rect x="2" y="2" width="8" height="8" rx="1" fill="#E57373" stroke="#333" strokeWidth="1.5" />
+      {/* Second color square (bottom-right) */}
+      <rect x="14" y="14" width="8" height="8" rx="1" fill="#64B5F6" stroke="#333" strokeWidth="1.5" />
+      {/* Swap arrow (top-right to bottom-left) */}
+      <path d="M14 6 L18 6 L18 10" fill="none" stroke="#333" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M18 6 L12 12" fill="none" stroke="#333" strokeWidth="1.5" strokeLinecap="round" />
+      {/* Swap arrow (bottom-left to top-right) */}
+      <path d="M10 18 L6 18 L6 14" fill="none" stroke="#333" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6 18 L12 12" fill="none" stroke="#333" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// Area Select icon SVG (marquee/selection rectangle with dashed border)
+export function AreaSelectIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {/* Dashed selection rectangle */}
+      <rect x="3" y="3" width="18" height="18" rx="1" strokeDasharray="4 2" />
+      {/* Corner handles */}
+      <rect x="1" y="1" width="4" height="4" fill="currentColor" stroke="none" />
+      <rect x="19" y="1" width="4" height="4" fill="currentColor" stroke="none" />
+      <rect x="1" y="19" width="4" height="4" fill="currentColor" stroke="none" />
+      <rect x="19" y="19" width="4" height="4" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 const DEFAULT_VISIBILITY: ToolVisibility = {
   pencil: true,
   eraser: true,
   fill: true,
+  colorswap: true,
   pan: true,
   select: true,
+  areaselect: true,
   text: true,
   line: true,
   rectangle: true,
@@ -183,7 +231,7 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, toolVisibility = DEFAU
   }
 
   // Check if any tools in a section are visible
-  const hasDrawingTools = toolVisibility.pencil || toolVisibility.eraser || toolVisibility.fill || toolVisibility.pan || toolVisibility.select || toolVisibility.text;
+  const hasDrawingTools = toolVisibility.pencil || toolVisibility.eraser || toolVisibility.fill || toolVisibility.colorswap || toolVisibility.pan || toolVisibility.select || toolVisibility.areaselect || toolVisibility.text;
   const hasShapeTools = toolVisibility.line || toolVisibility.rectangle || toolVisibility.ellipse;
   const hasHistoryTools = toolVisibility.undo || toolVisibility.redo;
   const hasZoomControls = toolVisibility.zoomIn || toolVisibility.zoomOut || toolVisibility.zoomFit;
@@ -198,6 +246,15 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, toolVisibility = DEFAU
               tool="select"
               icon={<CursorIcon />}
               label="Move (V)"
+              activeTool={activeTool}
+              onClick={setTool}
+            />
+          )}
+          {toolVisibility.areaselect && (
+            <ToolButton
+              tool="areaselect"
+              icon={<AreaSelectIcon />}
+              label="Select (S)"
               activeTool={activeTool}
               onClick={setTool}
             />
@@ -225,6 +282,15 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, toolVisibility = DEFAU
               tool="fill"
               icon={<FillIcon />}
               label="Fill (G)"
+              activeTool={activeTool}
+              onClick={setTool}
+            />
+          )}
+          {toolVisibility.colorswap && (
+            <ToolButton
+              tool="colorswap"
+              icon={<ColorSwapIcon />}
+              label="Color Swap (C)"
               activeTool={activeTool}
               onClick={setTool}
             />

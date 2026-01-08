@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { PatternCanvas } from './components/PatternCanvas';
 import { ColorPalette } from './components/ColorPalette';
-import { Toolbar, ToolVisibility, EraserIcon, FillIcon, PanIcon, CursorIcon, TextIcon } from './components/Toolbar';
+import { Toolbar, ToolVisibility, EraserIcon, FillIcon, PanIcon, CursorIcon, TextIcon, ColorSwapIcon } from './components/Toolbar';
 import { LayerPanel } from './components/LayerPanel';
 import { ProgressTrackingPanel } from './components/ProgressTrackingPanel';
 import { NewProjectDialog } from './components/NewProjectDialog';
@@ -134,8 +134,10 @@ const DEFAULT_TOOL_VISIBILITY: ToolVisibility = {
   pencil: true,
   eraser: true,
   fill: true,
+  colorswap: true,
   pan: true,
   select: true,
+  areaselect: true,
   text: true,
   line: true,
   rectangle: true,
@@ -262,6 +264,7 @@ function App() {
     getLayerBounds,
     removeLayer,
     clearSelection,
+    deleteSelection,
     selectLayerForTransform,
     setOverlayImages,
     isProgressMode,
@@ -398,9 +401,16 @@ function App() {
         return;
       }
 
-      // Handle Delete key for selected layer or active layer
+      // Handle Delete key for area selection or layer
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        // Determine which layer to delete: selection first, then active layer
+        // If there's an area selection with selected stitches, delete those
+        if (selection?.selectionType === 'area' && selection.selectedStitches?.length) {
+          e.preventDefault();
+          deleteSelection();
+          return;
+        }
+
+        // Otherwise, handle layer deletion
         const layerIdToDelete = selection?.layerId || activeLayerId;
 
         if (layerIdToDelete && pattern && pattern.layers.length > 1) {
@@ -417,6 +427,15 @@ function App() {
         }
       }
 
+      // Handle Escape key to clear selection
+      if (e.key === 'Escape') {
+        if (selection) {
+          e.preventDefault();
+          clearSelection();
+          return;
+        }
+      }
+
       switch (e.key.toLowerCase()) {
         case 'p':
           setTool('pencil');
@@ -427,7 +446,17 @@ function App() {
         case 'g':
           setTool('fill');
           break;
+        case 'c':
+          if (!e.ctrlKey && !e.metaKey) {
+            setTool('colorswap');
+          }
+          break;
         case 's':
+          if (!e.ctrlKey && !e.metaKey) {
+            setTool('areaselect');
+          }
+          break;
+        case 'v':
           if (!e.ctrlKey && !e.metaKey) {
             setTool('select');
           }
@@ -503,7 +532,7 @@ function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [zoom, activeTool, pattern, selection, activeLayerId, preferences.confirmLayerDelete, setTool, setZoom, removeLayer, clearSelection, showNewProject]);
+  }, [zoom, activeTool, pattern, selection, activeLayerId, preferences.confirmLayerDelete, setTool, setZoom, removeLayer, clearSelection, deleteSelection, showNewProject]);
 
   // Add file to recent files list
   const addToRecentFiles = useCallback((filePath: string) => {
@@ -1743,6 +1772,7 @@ function App() {
                     <ToolVisibilityRow checked={preferences.toolVisibility.pencil} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, pencil: checked } })} icon={<span className="text-lg">✏️</span>} label="Pencil (P)" />
                     <ToolVisibilityRow checked={preferences.toolVisibility.eraser} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, eraser: checked } })} icon={<EraserIcon className="w-5 h-5" />} label="Eraser (E)" />
                     <ToolVisibilityRow checked={preferences.toolVisibility.fill} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, fill: checked } })} icon={<FillIcon className="w-5 h-5" />} label="Fill (G)" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.colorswap} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, colorswap: checked } })} icon={<ColorSwapIcon className="w-5 h-5" />} label="Color Swap (C)" />
                     <ToolVisibilityRow checked={preferences.toolVisibility.pan} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, pan: checked } })} icon={<PanIcon className="w-5 h-5" />} label="Pan (Space)" />
                     <ToolVisibilityRow checked={preferences.toolVisibility.select} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, select: checked } })} icon={<CursorIcon className="w-5 h-5" />} label="Move (V)" />
                     <ToolVisibilityRow checked={preferences.toolVisibility.text} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, text: checked } })} icon={<TextIcon className="w-5 h-5" />} label="Text (T)" />

@@ -1,5 +1,6 @@
 import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
 import { usePatternStore, ResizeHandle, Color } from '../stores/patternStore';
+import { SelectionContextMenu } from './SelectionContextMenu';
 
 const CELL_SIZE = 20; // Base cell size in pixels
 const RULER_SIZE = 24; // Width/height of rulers in pixels
@@ -70,6 +71,15 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     getStitchCompleted,
     progressShadingColor: storeShadingColor,
     progressShadingOpacity: storeShadingOpacity,
+    activeLayerId,
+    swapColorOnLayer,
+    startAreaSelection,
+    updateAreaSelection,
+    endAreaSelection,
+    duplicateSelection,
+    moveSelection,
+    deleteSelection,
+    selectionToNewLayer,
   } = usePatternStore();
 
   // Ensure shading values have defaults
@@ -539,6 +549,12 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
         }
       }
 
+      // Draw semi-transparent fill for area selection
+      if (selection.selectionType === 'area') {
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.1)';
+        ctx.fillRect(left, top, selWidth, selHeight);
+      }
+
       // Draw selection rectangle (dashed)
       ctx.strokeStyle = '#3b82f6';
       ctx.lineWidth = 2;
@@ -546,34 +562,36 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       ctx.strokeRect(left, top, selWidth, selHeight);
       ctx.setLineDash([]);
 
-      // Draw resize handles
-      const handles = [
-        { x: left, y: top },                          // nw
-        { x: left + selWidth / 2, y: top },           // n
-        { x: left + selWidth, y: top },               // ne
-        { x: left + selWidth, y: top + selHeight / 2 }, // e
-        { x: left + selWidth, y: top + selHeight },   // se
-        { x: left + selWidth / 2, y: top + selHeight }, // s
-        { x: left, y: top + selHeight },              // sw
-        { x: left, y: top + selHeight / 2 },          // w
-      ];
+      // Draw resize handles (only when not actively selecting and not a completed area selection)
+      if (!selection.isSelectingArea && selection.selectionType !== 'area') {
+        const handles = [
+          { x: left, y: top },                          // nw
+          { x: left + selWidth / 2, y: top },           // n
+          { x: left + selWidth, y: top },               // ne
+          { x: left + selWidth, y: top + selHeight / 2 }, // e
+          { x: left + selWidth, y: top + selHeight },   // se
+          { x: left + selWidth / 2, y: top + selHeight }, // s
+          { x: left, y: top + selHeight },              // sw
+          { x: left, y: top + selHeight / 2 },          // w
+        ];
 
-      ctx.fillStyle = '#ffffff';
-      ctx.strokeStyle = '#3b82f6';
-      ctx.lineWidth = 1;
-      for (const handle of handles) {
-        ctx.fillRect(
-          handle.x - HANDLE_SIZE / 2,
-          handle.y - HANDLE_SIZE / 2,
-          HANDLE_SIZE,
-          HANDLE_SIZE
-        );
-        ctx.strokeRect(
-          handle.x - HANDLE_SIZE / 2,
-          handle.y - HANDLE_SIZE / 2,
-          HANDLE_SIZE,
-          HANDLE_SIZE
-        );
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 1;
+        for (const handle of handles) {
+          ctx.fillRect(
+            handle.x - HANDLE_SIZE / 2,
+            handle.y - HANDLE_SIZE / 2,
+            HANDLE_SIZE,
+            HANDLE_SIZE
+          );
+          ctx.strokeRect(
+            handle.x - HANDLE_SIZE / 2,
+            handle.y - HANDLE_SIZE / 2,
+            HANDLE_SIZE,
+            HANDLE_SIZE
+          );
+        }
       }
 
       // Draw hint text for floating selection
@@ -1441,6 +1459,32 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       return;
     }
 
+    if (activeTool === 'areaselect') {
+      // If there's a floating selection and we clicked outside, commit it
+      if (selection?.floatingStitches) {
+        commitFloatingSelection();
+        return;
+      }
+
+      // Check if clicking inside an existing area selection bounds (for drag)
+      if (selection && selection.selectionType === 'area' && isPointInSelectionBounds(x, y)) {
+        const cell = canvasToCellUnbounded(x, y);
+        if (cell) {
+          startDrag(cell);
+          setIsDrawing(true);
+        }
+        return;
+      }
+
+      // Start new area selection
+      const cell = canvasToCellUnbounded(x, y);
+      if (cell) {
+        startAreaSelection(cell);
+        setIsDrawing(true);
+      }
+      return;
+    }
+
     // For drawing tools, require a selected color
     if (!selectedColorId) return;
 
@@ -1457,6 +1501,18 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       setLastCell(cell);
     } else if (activeTool === 'fill') {
       fillArea(cell.x, cell.y, selectedColorId);
+    } else if (activeTool === 'colorswap') {
+      // Find the stitch at clicked position on active layer
+      const activeLayer = pattern.layers.find(l => l.id === activeLayerId);
+      if (!activeLayer) return;
+
+      const clickedStitch = activeLayer.stitches.find(
+        s => s.x === cell.x && s.y === cell.y
+      );
+
+      if (clickedStitch && clickedStitch.colorId !== selectedColorId) {
+        swapColorOnLayer(clickedStitch.colorId, selectedColorId);
+      }
     } else if (activeTool === 'line' || activeTool === 'rectangle' || activeTool === 'ellipse') {
       // Start shape drawing
       setShapeStart(cell);
@@ -1619,6 +1675,19 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       return;
     }
 
+    // Handle areaselect tool dragging/area selection
+    if (activeTool === 'areaselect' && isDrawing && selection) {
+      const cell = canvasToCellUnbounded(x, y);
+      if (cell) {
+        if (selection.isSelectingArea) {
+          updateAreaSelection(cell);
+        } else if (selection.isDragging) {
+          updateDrag(cell);
+        }
+      }
+      return;
+    }
+
     if (!isDrawing) return;
 
     if (activeTool === 'pan' && lastCell) {
@@ -1665,6 +1734,15 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     if (activeTool === 'select' && selection) {
       if (selection.isResizing) {
         endResize();
+      } else if (selection.isDragging) {
+        endDrag();
+      }
+    }
+
+    // Handle areaselect tool area selection end
+    if (activeTool === 'areaselect' && selection) {
+      if (selection.isSelectingArea) {
+        endAreaSelection();
       } else if (selection.isDragging) {
         endDrag();
       }
@@ -1769,6 +1847,13 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       }
 
       return moveCursor;
+    }
+    if (activeTool === 'areaselect') {
+      // Check selection bounds for move cursor
+      if (mousePos && selection && selection.selectionType === 'area' && isPointInSelectionBounds(mousePos.x, mousePos.y)) {
+        return 'move';
+      }
+      return 'crosshair';
     }
     return 'crosshair';
   }, [activeTool, mousePos, selection, selectedOverlay, getResizeHandleAt, isPointInSelectionBounds, getOverlayResizeHandle, isPointInSelectedOverlay, getOverlayAtPoint, isProgressMode]);
@@ -2388,6 +2473,25 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
             className="absolute inset-0 touch-none"
             style={{ cursor: getCursor() }}
           />
+          {/* Area selection context menu - only show when using areaselect tool */}
+          {activeTool === 'areaselect' &&
+            selection &&
+            selection.selectionType === 'area' &&
+            !selection.isSelectingArea &&
+            selection.selectedStitches &&
+            selection.selectedStitches.length > 0 && (
+              <SelectionContextMenu
+                position={{
+                  // Position at bottom-right of selection
+                  x: (selection.bounds.x + selection.bounds.width) * CELL_SIZE * zoom + panOffset.x + 8,
+                  y: (selection.bounds.y + selection.bounds.height) * CELL_SIZE * zoom + panOffset.y + 8,
+                }}
+                onDuplicate={duplicateSelection}
+                onMove={moveSelection}
+                onDelete={deleteSelection}
+                onNewLayer={selectionToNewLayer}
+              />
+            )}
         </div>
         {/* Right ruler */}
         <canvas

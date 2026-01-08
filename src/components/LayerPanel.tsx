@@ -20,6 +20,7 @@ export function LayerPanel({ onEditTextLayer }: LayerPanelProps) {
     toggleLayerLock,
     reorderLayer,
     mergeLayers,
+    mergeAllLayers,
     duplicateLayer,
     selectLayerForTransform,
     selectOverlay,
@@ -375,6 +376,14 @@ export function LayerPanel({ onEditTextLayer }: LayerPanelProps) {
           title="Merge with layer below"
         >
           Merge
+        </button>
+        <button
+          onClick={() => mergeAllLayers()}
+          disabled={pattern.layers.length <= 1}
+          className="px-2 py-1 text-[10px] bg-gray-100 hover:bg-gray-200 rounded disabled:opacity-50"
+          title="Flatten all layers into one"
+        >
+          Flatten
         </button>
         <button
           onClick={() => activeLayerId && removeLayer(activeLayerId)}
