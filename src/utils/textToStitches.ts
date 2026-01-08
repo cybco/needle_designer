@@ -2,7 +2,7 @@
 // Uses high-resolution rendering + coverage-based sampling for all fonts
 // Also supports custom bitmap fonts from Font Creator
 
-import { Stitch } from '../stores/patternStore';
+import { Stitch, TextOrientation } from '../stores/patternStore';
 import { getCustomFont, CustomFont } from '../data/customFonts';
 
 export interface TextRenderOptions {
@@ -13,6 +13,7 @@ export interface TextRenderOptions {
   targetHeight: number;      // Desired stitch count (height)
   colorId: string;
   boldness?: number;         // 0.0-1.0, coverage threshold (default 0.5)
+  orientation?: TextOrientation; // Text orientation (default: 'horizontal')
 }
 
 export interface TextRenderResult {
@@ -35,6 +36,7 @@ export interface TextLayerMetadata {
   italic: boolean;
   colorId: string;
   boldness: number;
+  orientation?: TextOrientation; // Default: 'horizontal'
 }
 
 const RENDER_SCALE = 8; // Always render at 8x target size for quality
@@ -45,6 +47,39 @@ const MIN_RENDER_HEIGHT = 48; // Minimum high-res height for readability
  * Uses high-resolution rendering + coverage-based sampling
  * For custom bitmap fonts, uses pixel-perfect glyph data
  */
+/**
+ * Convert text to stacked format (one character per line)
+ * Preserves existing newlines as double newlines for spacing
+ */
+function textToStacked(text: string): string {
+  // Split by existing newlines first
+  const lines = text.split('\n');
+  const stackedLines: string[] = [];
+
+  for (const line of lines) {
+    // Stack each character in this line
+    for (const char of line) {
+      if (char !== ' ') {
+        stackedLines.push(char);
+      } else {
+        // Treat spaces as blank lines for spacing
+        stackedLines.push('');
+      }
+    }
+    // Add extra blank line between original lines
+    if (lines.length > 1) {
+      stackedLines.push('');
+    }
+  }
+
+  // Remove trailing empty line if present
+  while (stackedLines.length > 0 && stackedLines[stackedLines.length - 1] === '') {
+    stackedLines.pop();
+  }
+
+  return stackedLines.join('\n');
+}
+
 export function renderTextToStitches(
   options: TextRenderOptions,
   includeHighResCanvas: boolean = false
@@ -62,31 +97,56 @@ export function renderTextToStitches(
     };
   }
 
+  // For stacked orientation, convert text to one character per line
+  // and adjust target height so each character is approximately the original target height
+  let processedText = text;
+  let adjustedTargetHeight = targetHeight;
+
+  if (options.orientation === 'stacked') {
+    processedText = textToStacked(text);
+    // Count number of lines (characters) in stacked text
+    const lineCount = processedText.split('\n').filter(line => line.trim()).length;
+    if (lineCount > 0) {
+      // Each character should be roughly targetHeight, no extra spacing for stacked
+      adjustedTargetHeight = Math.round(targetHeight * lineCount);
+    }
+  }
+
+  const processedOptions = { ...options, text: processedText, targetHeight: adjustedTargetHeight };
+
   // Check if this is a custom bitmap font
   const customFont = getCustomFont(fontFamily);
   if (customFont) {
-    return renderCustomBitmapFont(customFont, options, includeHighResCanvas);
+    return renderCustomBitmapFont(customFont, processedOptions, includeHighResCanvas);
   }
 
   // Standard font rendering: high resolution + sampling
-  const highRes = renderHighResolution(options);
+  const highRes = renderHighResolution(processedOptions);
 
   // Sample into stitch grid
   const sampled = sampleToStitchGrid(
     highRes.canvas,
     highRes.textBounds,
-    targetHeight,
+    adjustedTargetHeight,
     options.colorId,
     boldness
   );
 
+  // Apply orientation transformation
+  const oriented = applyOrientation(
+    sampled.stitches,
+    sampled.width,
+    sampled.height,
+    options.orientation
+  );
+
   return {
-    stitches: sampled.stitches,
-    width: sampled.width,
-    height: sampled.height,
+    stitches: oriented.stitches,
+    width: oriented.width,
+    height: oriented.height,
     highResCanvas: includeHighResCanvas ? highRes.canvas : undefined,
-    gridWidth: sampled.width,
-    gridHeight: sampled.height,
+    gridWidth: oriented.width,
+    gridHeight: oriented.height,
   };
 }
 
@@ -250,13 +310,35 @@ function renderCustomBitmapFont(
     highResCanvas = canvas;
   }
 
+  // Apply orientation transformation
+  const oriented = applyOrientation(stitches, finalWidth, finalHeight, options.orientation);
+
+  // Regenerate high-res canvas if orientation changed the dimensions
+  if (includeHighResCanvas && options.orientation && options.orientation !== 'horizontal') {
+    const cellSize = Math.max(4, Math.ceil(MIN_RENDER_HEIGHT / oriented.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = oriented.width * cellSize;
+    canvas.height = oriented.height * cellSize;
+
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'black';
+
+    for (const stitch of oriented.stitches) {
+      ctx.fillRect(stitch.x * cellSize, stitch.y * cellSize, cellSize, cellSize);
+    }
+
+    highResCanvas = canvas;
+  }
+
   return {
-    stitches,
-    width: finalWidth,
-    height: finalHeight,
+    stitches: oriented.stitches,
+    width: oriented.width,
+    height: oriented.height,
     highResCanvas,
-    gridWidth: finalWidth,
-    gridHeight: finalHeight,
+    gridWidth: oriented.width,
+    gridHeight: oriented.height,
   };
 }
 
@@ -312,7 +394,7 @@ interface HighResResult {
  * Render text at high resolution for quality sampling
  */
 function renderHighResolution(options: TextRenderOptions): HighResResult {
-  const { text, fontFamily, fontWeight, italic, targetHeight } = options;
+  const { text, fontFamily, fontWeight, italic, targetHeight, orientation } = options;
 
   // Calculate render size - at least MIN_RENDER_HEIGHT or RENDER_SCALE * target
   const renderHeight = Math.max(MIN_RENDER_HEIGHT, targetHeight * RENDER_SCALE);
@@ -326,7 +408,9 @@ function renderHighResolution(options: TextRenderOptions): HighResResult {
 
   // Handle multiline text
   const lines = text.split('\n');
-  const lineHeight = Math.ceil(renderHeight * 1.2);
+  // For stacked text, use tighter line spacing (no extra space between characters)
+  const lineHeightMultiplier = orientation === 'stacked' ? 1.0 : 1.2;
+  const lineHeight = Math.ceil(renderHeight * lineHeightMultiplier);
 
   // Measure text
   let maxWidth = 0;
@@ -511,5 +595,60 @@ export function createTextLayerMetadata(options: TextRenderOptions): TextLayerMe
     italic: options.italic,
     colorId: options.colorId,
     boldness: options.boldness ?? 0.5,
+    orientation: options.orientation ?? 'horizontal',
   };
+}
+
+/**
+ * Transform stitches based on text orientation
+ * - horizontal: no change (default)
+ * - vertical-up: rotate 90° counter-clockwise (text reads bottom to top)
+ * - vertical-down: rotate 90° clockwise (text reads top to bottom)
+ * - stacked: handled during rendering (each character on separate line)
+ */
+function applyOrientation(
+  stitches: Stitch[],
+  width: number,
+  height: number,
+  orientation: TextOrientation | undefined
+): { stitches: Stitch[]; width: number; height: number } {
+  // 'stacked' is handled by modifying text before rendering, not here
+  if (!orientation || orientation === 'horizontal' || orientation === 'stacked') {
+    return { stitches, width, height };
+  }
+
+  const transformed: Stitch[] = [];
+
+  for (const stitch of stitches) {
+    let newX: number, newY: number;
+
+    switch (orientation) {
+      case 'vertical-up':
+        // Rotate 90° counter-clockwise: (x, y) -> (y, width - 1 - x)
+        newX = stitch.y;
+        newY = width - 1 - stitch.x;
+        break;
+      case 'vertical-down':
+        // Rotate 90° clockwise: (x, y) -> (height - 1 - y, x)
+        newX = height - 1 - stitch.y;
+        newY = stitch.x;
+        break;
+      default:
+        newX = stitch.x;
+        newY = stitch.y;
+    }
+
+    transformed.push({
+      ...stitch,
+      x: newX,
+      y: newY,
+    });
+  }
+
+  // For 90° rotations, swap width and height
+  if (orientation === 'vertical-up' || orientation === 'vertical-down') {
+    return { stitches: transformed, width: height, height: width };
+  }
+
+  return { stitches: transformed, width, height };
 }

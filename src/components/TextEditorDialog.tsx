@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Stitch, Color } from '../stores/patternStore';
-import { bundledFonts, waitForFont } from '../data/bundledFonts';
+import { Stitch, Color, TextOrientation } from '../stores/patternStore';
+import { waitForFont } from '../data/bundledFonts';
 import {
   generateTextPreview,
   TextLayerMetadata,
@@ -14,7 +14,7 @@ interface TextEditorDialogProps {
   onConfirm: (stitches: Stitch[], width: number, height: number, colorToAdd?: Color, metadata?: TextLayerMetadata) => void;
   colorPalette: Color[];
   initialColorId: string;
-  onOpenFontBrowser: () => void;
+  onOpenFontBrowser: (previewText: string) => void;
   selectedFont: string;
   selectedWeight: number;
   onWeightChange: (weight: number) => void;
@@ -42,12 +42,14 @@ export function TextEditorDialog({
   const DEFAULT_FONT_SIZE = 24;
   const DEFAULT_BOLDNESS = 0.5;
   const DEFAULT_ITALIC = false;
+  const DEFAULT_ORIENTATION: TextOrientation = 'horizontal';
 
   const [text, setText] = useState('');
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
   const [fontSizeInput, setFontSizeInput] = useState(String(DEFAULT_FONT_SIZE));
   const [italic, setItalic] = useState(DEFAULT_ITALIC);
   const [boldness, setBoldness] = useState(DEFAULT_BOLDNESS);
+  const [orientation, setOrientation] = useState<TextOrientation>(DEFAULT_ORIENTATION);
   const [selectedColorId, setSelectedColorId] = useState(initialColorId);
   const [previewData, setPreviewData] = useState<{
     stitches: Stitch[];
@@ -57,6 +59,8 @@ export function TextEditorDialog({
     gridWidth: number;
     gridHeight: number;
   } | null>(null);
+  // Separate preview for font sample (always horizontal)
+  const [fontSampleCanvas, setFontSampleCanvas] = useState<HTMLCanvasElement | null>(null);
   const [fontLoaded, setFontLoaded] = useState(false);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const fontSampleCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -67,6 +71,7 @@ export function TextEditorDialog({
     setFontSizeInput(String(DEFAULT_FONT_SIZE));
     setItalic(DEFAULT_ITALIC);
     setBoldness(DEFAULT_BOLDNESS);
+    setOrientation(DEFAULT_ORIENTATION);
     onWeightChange(400); // Reset to regular weight
   };
 
@@ -78,6 +83,7 @@ export function TextEditorDialog({
         setText(initialMetadata.text);
         setItalic(initialMetadata.italic);
         setBoldness(initialMetadata.boldness);
+        setOrientation(initialMetadata.orientation ?? DEFAULT_ORIENTATION);
 
         // Use layer height if available, otherwise use default
         const height = initialHeight ?? DEFAULT_FONT_SIZE;
@@ -96,6 +102,7 @@ export function TextEditorDialog({
         setText('');
         setItalic(DEFAULT_ITALIC);
         setBoldness(DEFAULT_BOLDNESS);
+        setOrientation(DEFAULT_ORIENTATION);
         setFontSize(DEFAULT_FONT_SIZE);
         setFontSizeInput(String(DEFAULT_FONT_SIZE));
 
@@ -131,16 +138,31 @@ export function TextEditorDialog({
   const generatePreview = useCallback(() => {
     if (!text.trim()) {
       setPreviewData(null);
+      setFontSampleCanvas(null);
       return;
     }
 
     // Wait for font to load
     if (!fontLoaded) {
       setPreviewData(null);
+      setFontSampleCanvas(null);
       return;
     }
 
-    // Use unified renderer for all fonts
+    // Generate font sample preview (always horizontal for the font selector)
+    const fontSample = generateTextPreview({
+      text,
+      fontFamily: selectedFont,
+      fontWeight: selectedWeight,
+      italic,
+      targetHeight: fontSize,
+      colorId: effectiveColorId,
+      boldness,
+      orientation: 'horizontal', // Always horizontal for font sample
+    });
+    setFontSampleCanvas(fontSample.highResCanvas || null);
+
+    // Generate stitch preview with actual orientation
     const preview = generateTextPreview({
       text,
       fontFamily: selectedFont,
@@ -149,6 +171,7 @@ export function TextEditorDialog({
       targetHeight: fontSize,
       colorId: effectiveColorId,
       boldness,
+      orientation,
     });
 
     setPreviewData({
@@ -159,26 +182,27 @@ export function TextEditorDialog({
       gridWidth: preview.gridWidth,
       gridHeight: preview.gridHeight,
     });
-  }, [text, selectedFont, fontSize, selectedWeight, italic, boldness, effectiveColorId, fontLoaded]);
+  }, [text, selectedFont, fontSize, selectedWeight, italic, boldness, effectiveColorId, fontLoaded, orientation]);
 
   useEffect(() => {
     const debounce = setTimeout(generatePreview, 150);
     return () => clearTimeout(debounce);
   }, [generatePreview]);
 
-  // Draw font sample canvas - shows high-res text (readable)
+  // Draw font sample canvas - shows high-res text (readable) inline with font selector
+  // Always uses horizontal orientation
   useEffect(() => {
     const canvas = fontSampleCanvasRef.current;
-    if (!canvas || !previewData?.highResCanvas) return;
+    if (!canvas || !fontSampleCanvas) return;
 
     const ctx = canvas.getContext('2d')!;
-    const { highResCanvas } = previewData;
+    const highResCanvas = fontSampleCanvas;
 
     if (highResCanvas.width === 0 || highResCanvas.height === 0) return;
 
-    // Fit within sample area
-    const maxWidth = 540;
-    const maxHeight = 80;
+    // Fit within inline sample area (smaller height to fit in row)
+    const maxWidth = 300;
+    const maxHeight = 32;
     const scale = Math.min(maxWidth / highResCanvas.width, maxHeight / highResCanvas.height, 1);
 
     canvas.width = Math.ceil(highResCanvas.width * scale);
@@ -190,7 +214,7 @@ export function TextEditorDialog({
 
     // Draw high-res text
     ctx.drawImage(highResCanvas, 0, 0, canvas.width, canvas.height);
-  }, [previewData]);
+  }, [fontSampleCanvas]);
 
   // Draw preview on canvas - shows stitch grid only (no high-res text)
   useEffect(() => {
@@ -271,6 +295,7 @@ export function TextEditorDialog({
         targetHeight: fontSize,
         colorId: effectiveColorId,
         boldness,
+        orientation,
       });
 
       onConfirm(previewData.stitches, previewData.width, previewData.height, colorToAdd, metadata);
@@ -286,8 +311,6 @@ export function TextEditorDialog({
 
   if (!isOpen) return null;
 
-  const currentFontData = bundledFonts.find(f => f.family === selectedFont);
-  const isBundledFont = !!currentFontData;
   const isCustomFont = !!getCustomFont(selectedFont);
 
   return (
@@ -315,32 +338,43 @@ export function TextEditorDialog({
               value={text}
               onChange={(e) => setText(e.target.value)}
               placeholder="Enter your text..."
-              className="w-full h-24 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              rows={2}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none overflow-y-auto"
               autoFocus
             />
           </div>
 
-          {/* Font Selection */}
-          <div className="flex items-center gap-4">
-            <div className="flex-1">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Font
-              </label>
-              <div className="flex items-center gap-2">
-                <div
-                  className="flex-1 px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
-                  style={{ fontFamily: `"${selectedFont}", sans-serif` }}
-                >
-                  {selectedFont}
-                  {!fontLoaded && <span className="text-gray-400 ml-2">(loading...)</span>}
-                  {isBundledFont && fontLoaded && <span className="text-xs text-green-600 ml-2">(available)</span>}
-                </div>
-                <button
-                  onClick={onOpenFontBrowser}
-                  className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-md text-sm"
-                >
-                  Browse...
-                </button>
+          {/* Font Selection with inline sample */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Font
+            </label>
+            <div className="flex items-center gap-2">
+              <div
+                className="w-40 px-3 py-2 border border-gray-300 rounded-md bg-gray-50 truncate"
+                style={{ fontFamily: `"${selectedFont}", sans-serif` }}
+                title={selectedFont}
+              >
+                {selectedFont}
+                {!fontLoaded && <span className="text-gray-400 text-xs ml-1">(loading...)</span>}
+              </div>
+              <button
+                onClick={() => onOpenFontBrowser(text)}
+                className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-md text-sm whitespace-nowrap"
+              >
+                Browse...
+              </button>
+              <div className="flex-1 h-10 border border-gray-300 rounded-md bg-white flex items-center justify-center overflow-hidden px-2">
+                {fontSampleCanvas ? (
+                  <canvas
+                    ref={fontSampleCanvasRef}
+                    className="max-w-full max-h-full"
+                  />
+                ) : (
+                  <span className="text-gray-400 text-sm truncate">
+                    {text.trim() ? (fontLoaded ? 'Loading...' : 'Loading font...') : 'Enter text'}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -438,6 +472,91 @@ export function TextEditorDialog({
             </button>
           </div>
 
+          {/* Text Orientation */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Orientation
+            </label>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setOrientation('horizontal')}
+                className={`px-3 py-2 rounded border flex items-center gap-2 ${
+                  orientation === 'horizontal'
+                    ? 'bg-blue-500 text-white border-blue-500'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Horizontal (normal)"
+              >
+                <span className="text-sm">A</span>
+                <span className="text-xs">Horizontal</span>
+              </button>
+              <button
+                onClick={() => setOrientation('vertical-down')}
+                className={`px-3 py-2 rounded border flex items-center gap-2 ${
+                  orientation === 'vertical-down'
+                    ? 'bg-blue-500 text-white border-blue-500'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Vertical (top to bottom)"
+              >
+                <span className="text-sm" style={{ writingMode: 'vertical-rl' }}>A</span>
+                <span className="text-xs">Vertical</span>
+              </button>
+              <button
+                onClick={() => setOrientation('vertical-up')}
+                className={`px-3 py-2 rounded border flex items-center gap-2 ${
+                  orientation === 'vertical-up'
+                    ? 'bg-blue-500 text-white border-blue-500'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Vertical (bottom to top)"
+              >
+                <span className="text-sm" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>A</span>
+                <span className="text-xs">Vertical Up</span>
+              </button>
+              <button
+                onClick={() => setOrientation('stacked')}
+                className={`px-3 py-2 rounded border flex items-center gap-2 ${
+                  orientation === 'stacked'
+                    ? 'bg-blue-500 text-white border-blue-500'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Stacked (one letter on top of another)"
+              >
+                <span className="text-sm flex flex-col leading-none" style={{ fontSize: '8px' }}>
+                  <span>A</span>
+                  <span>B</span>
+                  <span>C</span>
+                </span>
+                <span className="text-xs">Stacked</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Stitch Preview */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Stitch Preview
+            </label>
+            <div className="border border-gray-300 rounded-md p-2 bg-gray-50 h-[180px] flex items-center justify-center overflow-hidden">
+              {previewData && previewData.stitches.length > 0 ? (
+                <div className="text-center h-full flex flex-col items-center justify-center">
+                  <canvas
+                    ref={previewCanvasRef}
+                    className="border border-gray-200 mx-auto max-w-full max-h-[140px]"
+                  />
+                  <p className="text-xs text-gray-500 mt-2">
+                    {previewData.width} x {previewData.height} stitches ({previewData.stitches.length} total)
+                  </p>
+                </div>
+              ) : (
+                <p className="text-gray-400 text-sm">
+                  {text.trim() ? 'Generating preview...' : 'Enter text to see preview'}
+                </p>
+              )}
+            </div>
+          </div>
+
           {/* Color Selection */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -464,49 +583,6 @@ export function TextEditorDialog({
                 {currentColor.threadCode && ` (${currentColor.threadCode})`}
               </p>
             )}
-          </div>
-
-          {/* Font Sample - shows readable high-res text */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Font Sample
-            </label>
-            <div className="border border-gray-300 rounded-md p-3 bg-white h-[80px] flex items-center justify-center overflow-hidden">
-              {previewData?.highResCanvas ? (
-                <canvas
-                  ref={fontSampleCanvasRef}
-                  className="max-w-full max-h-full"
-                />
-              ) : (
-                <p className="text-gray-400 text-sm">
-                  {text.trim() ? 'Loading...' : 'Enter text to see font sample'}
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Stitch Preview */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Stitch Preview
-            </label>
-            <div className="border border-gray-300 rounded-md p-2 bg-gray-50 h-[180px] flex items-center justify-center overflow-hidden">
-              {previewData && previewData.stitches.length > 0 ? (
-                <div className="text-center h-full flex flex-col items-center justify-center">
-                  <canvas
-                    ref={previewCanvasRef}
-                    className="border border-gray-200 mx-auto max-w-full max-h-[140px]"
-                  />
-                  <p className="text-xs text-gray-500 mt-2">
-                    {previewData.width} x {previewData.height} stitches ({previewData.stitches.length} total)
-                  </p>
-                </div>
-              ) : (
-                <p className="text-gray-400 text-sm">
-                  {text.trim() ? 'Generating preview...' : 'Enter text to see preview'}
-                </p>
-              )}
-            </div>
           </div>
         </div>
 

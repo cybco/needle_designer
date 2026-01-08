@@ -29,6 +29,9 @@ export interface Stitch {
   completed: boolean;
 }
 
+// Text orientation options
+export type TextOrientation = 'horizontal' | 'vertical-up' | 'vertical-down' | 'stacked';
+
 // Metadata stored with text layers for re-rendering on resize
 export interface TextLayerMetadata {
   type: 'text';
@@ -38,6 +41,7 @@ export interface TextLayerMetadata {
   italic: boolean;
   colorId: string;
   boldness: number;
+  orientation?: TextOrientation; // Default: 'horizontal'
 }
 
 export type LayerMetadata = TextLayerMetadata; // Extensible for other layer types
@@ -87,6 +91,8 @@ export interface SelectionState {
   selectedStitches?: Stitch[];  // Stitches within area selection
   isSelectingArea?: boolean;    // True while dragging to create area selection
   selectionStart?: { x: number; y: number };  // Start point of rectangle drag
+  // When true, floating stitches will be committed to a new layer instead of active layer
+  commitToNewLayer?: boolean;
 }
 
 export interface OverlayImage {
@@ -216,6 +222,18 @@ interface PatternState {
   moveSelection: () => void;
   deleteSelection: () => void;
   selectionToNewLayer: () => void;
+  duplicateSelectionToNewLayer: () => void;
+  flipSelectionHorizontal: () => void;
+  flipSelectionVertical: () => void;
+  rotateSelectionLeft: () => void;
+  rotateSelectionRight: () => void;
+
+  // Layer transform actions (for whole layer when select tool is active)
+  duplicateLayerToNewLayer: () => void;
+  flipLayerHorizontal: () => void;
+  flipLayerVertical: () => void;
+  rotateLayerLeft: () => void;
+  rotateLayerRight: () => void;
 
   // Overlay image actions
   addOverlayImage: (dataUrl: string, naturalWidth: number, naturalHeight: number, name?: string) => void;
@@ -1463,6 +1481,36 @@ export const usePatternStore = create<PatternState>((set, get) => {
       return;
     }
 
+    // For area selections, convert to floating selection for dragging
+    if (selection.selectionType === 'area' && selection.selectedStitches?.length) {
+      pushToHistory();
+
+      // Remove selected stitches from their layers
+      const toRemove = new Set(selection.selectedStitches.map(s => `${s.x},${s.y}`));
+      const updatedLayers = pattern.layers.map(layer => ({
+        ...layer,
+        stitches: layer.stitches.filter(s => !toRemove.has(`${s.x},${s.y}`)),
+      }));
+
+      set({
+        pattern: {
+          ...pattern,
+          layers: updatedLayers,
+        },
+        selection: {
+          ...selection,
+          isDragging: true,
+          dragStart: point,
+          originalBounds: { ...selection.bounds },
+          originalStitches: selection.selectedStitches.map(s => ({ ...s })),
+          floatingStitches: selection.selectedStitches.map(s => ({ ...s })),
+        },
+        hasUnsavedChanges: true,
+      });
+      return;
+    }
+
+    // For layer selections, use the layer's stitches
     const layer = pattern.layers.find(l => l.id === selection.layerId);
     if (!layer) return;
 
@@ -1805,6 +1853,29 @@ export const usePatternStore = create<PatternState>((set, get) => {
 
     pushToHistory();
 
+    // If marked for new layer, create a new layer with the floating stitches
+    if (selection.commitToNewLayer) {
+      const newLayerId = `layer-${Date.now()}`;
+      const newLayer: Layer = {
+        id: newLayerId,
+        name: 'Selection',
+        visible: true,
+        locked: false,
+        stitches: selection.floatingStitches.map(s => ({ ...s })),
+      };
+
+      set({
+        pattern: {
+          ...pattern,
+          layers: [...pattern.layers, newLayer],
+        },
+        activeLayerId: newLayerId,
+        selection: null,
+        hasUnsavedChanges: true,
+      });
+      return;
+    }
+
     const targetLayerId = activeLayerId || pattern.layers[0]?.id;
     if (!targetLayerId) return;
 
@@ -2000,34 +2071,495 @@ export const usePatternStore = create<PatternState>((set, get) => {
 
     pushToHistory();
 
-    // Create set of positions to move
-    const toMove = new Set(
+    // Create set of positions to remove from layers
+    const toRemove = new Set(
       selection.selectedStitches.map(s => `${s.x},${s.y}`)
     );
 
-    // Remove from existing layers
+    // Remove from all layers
     const updatedLayers = pattern.layers.map(layer => ({
       ...layer,
-      stitches: layer.stitches.filter(s => !toMove.has(`${s.x},${s.y}`)),
+      stitches: layer.stitches.filter(s => !toRemove.has(`${s.x},${s.y}`)),
     }));
 
-    // Create new layer with selected stitches
+    // Create floating selection with the stitches, marked for new layer commit
+    set({
+      pattern: { ...pattern, layers: updatedLayers },
+      selection: {
+        ...selection,
+        floatingStitches: selection.selectedStitches.map(s => ({ ...s })),
+        selectedStitches: undefined,
+        isSelectingArea: false,
+        commitToNewLayer: true,
+      },
+      hasUnsavedChanges: true,
+    });
+  },
+
+  duplicateSelectionToNewLayer: () => {
+    const { selection } = get();
+    if (selection?.selectionType !== 'area' || !selection.selectedStitches?.length) return;
+
+    // Create floating selection with a copy of the stitches, marked for new layer commit
+    // Unlike selectionToNewLayer, this does NOT remove the original stitches
+    set({
+      selection: {
+        ...selection,
+        floatingStitches: selection.selectedStitches.map(s => ({ ...s })),
+        selectedStitches: undefined,
+        isSelectingArea: false,
+        commitToNewLayer: true,
+      },
+    });
+  },
+
+  flipSelectionHorizontal: () => {
+    const { pattern, selection } = get();
+    if (!pattern || selection?.selectionType !== 'area') return;
+
+    // Work with either selectedStitches or floatingStitches
+    const stitchesToFlip = selection.selectedStitches || selection.floatingStitches;
+    if (!stitchesToFlip?.length) return;
+
+    const isFloating = !!selection.floatingStitches;
+
+    pushToHistory();
+
+    const { bounds } = selection;
+
+    // Flip stitches horizontally within the selection bounds
+    const flippedStitches = stitchesToFlip.map(s => ({
+      ...s,
+      x: bounds.x + bounds.width - 1 - (s.x - bounds.x),
+    }));
+
+    if (isFloating) {
+      // Just update the floating stitches, no layer changes needed
+      set({
+        selection: {
+          ...selection,
+          floatingStitches: flippedStitches,
+        },
+      });
+    } else {
+      // Update layers for non-floating selection
+      const toUpdate = new Set(stitchesToFlip.map(s => `${s.x},${s.y}`));
+
+      const updatedLayers = pattern.layers.map(layer => {
+        const layerStitchMap = new Map<string, Stitch>();
+
+        for (const stitch of layer.stitches) {
+          if (!toUpdate.has(`${stitch.x},${stitch.y}`)) {
+            layerStitchMap.set(`${stitch.x},${stitch.y}`, stitch);
+          }
+        }
+
+        for (let i = 0; i < stitchesToFlip.length; i++) {
+          const original = stitchesToFlip[i];
+          const flipped = flippedStitches[i];
+          if (layer.stitches.some(s => s.x === original.x && s.y === original.y && s.colorId === original.colorId)) {
+            layerStitchMap.set(`${flipped.x},${flipped.y}`, flipped);
+          }
+        }
+
+        return {
+          ...layer,
+          stitches: Array.from(layerStitchMap.values()),
+        };
+      });
+
+      set({
+        pattern: { ...pattern, layers: updatedLayers },
+        selection: {
+          ...selection,
+          selectedStitches: flippedStitches,
+        },
+        hasUnsavedChanges: true,
+      });
+    }
+  },
+
+  flipSelectionVertical: () => {
+    const { pattern, selection } = get();
+    if (!pattern || selection?.selectionType !== 'area') return;
+
+    // Work with either selectedStitches or floatingStitches
+    const stitchesToFlip = selection.selectedStitches || selection.floatingStitches;
+    if (!stitchesToFlip?.length) return;
+
+    const isFloating = !!selection.floatingStitches;
+
+    pushToHistory();
+
+    const { bounds } = selection;
+
+    // Flip stitches vertically within the selection bounds
+    const flippedStitches = stitchesToFlip.map(s => ({
+      ...s,
+      y: bounds.y + bounds.height - 1 - (s.y - bounds.y),
+    }));
+
+    if (isFloating) {
+      // Just update the floating stitches, no layer changes needed
+      set({
+        selection: {
+          ...selection,
+          floatingStitches: flippedStitches,
+        },
+      });
+    } else {
+      // Update layers for non-floating selection
+      const toUpdate = new Set(stitchesToFlip.map(s => `${s.x},${s.y}`));
+
+      const updatedLayers = pattern.layers.map(layer => {
+        const layerStitchMap = new Map<string, Stitch>();
+
+        for (const stitch of layer.stitches) {
+          if (!toUpdate.has(`${stitch.x},${stitch.y}`)) {
+            layerStitchMap.set(`${stitch.x},${stitch.y}`, stitch);
+          }
+        }
+
+        for (let i = 0; i < stitchesToFlip.length; i++) {
+          const original = stitchesToFlip[i];
+          const flipped = flippedStitches[i];
+          if (layer.stitches.some(s => s.x === original.x && s.y === original.y && s.colorId === original.colorId)) {
+            layerStitchMap.set(`${flipped.x},${flipped.y}`, flipped);
+          }
+        }
+
+        return {
+          ...layer,
+          stitches: Array.from(layerStitchMap.values()),
+        };
+      });
+
+      set({
+        pattern: { ...pattern, layers: updatedLayers },
+        selection: {
+          ...selection,
+          selectedStitches: flippedStitches,
+        },
+        hasUnsavedChanges: true,
+      });
+    }
+  },
+
+  rotateSelectionLeft: () => {
+    const { pattern, selection } = get();
+    if (!pattern || selection?.selectionType !== 'area') return;
+
+    // Work with either selectedStitches or floatingStitches
+    const stitchesToRotate = selection.selectedStitches || selection.floatingStitches;
+    if (!stitchesToRotate?.length) return;
+
+    const isFloating = !!selection.floatingStitches;
+
+    pushToHistory();
+
+    const { bounds } = selection;
+
+    // Rotate 90° counter-clockwise: (x, y) -> (y, width - 1 - x)
+    // New bounds will have swapped width/height
+    const newWidth = bounds.height;
+    const newHeight = bounds.width;
+
+    const rotatedStitches = stitchesToRotate.map(s => {
+      const relX = s.x - bounds.x;
+      const relY = s.y - bounds.y;
+      // Rotate CCW: new position is (relY, width - 1 - relX)
+      return {
+        ...s,
+        x: bounds.x + relY,
+        y: bounds.y + (bounds.width - 1 - relX),
+      };
+    });
+
+    if (isFloating) {
+      // Just update the floating stitches and bounds, no layer changes needed
+      set({
+        selection: {
+          ...selection,
+          bounds: { x: bounds.x, y: bounds.y, width: newWidth, height: newHeight },
+          floatingStitches: rotatedStitches,
+        },
+      });
+    } else {
+      // Update layers for non-floating selection
+      const toUpdate = new Set(stitchesToRotate.map(s => `${s.x},${s.y}`));
+
+      const updatedLayers = pattern.layers.map(layer => {
+        const layerStitchMap = new Map<string, Stitch>();
+
+        for (const stitch of layer.stitches) {
+          if (!toUpdate.has(`${stitch.x},${stitch.y}`)) {
+            layerStitchMap.set(`${stitch.x},${stitch.y}`, stitch);
+          }
+        }
+
+        for (let i = 0; i < stitchesToRotate.length; i++) {
+          const original = stitchesToRotate[i];
+          const rotated = rotatedStitches[i];
+          if (layer.stitches.some(s => s.x === original.x && s.y === original.y && s.colorId === original.colorId)) {
+            layerStitchMap.set(`${rotated.x},${rotated.y}`, rotated);
+          }
+        }
+
+        return {
+          ...layer,
+          stitches: Array.from(layerStitchMap.values()),
+        };
+      });
+
+      set({
+        pattern: { ...pattern, layers: updatedLayers },
+        selection: {
+          ...selection,
+          bounds: { x: bounds.x, y: bounds.y, width: newWidth, height: newHeight },
+          selectedStitches: rotatedStitches,
+        },
+        hasUnsavedChanges: true,
+      });
+    }
+  },
+
+  rotateSelectionRight: () => {
+    const { pattern, selection } = get();
+    if (!pattern || selection?.selectionType !== 'area') return;
+
+    // Work with either selectedStitches or floatingStitches
+    const stitchesToRotate = selection.selectedStitches || selection.floatingStitches;
+    if (!stitchesToRotate?.length) return;
+
+    const isFloating = !!selection.floatingStitches;
+
+    pushToHistory();
+
+    const { bounds } = selection;
+
+    // Rotate 90° clockwise: (x, y) -> (height - 1 - y, x)
+    // New bounds will have swapped width/height
+    const newWidth = bounds.height;
+    const newHeight = bounds.width;
+
+    const rotatedStitches = stitchesToRotate.map(s => {
+      const relX = s.x - bounds.x;
+      const relY = s.y - bounds.y;
+      // Rotate CW: new position is (height - 1 - relY, relX)
+      return {
+        ...s,
+        x: bounds.x + (bounds.height - 1 - relY),
+        y: bounds.y + relX,
+      };
+    });
+
+    if (isFloating) {
+      // Just update the floating stitches and bounds, no layer changes needed
+      set({
+        selection: {
+          ...selection,
+          bounds: { x: bounds.x, y: bounds.y, width: newWidth, height: newHeight },
+          floatingStitches: rotatedStitches,
+        },
+      });
+    } else {
+      // Update layers for non-floating selection
+      const toUpdate = new Set(stitchesToRotate.map(s => `${s.x},${s.y}`));
+
+      const updatedLayers = pattern.layers.map(layer => {
+        const layerStitchMap = new Map<string, Stitch>();
+
+        for (const stitch of layer.stitches) {
+          if (!toUpdate.has(`${stitch.x},${stitch.y}`)) {
+            layerStitchMap.set(`${stitch.x},${stitch.y}`, stitch);
+          }
+        }
+
+        for (let i = 0; i < stitchesToRotate.length; i++) {
+          const original = stitchesToRotate[i];
+          const rotated = rotatedStitches[i];
+          if (layer.stitches.some(s => s.x === original.x && s.y === original.y && s.colorId === original.colorId)) {
+            layerStitchMap.set(`${rotated.x},${rotated.y}`, rotated);
+          }
+        }
+
+        return {
+          ...layer,
+          stitches: Array.from(layerStitchMap.values()),
+        };
+      });
+
+      set({
+        pattern: { ...pattern, layers: updatedLayers },
+        selection: {
+          ...selection,
+          bounds: { x: bounds.x, y: bounds.y, width: newWidth, height: newHeight },
+          selectedStitches: rotatedStitches,
+        },
+        hasUnsavedChanges: true,
+      });
+    }
+  },
+
+  // Layer transform actions (for whole layer when select tool is active)
+  duplicateLayerToNewLayer: () => {
+    const { pattern, selection } = get();
+    if (!pattern || !selection || selection.selectionType !== 'layer') return;
+
+    const layer = pattern.layers.find(l => l.id === selection.layerId);
+    if (!layer || layer.stitches.length === 0) return;
+
+    pushToHistory();
+
+    // Create a new layer with a copy of all stitches from the selected layer
     const newLayerId = `layer-${Date.now()}`;
     const newLayer: Layer = {
       id: newLayerId,
-      name: 'Selection',
+      name: `${layer.name} Copy`,
       visible: true,
       locked: false,
-      stitches: selection.selectedStitches.map(s => ({ ...s })),
+      stitches: layer.stitches.map(s => ({ ...s })),
     };
 
     set({
       pattern: {
         ...pattern,
-        layers: [...updatedLayers, newLayer],
+        layers: [...pattern.layers, newLayer],
       },
       activeLayerId: newLayerId,
       selection: null,
+      hasUnsavedChanges: true,
+    });
+  },
+
+  flipLayerHorizontal: () => {
+    const { pattern, selection } = get();
+    if (!pattern || !selection || selection.selectionType !== 'layer') return;
+
+    const layer = pattern.layers.find(l => l.id === selection.layerId);
+    if (!layer || layer.stitches.length === 0) return;
+
+    pushToHistory();
+
+    const { bounds } = selection;
+
+    // Flip all stitches in the layer horizontally within bounds
+    const flippedStitches = layer.stitches.map(s => ({
+      ...s,
+      x: bounds.x + bounds.width - 1 - (s.x - bounds.x),
+    }));
+
+    const updatedLayers = pattern.layers.map(l =>
+      l.id === layer.id ? { ...l, stitches: flippedStitches } : l
+    );
+
+    set({
+      pattern: { ...pattern, layers: updatedLayers },
+      hasUnsavedChanges: true,
+    });
+  },
+
+  flipLayerVertical: () => {
+    const { pattern, selection } = get();
+    if (!pattern || !selection || selection.selectionType !== 'layer') return;
+
+    const layer = pattern.layers.find(l => l.id === selection.layerId);
+    if (!layer || layer.stitches.length === 0) return;
+
+    pushToHistory();
+
+    const { bounds } = selection;
+
+    // Flip all stitches in the layer vertically within bounds
+    const flippedStitches = layer.stitches.map(s => ({
+      ...s,
+      y: bounds.y + bounds.height - 1 - (s.y - bounds.y),
+    }));
+
+    const updatedLayers = pattern.layers.map(l =>
+      l.id === layer.id ? { ...l, stitches: flippedStitches } : l
+    );
+
+    set({
+      pattern: { ...pattern, layers: updatedLayers },
+      hasUnsavedChanges: true,
+    });
+  },
+
+  rotateLayerLeft: () => {
+    const { pattern, selection } = get();
+    if (!pattern || !selection || selection.selectionType !== 'layer') return;
+
+    const layer = pattern.layers.find(l => l.id === selection.layerId);
+    if (!layer || layer.stitches.length === 0) return;
+
+    pushToHistory();
+
+    const { bounds } = selection;
+
+    // Rotate 90° counter-clockwise: (x, y) -> (y, width - 1 - x)
+    const newWidth = bounds.height;
+    const newHeight = bounds.width;
+
+    const rotatedStitches = layer.stitches.map(s => {
+      const relX = s.x - bounds.x;
+      const relY = s.y - bounds.y;
+      return {
+        ...s,
+        x: bounds.x + relY,
+        y: bounds.y + (bounds.width - 1 - relX),
+      };
+    });
+
+    const updatedLayers = pattern.layers.map(l =>
+      l.id === layer.id ? { ...l, stitches: rotatedStitches } : l
+    );
+
+    set({
+      pattern: { ...pattern, layers: updatedLayers },
+      selection: {
+        ...selection,
+        bounds: { x: bounds.x, y: bounds.y, width: newWidth, height: newHeight },
+      },
+      hasUnsavedChanges: true,
+    });
+  },
+
+  rotateLayerRight: () => {
+    const { pattern, selection } = get();
+    if (!pattern || !selection || selection.selectionType !== 'layer') return;
+
+    const layer = pattern.layers.find(l => l.id === selection.layerId);
+    if (!layer || layer.stitches.length === 0) return;
+
+    pushToHistory();
+
+    const { bounds } = selection;
+
+    // Rotate 90° clockwise: (x, y) -> (height - 1 - y, x)
+    const newWidth = bounds.height;
+    const newHeight = bounds.width;
+
+    const rotatedStitches = layer.stitches.map(s => {
+      const relX = s.x - bounds.x;
+      const relY = s.y - bounds.y;
+      return {
+        ...s,
+        x: bounds.x + (bounds.height - 1 - relY),
+        y: bounds.y + relX,
+      };
+    });
+
+    const updatedLayers = pattern.layers.map(l =>
+      l.id === layer.id ? { ...l, stitches: rotatedStitches } : l
+    );
+
+    set({
+      pattern: { ...pattern, layers: updatedLayers },
+      selection: {
+        ...selection,
+        bounds: { x: bounds.x, y: bounds.y, width: newWidth, height: newHeight },
+      },
       hasUnsavedChanges: true,
     });
   },
