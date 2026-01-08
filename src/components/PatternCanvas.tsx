@@ -1,6 +1,5 @@
 import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
 import { usePatternStore, ResizeHandle, Color } from '../stores/patternStore';
-import { SelectionContextMenu } from './SelectionContextMenu';
 
 const CELL_SIZE = 20; // Base cell size in pixels
 const RULER_SIZE = 24; // Width/height of rulers in pixels
@@ -76,10 +75,6 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     startAreaSelection,
     updateAreaSelection,
     endAreaSelection,
-    duplicateSelection,
-    moveSelection,
-    deleteSelection,
-    selectionToNewLayer,
   } = usePatternStore();
 
   // Ensure shading values have defaults
@@ -1460,10 +1455,21 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     }
 
     if (activeTool === 'areaselect') {
-      // If there's a floating selection and we clicked outside, commit it
+      // If there's a floating selection, check if clicking inside to drag or outside to commit
       if (selection?.floatingStitches) {
-        commitFloatingSelection();
-        return;
+        if (isPointInSelectionBounds(x, y)) {
+          // Clicking inside floating selection - start dragging it
+          const cell = canvasToCellUnbounded(x, y);
+          if (cell) {
+            startDrag(cell);
+            setIsDrawing(true);
+          }
+          return;
+        } else {
+          // Clicking outside - commit the floating selection
+          commitFloatingSelection();
+          return;
+        }
       }
 
       // Check if clicking inside an existing area selection bounds (for drag)
@@ -2473,25 +2479,6 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
             className="absolute inset-0 touch-none"
             style={{ cursor: getCursor() }}
           />
-          {/* Area selection context menu - only show when using areaselect tool */}
-          {activeTool === 'areaselect' &&
-            selection &&
-            selection.selectionType === 'area' &&
-            !selection.isSelectingArea &&
-            selection.selectedStitches &&
-            selection.selectedStitches.length > 0 && (
-              <SelectionContextMenu
-                position={{
-                  // Position at bottom-right of selection
-                  x: (selection.bounds.x + selection.bounds.width) * CELL_SIZE * zoom + panOffset.x + 8,
-                  y: (selection.bounds.y + selection.bounds.height) * CELL_SIZE * zoom + panOffset.y + 8,
-                }}
-                onDuplicate={duplicateSelection}
-                onMove={moveSelection}
-                onDelete={deleteSelection}
-                onNewLayer={selectionToNewLayer}
-              />
-            )}
         </div>
         {/* Right ruler */}
         <canvas

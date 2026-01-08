@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { PatternCanvas } from './components/PatternCanvas';
 import { ColorPalette } from './components/ColorPalette';
-import { Toolbar, ToolVisibility, EraserIcon, FillIcon, PanIcon, CursorIcon, TextIcon, ColorSwapIcon } from './components/Toolbar';
+import { Toolbar, ToolVisibility, EraserIcon, FillIcon, PanIcon, CursorIcon, TextIcon, ColorSwapIcon, AreaSelectIcon, PreviewCanvasIcon, SelectionMoveIcon, SelectionDuplicateIcon, SelectionNewLayerIcon, SelectionDuplicateToNewLayerIcon, FlipHorizontalIcon, FlipVerticalIcon, RotateLeftIcon, RotateRightIcon } from './components/Toolbar';
 import { LayerPanel } from './components/LayerPanel';
 import { ProgressTrackingPanel } from './components/ProgressTrackingPanel';
 import { NewProjectDialog } from './components/NewProjectDialog';
@@ -16,6 +16,7 @@ import { ColorMatchDialog } from './components/ColorMatchDialog';
 import { SymbolAssignmentDialog } from './components/SymbolAssignmentDialog';
 import { OverlayImageDialog } from './components/OverlayImageDialog';
 import { UploadImageDialog } from './components/UploadImageDialog';
+import { PreviewCanvasDialog } from './components/PreviewCanvasDialog';
 import { ToggleSwitch } from './components/ToggleSwitch';
 import { usePatternStore, Pattern, RulerUnit, Stitch, TextLayerMetadata } from './stores/patternStore';
 import { useSessionHistoryStore } from './stores/sessionHistoryStore';
@@ -148,6 +149,15 @@ const DEFAULT_TOOL_VISIBILITY: ToolVisibility = {
   zoomOut: true,
   zoomFit: true,
   grid: true,
+  preview: true,
+  selectionMove: true,
+  selectionDuplicate: true,
+  selectionNewLayer: true,
+  selectionDuplicateToNewLayer: true,
+  selectionFlipHorizontal: true,
+  selectionFlipVertical: true,
+  selectionRotateLeft: true,
+  selectionRotateRight: true,
 };
 
 const DEFAULT_PREFERENCES: Preferences = {
@@ -190,6 +200,7 @@ function App() {
   const [showFontBrowser, setShowFontBrowser] = useState(false);
   const [showBitmapFontEditor, setShowBitmapFontEditor] = useState(false);
   const [editingTextLayerId, setEditingTextLayerId] = useState<string | null>(null);
+  const [fontBrowserPreviewText, setFontBrowserPreviewText] = useState('');
 
   // Ref to store the tool before space-bar pan (to restore on release)
   const toolBeforePanRef = useRef<string | null>(null);
@@ -238,6 +249,9 @@ function App() {
   // Unsaved changes dialog state
   const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = useState(false);
 
+  // Preview canvas dialog state
+  const [showPreviewDialog, setShowPreviewDialog] = useState(false);
+
   const {
     pattern,
     zoom,
@@ -265,6 +279,7 @@ function App() {
     removeLayer,
     clearSelection,
     deleteSelection,
+    commitFloatingSelection,
     selectLayerForTransform,
     setOverlayImages,
     isProgressMode,
@@ -427,6 +442,15 @@ function App() {
         }
       }
 
+      // Handle Enter key to commit floating selection
+      if (e.key === 'Enter') {
+        if (selection?.floatingStitches) {
+          e.preventDefault();
+          commitFloatingSelection();
+          return;
+        }
+      }
+
       // Handle Escape key to clear selection
       if (e.key === 'Escape') {
         if (selection) {
@@ -532,7 +556,7 @@ function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [zoom, activeTool, pattern, selection, activeLayerId, preferences.confirmLayerDelete, setTool, setZoom, removeLayer, clearSelection, deleteSelection, showNewProject]);
+  }, [zoom, activeTool, pattern, selection, activeLayerId, preferences.confirmLayerDelete, setTool, setZoom, removeLayer, clearSelection, deleteSelection, commitFloatingSelection, showNewProject]);
 
   // Add file to recent files list
   const addToRecentFiles = useCallback((filePath: string) => {
@@ -1507,7 +1531,7 @@ function App() {
           <>
             {/* Left Toolbar - hidden in progress mode */}
             {!isProgressMode && (
-              <Toolbar onTextToolClick={() => setShowTextEditor(true)} onFitToCanvas={handleFitToCanvas} toolVisibility={preferences.toolVisibility} />
+              <Toolbar onTextToolClick={() => setShowTextEditor(true)} onFitToCanvas={handleFitToCanvas} onPreviewClick={() => setShowPreviewDialog(true)} toolVisibility={preferences.toolVisibility} />
             )}
 
             {/* Canvas Area */}
@@ -1662,7 +1686,10 @@ function App() {
         onConfirm={handleTextConfirm}
         colorPalette={pattern?.colorPalette || []}
         initialColorId={selectedColorId || 'color-1'}
-        onOpenFontBrowser={() => setShowFontBrowser(true)}
+        onOpenFontBrowser={(previewText) => {
+          setFontBrowserPreviewText(previewText);
+          setShowFontBrowser(true);
+        }}
         selectedFont={selectedFont}
         selectedWeight={selectedFontWeight}
         onWeightChange={setSelectedFontWeight}
@@ -1686,6 +1713,7 @@ function App() {
         currentFont={selectedFont}
         currentWeight={selectedFontWeight}
         onOpenFontCreator={() => setShowBitmapFontEditor(true)}
+        previewText={fontBrowserPreviewText}
       />
 
       {/* Bitmap Font Editor - Dev Tool (Ctrl+Shift+F) */}
@@ -1746,6 +1774,11 @@ function App() {
         onSelectConvert={() => setShowImportDialog(true)}
         onSelectOverlay={() => setShowOverlayDialog(true)}
       />
+
+      {/* Preview Canvas Dialog */}
+      {showPreviewDialog && (
+        <PreviewCanvasDialog onClose={() => setShowPreviewDialog(false)} />
+      )}
 
       {/* Toolbar Visibility Dialog */}
       {showToolbarVisibilityDialog && (
@@ -1812,6 +1845,22 @@ function App() {
                   <h3 className="text-sm font-medium text-gray-700 mb-2">View</h3>
                   <div className="space-y-2">
                     <ToolVisibilityRow checked={preferences.toolVisibility.grid} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, grid: checked } })} icon={<span className="text-lg">#</span>} label="Grid Toggle" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.preview} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, preview: checked } })} icon={<PreviewCanvasIcon className="w-5 h-5" />} label="Preview Canvas" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.areaselect} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, areaselect: checked } })} icon={<AreaSelectIcon className="w-5 h-5" />} label="Area Select (S)" />
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-sm font-medium text-gray-700 mb-2">Selection Actions</h3>
+                  <div className="space-y-2">
+                    <ToolVisibilityRow checked={preferences.toolVisibility.selectionMove} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, selectionMove: checked } })} icon={<SelectionMoveIcon className="w-5 h-5" />} label="Move Selection" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.selectionDuplicate} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, selectionDuplicate: checked } })} icon={<SelectionDuplicateIcon className="w-5 h-5" />} label="Duplicate Selection" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.selectionNewLayer} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, selectionNewLayer: checked } })} icon={<SelectionNewLayerIcon className="w-5 h-5" />} label="Move to New Layer" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.selectionDuplicateToNewLayer} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, selectionDuplicateToNewLayer: checked } })} icon={<SelectionDuplicateToNewLayerIcon className="w-5 h-5" />} label="Duplicate to New Layer" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.selectionFlipHorizontal} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, selectionFlipHorizontal: checked } })} icon={<FlipHorizontalIcon className="w-5 h-5" />} label="Flip Horizontal" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.selectionFlipVertical} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, selectionFlipVertical: checked } })} icon={<FlipVerticalIcon className="w-5 h-5" />} label="Flip Vertical" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.selectionRotateLeft} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, selectionRotateLeft: checked } })} icon={<RotateLeftIcon className="w-5 h-5" />} label="Rotate Left" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.selectionRotateRight} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, selectionRotateRight: checked } })} icon={<RotateRightIcon className="w-5 h-5" />} label="Rotate Right" />
                   </div>
                 </div>
               </div>

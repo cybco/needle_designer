@@ -10,6 +10,7 @@ interface FontBrowserDialogProps {
   currentFont: string;
   currentWeight: number;
   onOpenFontCreator?: () => void;
+  previewText?: string; // Custom text to show in font previews
 }
 
 type Tab = 'myfonts' | 'google' | 'recent';
@@ -69,10 +70,12 @@ interface FontCardProps {
   isDownloading: boolean;
   isSelected: boolean;
   onClick: () => void;
+  previewText?: string;
 }
 
-function FontCard({ family, category, weight, isAvailable, isDownloading, isSelected, onClick }: FontCardProps) {
+function FontCard({ family, category, weight, isAvailable, isDownloading, isSelected, onClick, previewText }: FontCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const displayText = previewText?.trim() || 'The quick brown fox';
 
   return (
     <div
@@ -91,7 +94,7 @@ function FontCard({ family, category, weight, isAvailable, isDownloading, isSele
           fontWeight: weight,
         }}
       >
-        {isAvailable ? 'The quick brown fox' : (isDownloading ? 'Downloading...' : family)}
+        {isAvailable ? displayText : (isDownloading ? 'Downloading...' : family)}
       </div>
       <div className="flex items-center gap-2">
         <span className="text-sm font-medium text-gray-700 truncate">{family}</span>
@@ -156,6 +159,7 @@ export function FontBrowserDialog({
   currentFont,
   currentWeight,
   onOpenFontCreator,
+  previewText,
 }: FontBrowserDialogProps) {
   const [customFonts, setCustomFonts] = useState<CustomFont[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>('recent');
@@ -518,6 +522,7 @@ export function FontBrowserDialog({
                       isDownloading={downloading}
                       isSelected={selectedFont === font.family}
                       onClick={() => handleSelectFont(font.family, defaultWeight)}
+                      previewText={previewText}
                     />
                   );
                 })}
@@ -552,6 +557,7 @@ export function FontBrowserDialog({
                       isDownloading={downloading}
                       isSelected={selectedFont === font.family}
                       onClick={() => handleSelectFont(font.family, font.weight)}
+                      previewText={previewText}
                     />
                     <button
                       onClick={(e) => {
@@ -580,6 +586,7 @@ export function FontBrowserDialog({
                     isDownloading={false}
                     isSelected={selectedFont === font.family}
                     onClick={() => handleSelectFont(font.family, font.weights.includes(selectedWeight) ? selectedWeight : font.weights[0])}
+                    previewText={previewText}
                   />
                 ))}
             </div>

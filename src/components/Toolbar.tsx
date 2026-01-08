@@ -2,6 +2,167 @@ import { ReactNode } from 'react';
 import { usePatternStore, Tool } from '../stores/patternStore';
 import handMoveIcon from '../assets/hand-move.svg';
 
+// Icons for selection actions
+export function SelectionMoveIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M5 9l-3 3 3 3" />
+      <path d="M9 5l3-3 3 3" />
+      <path d="M15 19l-3 3-3-3" />
+      <path d="M19 9l3 3-3 3" />
+      <path d="M2 12h20" />
+      <path d="M12 2v20" />
+    </svg>
+  );
+}
+
+export function SelectionDuplicateIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="9" y="9" width="13" height="13" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+export function SelectionNewLayerIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z" />
+      <path d="m22 12.5-8.97 4.08a2 2 0 0 1-1.66 0L2 12.5" />
+      <path d="M12 17v5" />
+      <path d="M9 22h6" />
+    </svg>
+  );
+}
+
+export function SelectionDuplicateToNewLayerIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {/* Duplicate squares */}
+      <rect x="10" y="2" width="10" height="10" rx="1" />
+      <path d="M6 6H5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h1" />
+      {/* Layer with plus */}
+      <path d="M4 18l8 4 8-4" />
+      <path d="M12 14v8" />
+    </svg>
+  );
+}
+
+export function FlipHorizontalIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {/* Center vertical line */}
+      <path d="M12 3v18" strokeDasharray="2 2" />
+      {/* Left arrow */}
+      <path d="M8 7L4 12l4 5" />
+      <path d="M4 12h5" />
+      {/* Right arrow */}
+      <path d="M16 7l4 5-4 5" />
+      <path d="M20 12h-5" />
+    </svg>
+  );
+}
+
+export function FlipVerticalIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {/* Center horizontal line */}
+      <path d="M3 12h18" strokeDasharray="2 2" />
+      {/* Top arrow */}
+      <path d="M7 8L12 4l5 4" />
+      <path d="M12 4v5" />
+      {/* Bottom arrow */}
+      <path d="M7 16l5 4 5-4" />
+      <path d="M12 20v-5" />
+    </svg>
+  );
+}
+
+export function RotateLeftIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {/* Curved arrow going counter-clockwise */}
+      <path d="M3 12a9 9 0 1 0 9-9" />
+      <path d="M3 3v6h6" />
+    </svg>
+  );
+}
+
+export function RotateRightIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {/* Curved arrow going clockwise */}
+      <path d="M21 12a9 9 0 1 1-9-9" />
+      <path d="M21 3v6h-6" />
+    </svg>
+  );
+}
+
 export interface ToolVisibility {
   pencil: boolean;
   eraser: boolean;
@@ -20,6 +181,16 @@ export interface ToolVisibility {
   zoomOut: boolean;
   zoomFit: boolean;
   grid: boolean;
+  preview: boolean;
+  // Selection action buttons
+  selectionMove: boolean;
+  selectionDuplicate: boolean;
+  selectionNewLayer: boolean;
+  selectionDuplicateToNewLayer: boolean;
+  selectionFlipHorizontal: boolean;
+  selectionFlipVertical: boolean;
+  selectionRotateLeft: boolean;
+  selectionRotateRight: boolean;
 }
 
 interface ToolButtonProps {
@@ -166,6 +337,29 @@ export function ColorSwapIcon({ className }: { className?: string }) {
   );
 }
 
+// Preview Canvas icon SVG (eye with canvas/grid)
+export function PreviewCanvasIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {/* Eye outline */}
+      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+      {/* Pupil with grid pattern */}
+      <circle cx="12" cy="12" r="3" />
+      {/* Small grid lines inside pupil */}
+      <path d="M10.5 12h3" strokeWidth="1" />
+      <path d="M12 10.5v3" strokeWidth="1" />
+    </svg>
+  );
+}
+
 // Area Select icon SVG (marquee/selection rectangle with dashed border)
 export function AreaSelectIcon({ className }: { className?: string }) {
   return (
@@ -207,16 +401,62 @@ const DEFAULT_VISIBILITY: ToolVisibility = {
   zoomOut: true,
   zoomFit: true,
   grid: true,
+  preview: true,
+  selectionMove: true,
+  selectionDuplicate: true,
+  selectionNewLayer: true,
+  selectionDuplicateToNewLayer: true,
+  selectionFlipHorizontal: true,
+  selectionFlipVertical: true,
+  selectionRotateLeft: true,
+  selectionRotateRight: true,
 };
 
 interface ToolbarProps {
   onTextToolClick?: () => void;
   onFitToCanvas?: () => void;
+  onPreviewClick?: () => void;
   toolVisibility?: ToolVisibility;
 }
 
-export function Toolbar({ onTextToolClick, onFitToCanvas, toolVisibility = DEFAULT_VISIBILITY }: ToolbarProps) {
-  const { pattern, activeTool, zoom, showGrid, history, future, setTool, setZoom, toggleGrid, undo, redo } = usePatternStore();
+export function Toolbar({ onTextToolClick, onFitToCanvas, onPreviewClick, toolVisibility = DEFAULT_VISIBILITY }: ToolbarProps) {
+  const {
+    pattern,
+    activeTool,
+    zoom,
+    showGrid,
+    history,
+    future,
+    selection,
+    setTool,
+    setZoom,
+    toggleGrid,
+    undo,
+    redo,
+    moveSelection,
+    duplicateSelection,
+    selectionToNewLayer,
+    duplicateSelectionToNewLayer,
+    flipSelectionHorizontal,
+    flipSelectionVertical,
+    rotateSelectionLeft,
+    rotateSelectionRight,
+    flipLayerHorizontal,
+    flipLayerVertical,
+    rotateLayerLeft,
+    rotateLayerRight,
+    duplicateLayerToNewLayer,
+  } = usePatternStore();
+
+  // Helper to check if we have an area selection with stitches
+  const hasAreaSelection = selection?.selectionType === 'area' &&
+    (selection.selectedStitches?.length || selection.floatingStitches?.length);
+
+  // Helper to check if we have a layer selection
+  const hasLayerSelection = selection?.selectionType === 'layer';
+
+  // Combined check: either area selection or layer selection
+  const hasTransformableSelection = hasAreaSelection || hasLayerSelection;
 
   if (!pattern) {
     return (
@@ -231,7 +471,7 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, toolVisibility = DEFAU
   }
 
   // Check if any tools in a section are visible
-  const hasDrawingTools = toolVisibility.pencil || toolVisibility.eraser || toolVisibility.fill || toolVisibility.colorswap || toolVisibility.pan || toolVisibility.select || toolVisibility.areaselect || toolVisibility.text;
+  const hasDrawingTools = toolVisibility.pencil || toolVisibility.eraser || toolVisibility.fill || toolVisibility.colorswap || toolVisibility.pan || toolVisibility.select || toolVisibility.text;
   const hasShapeTools = toolVisibility.line || toolVisibility.rectangle || toolVisibility.ellipse;
   const hasHistoryTools = toolVisibility.undo || toolVisibility.redo;
   const hasZoomControls = toolVisibility.zoomIn || toolVisibility.zoomOut || toolVisibility.zoomFit;
@@ -246,15 +486,6 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, toolVisibility = DEFAU
               tool="select"
               icon={<CursorIcon />}
               label="Move (V)"
-              activeTool={activeTool}
-              onClick={setTool}
-            />
-          )}
-          {toolVisibility.areaselect && (
-            <ToolButton
-              tool="areaselect"
-              icon={<AreaSelectIcon />}
-              label="Select (S)"
               activeTool={activeTool}
               onClick={setTool}
             />
@@ -422,7 +653,7 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, toolVisibility = DEFAU
 
       {/* Grid toggle */}
       {toolVisibility.grid && (
-        <div className="p-2 space-y-2 w-14">
+        <div className="p-2 space-y-2 border-b border-gray-200 w-14">
           <button
             onClick={toggleGrid}
             className={`
@@ -437,6 +668,151 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, toolVisibility = DEFAU
           >
             #
           </button>
+        </div>
+      )}
+
+      {/* Preview Canvas */}
+      {toolVisibility.preview && (
+        <div className="p-2 space-y-2 border-b border-gray-200 w-14">
+          <button
+            onClick={onPreviewClick}
+            className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200"
+            title="Preview Canvas"
+          >
+            <PreviewCanvasIcon />
+          </button>
+        </div>
+      )}
+
+      {/* Area Select tool */}
+      {toolVisibility.areaselect && (
+        <div className="p-2 space-y-2 border-b border-gray-200 w-14">
+          <ToolButton
+            tool="areaselect"
+            icon={<AreaSelectIcon />}
+            label="Select (S)"
+            activeTool={activeTool}
+            onClick={setTool}
+          />
+        </div>
+      )}
+
+      {/* Selection Actions */}
+      {(toolVisibility.selectionMove || toolVisibility.selectionDuplicate || toolVisibility.selectionNewLayer || toolVisibility.selectionDuplicateToNewLayer || toolVisibility.selectionFlipHorizontal || toolVisibility.selectionFlipVertical || toolVisibility.selectionRotateLeft || toolVisibility.selectionRotateRight) && (
+        <div className="p-2 space-y-2 w-14">
+          <div className="text-[9px] text-gray-400 text-center font-medium -mb-1">Selection</div>
+          {toolVisibility.selectionMove && (
+            <button
+              onClick={moveSelection}
+              disabled={!selection || selection.selectionType !== 'area' || !selection.selectedStitches?.length}
+              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
+                selection && selection.selectionType === 'area' && selection.selectedStitches?.length
+                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
+              }`}
+              title="Move Selection"
+            >
+              <SelectionMoveIcon />
+            </button>
+          )}
+          {toolVisibility.selectionDuplicate && (
+            <button
+              onClick={duplicateSelection}
+              disabled={!selection || selection.selectionType !== 'area' || !selection.selectedStitches?.length}
+              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
+                selection && selection.selectionType === 'area' && selection.selectedStitches?.length
+                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
+              }`}
+              title="Duplicate Selection"
+            >
+              <SelectionDuplicateIcon />
+            </button>
+          )}
+          {toolVisibility.selectionNewLayer && (
+            <button
+              onClick={selectionToNewLayer}
+              disabled={!selection || selection.selectionType !== 'area' || !selection.selectedStitches?.length}
+              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
+                selection && selection.selectionType === 'area' && selection.selectedStitches?.length
+                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
+              }`}
+              title="Move to New Layer"
+            >
+              <SelectionNewLayerIcon />
+            </button>
+          )}
+          {toolVisibility.selectionDuplicateToNewLayer && (
+            <button
+              onClick={() => hasLayerSelection ? duplicateLayerToNewLayer() : duplicateSelectionToNewLayer()}
+              disabled={!hasTransformableSelection}
+              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
+                hasTransformableSelection
+                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
+              }`}
+              title="Duplicate to New Layer"
+            >
+              <SelectionDuplicateToNewLayerIcon />
+            </button>
+          )}
+          {toolVisibility.selectionFlipHorizontal && (
+            <button
+              onClick={() => hasLayerSelection ? flipLayerHorizontal() : flipSelectionHorizontal()}
+              disabled={!hasTransformableSelection}
+              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
+                hasTransformableSelection
+                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
+              }`}
+              title="Flip Horizontal"
+            >
+              <FlipHorizontalIcon />
+            </button>
+          )}
+          {toolVisibility.selectionFlipVertical && (
+            <button
+              onClick={() => hasLayerSelection ? flipLayerVertical() : flipSelectionVertical()}
+              disabled={!hasTransformableSelection}
+              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
+                hasTransformableSelection
+                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
+              }`}
+              title="Flip Vertical"
+            >
+              <FlipVerticalIcon />
+            </button>
+          )}
+          {toolVisibility.selectionRotateLeft && (
+            <button
+              onClick={() => hasLayerSelection ? rotateLayerLeft() : rotateSelectionLeft()}
+              disabled={!hasTransformableSelection}
+              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
+                hasTransformableSelection
+                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
+              }`}
+              title="Rotate Left (90° CCW)"
+            >
+              <RotateLeftIcon />
+            </button>
+          )}
+          {toolVisibility.selectionRotateRight && (
+            <button
+              onClick={() => hasLayerSelection ? rotateLayerRight() : rotateSelectionRight()}
+              disabled={!hasTransformableSelection}
+              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
+                hasTransformableSelection
+                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
+              }`}
+              title="Rotate Right (90° CW)"
+            >
+              <RotateRightIcon />
+            </button>
+          )}
         </div>
       )}
 
