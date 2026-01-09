@@ -26,6 +26,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { exit } from '@tauri-apps/plugin-process';
+import { getVersion } from '@tauri-apps/api/app';
 
 // NDP file format for Tauri
 interface NdpOverlayImage {
@@ -196,6 +197,9 @@ function App() {
     }
   });
 
+  // App version
+  const [appVersion, setAppVersion] = useState('');
+
   // Text tool state
   const [showTextEditor, setShowTextEditor] = useState(false);
   const [showFontBrowser, setShowFontBrowser] = useState(false);
@@ -301,6 +305,11 @@ function App() {
   // Load bundled fonts on app startup
   useEffect(() => {
     loadBundledFonts();
+  }, []);
+
+  // Get app version on startup
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => setAppVersion(''));
   }, []);
 
   // Show window after React has mounted (prevents white flash on startup)
@@ -1477,7 +1486,7 @@ function App() {
               {hasUnsavedChanges ? ' *' : ''} - {pattern.canvas.width} x {pattern.canvas.height}
             </span>
           )}
-          <span className="text-sm text-gray-400">v1.1.1</span>
+          {appVersion && <span className="text-sm text-gray-400">v{appVersion}</span>}
           {/* Window Controls */}
           <div className="flex items-center gap-1 ml-4" data-window-controls style={{ WebkitAppRegion: 'no-drag', appRegion: 'no-drag' } as React.CSSProperties}>
             <button

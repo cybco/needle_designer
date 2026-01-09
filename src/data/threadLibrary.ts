@@ -32,7 +32,7 @@ export function getThreadLibraries(): ThreadLibraryInfo[] {
   return [
     {
       brand: 'DMC',
-      name: 'DMC Mouliné',
+      name: 'DMC',
       description: 'DMC Cotton Embroidery Floss - Industry standard for cross-stitch and embroidery',
       colorCount: dmcThreads.length,
     },
@@ -179,7 +179,7 @@ export function getKreinikTypeName(type: KreinikType): string {
 // Brand display names
 export function getBrandDisplayName(brand: ThreadBrand): string {
   const brandNames: Record<ThreadBrand, string> = {
-    'DMC': 'DMC Mouliné',
+    'DMC': 'DMC',
     'Anchor': 'Anchor Stranded',
     'Kreinik': 'Kreinik Metallics',
   };

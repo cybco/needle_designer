@@ -75,7 +75,7 @@ pub fn get_thread_libraries() -> Vec<ThreadLibraryInfo> {
     vec![
         ThreadLibraryInfo {
             brand: ThreadBrand::DMC,
-            name: "DMC Mouliné".to_string(),
+            name: "DMC".to_string(),
             description: "DMC Cotton Embroidery Floss - Industry standard".to_string(),
             color_count: dmc::get_dmc_threads().len(),
         },

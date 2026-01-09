@@ -1,5 +1,5 @@
-import { ReactNode } from 'react';
-import { usePatternStore, Tool } from '../stores/patternStore';
+import React, { ReactNode, useState, useRef, useEffect } from 'react';
+import { usePatternStore, Tool, StitchType, isHalfSquareType, isBorderType, isCrossType } from '../stores/patternStore';
 import handMoveIcon from '../assets/hand-move.svg';
 
 // Icons for selection actions
@@ -408,6 +408,343 @@ export function CenterViewIcon({ className }: { className?: string }) {
   );
 }
 
+// Square stitch type icon
+export function SquareStitchIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      <rect x="4" y="4" width="16" height="16" rx="1" />
+    </svg>
+  );
+}
+
+// Circle stitch type icon (small - for positional circles)
+export function CircleStitchIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      <circle cx="12" cy="12" r="4" />
+      <rect x="3" y="3" width="18" height="18" fill="none" strokeWidth="1" strokeDasharray="2 2" />
+    </svg>
+  );
+}
+
+// Full circle stitch type icon (fills cell like square)
+export function CircleFullIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      <circle cx="12" cy="12" r="9" />
+    </svg>
+  );
+}
+
+// Half-square triangle icons (4 corner types)
+export function HalfSquareTLIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      {/* Triangle in top-left corner */}
+      <polygon points="3,3 21,3 3,21" />
+    </svg>
+  );
+}
+
+export function HalfSquareTRIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      {/* Triangle in top-right corner */}
+      <polygon points="3,3 21,3 21,21" />
+    </svg>
+  );
+}
+
+export function HalfSquareBLIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      {/* Triangle in bottom-left corner */}
+      <polygon points="3,3 3,21 21,21" />
+    </svg>
+  );
+}
+
+export function HalfSquareBRIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      {/* Triangle in bottom-right corner */}
+      <polygon points="21,3 3,21 21,21" />
+    </svg>
+  );
+}
+
+// Half-square rectangle icons (top, bottom, left, right)
+export function HalfSquareTopIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      {/* Top half rectangle */}
+      <rect x="3" y="3" width="18" height="9" />
+      <rect x="3" y="3" width="18" height="18" fill="none" />
+    </svg>
+  );
+}
+
+export function HalfSquareBottomIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      {/* Bottom half rectangle */}
+      <rect x="3" y="12" width="18" height="9" />
+      <rect x="3" y="3" width="18" height="18" fill="none" />
+    </svg>
+  );
+}
+
+export function HalfSquareLeftIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      {/* Left half rectangle */}
+      <rect x="3" y="3" width="9" height="18" />
+      <rect x="3" y="3" width="18" height="18" fill="none" />
+    </svg>
+  );
+}
+
+export function HalfSquareRightIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      {/* Right half rectangle */}
+      <rect x="12" y="3" width="9" height="18" />
+      <rect x="3" y="3" width="18" height="18" fill="none" />
+    </svg>
+  );
+}
+
+// Quarter-square icons (4 corners)
+export function QuarterSquareTLIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      {/* Top-left quarter */}
+      <rect x="3" y="3" width="9" height="9" />
+      <rect x="3" y="3" width="18" height="18" fill="none" />
+    </svg>
+  );
+}
+
+export function QuarterSquareTRIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      {/* Top-right quarter */}
+      <rect x="12" y="3" width="9" height="9" />
+      <rect x="3" y="3" width="18" height="18" fill="none" />
+    </svg>
+  );
+}
+
+export function QuarterSquareBLIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      {/* Bottom-left quarter */}
+      <rect x="3" y="12" width="9" height="9" />
+      <rect x="3" y="3" width="18" height="18" fill="none" />
+    </svg>
+  );
+}
+
+export function QuarterSquareBRIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      {/* Bottom-right quarter */}
+      <rect x="12" y="12" width="9" height="9" />
+      <rect x="3" y="3" width="18" height="18" fill="none" />
+    </svg>
+  );
+}
+
+// Border icons (thin edges)
+export function BorderTopIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      {/* Top border */}
+      <rect x="3" y="3" width="18" height="4" rx="2" />
+      <rect x="3" y="3" width="18" height="18" fill="none" />
+    </svg>
+  );
+}
+
+export function BorderBottomIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      {/* Bottom border */}
+      <rect x="3" y="17" width="18" height="4" rx="2" />
+      <rect x="3" y="3" width="18" height="18" fill="none" />
+    </svg>
+  );
+}
+
+export function BorderLeftIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      {/* Left border */}
+      <rect x="3" y="3" width="4" height="18" rx="2" />
+      <rect x="3" y="3" width="18" height="18" fill="none" />
+    </svg>
+  );
+}
+
+export function BorderRightIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      {/* Right border */}
+      <rect x="17" y="3" width="4" height="18" rx="2" />
+      <rect x="3" y="3" width="18" height="18" fill="none" />
+    </svg>
+  );
+}
+
+// Cross line icons (diagonal backstitches)
+export function CrossTLBRIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+    >
+      {/* Diagonal line from top-left to bottom-right */}
+      <line x1="3" y1="3" x2="21" y2="21" />
+      <rect x="3" y="3" width="18" height="18" fill="none" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+export function CrossTRBLIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+    >
+      {/* Diagonal line from top-right to bottom-left */}
+      <line x1="21" y1="3" x2="3" y2="21" />
+      <rect x="3" y="3" width="18" height="18" fill="none" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
 const DEFAULT_VISIBILITY: ToolVisibility = {
   pencil: true,
   eraser: true,
@@ -437,6 +774,62 @@ const DEFAULT_VISIBILITY: ToolVisibility = {
   selectionRotateRight: true,
 };
 
+// Helper to get stitch type display name
+function getStitchTypeName(type: StitchType): string {
+  switch (type) {
+    case 'square': return 'Square';
+    case 'circle': return 'Small Circle';
+    case 'circle-full': return 'Circle';
+    case 'half-tl': return 'Half-Square (Top-Left)';
+    case 'half-tr': return 'Half-Square (Top-Right)';
+    case 'half-bl': return 'Half-Square (Bottom-Left)';
+    case 'half-br': return 'Half-Square (Bottom-Right)';
+    case 'half-top': return 'Half-Square (Top)';
+    case 'half-bottom': return 'Half-Square (Bottom)';
+    case 'half-left': return 'Half-Square (Left)';
+    case 'half-right': return 'Half-Square (Right)';
+    case 'quarter-tl': return 'Quarter-Square (Top-Left)';
+    case 'quarter-tr': return 'Quarter-Square (Top-Right)';
+    case 'quarter-bl': return 'Quarter-Square (Bottom-Left)';
+    case 'quarter-br': return 'Quarter-Square (Bottom-Right)';
+    case 'border-top': return 'Border (Top)';
+    case 'border-bottom': return 'Border (Bottom)';
+    case 'border-left': return 'Border (Left)';
+    case 'border-right': return 'Border (Right)';
+    case 'cross-tlbr': return 'Cross (TL-BR)';
+    case 'cross-trbl': return 'Cross (TR-BL)';
+    default: return 'Square';
+  }
+}
+
+// Helper to get stitch type icon component
+function getStitchTypeIcon(type: StitchType): React.ReactNode {
+  switch (type) {
+    case 'square': return <SquareStitchIcon />;
+    case 'circle': return <CircleStitchIcon />;
+    case 'circle-full': return <CircleFullIcon />;
+    case 'half-tl': return <HalfSquareTLIcon />;
+    case 'half-tr': return <HalfSquareTRIcon />;
+    case 'half-bl': return <HalfSquareBLIcon />;
+    case 'half-br': return <HalfSquareBRIcon />;
+    case 'half-top': return <HalfSquareTopIcon />;
+    case 'half-bottom': return <HalfSquareBottomIcon />;
+    case 'half-left': return <HalfSquareLeftIcon />;
+    case 'half-right': return <HalfSquareRightIcon />;
+    case 'quarter-tl': return <QuarterSquareTLIcon />;
+    case 'quarter-tr': return <QuarterSquareTRIcon />;
+    case 'quarter-bl': return <QuarterSquareBLIcon />;
+    case 'quarter-br': return <QuarterSquareBRIcon />;
+    case 'border-top': return <BorderTopIcon />;
+    case 'border-bottom': return <BorderBottomIcon />;
+    case 'border-left': return <BorderLeftIcon />;
+    case 'border-right': return <BorderRightIcon />;
+    case 'cross-tlbr': return <CrossTLBRIcon />;
+    case 'cross-trbl': return <CrossTRBLIcon />;
+    default: return <SquareStitchIcon />;
+  }
+}
+
 interface ToolbarProps {
   onTextToolClick?: () => void;
   onFitToCanvas?: () => void;
@@ -454,6 +847,7 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPrev
     history,
     future,
     selection,
+    selectedColorId,
     setTool,
     setZoom,
     toggleGrid,
@@ -472,7 +866,32 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPrev
     rotateLayerLeft,
     rotateLayerRight,
     duplicateLayerToNewLayer,
+    activeStitchType,
+    setActiveStitchType,
   } = usePatternStore();
+
+  // Stitch type popup state
+  const [showStitchTypePopup, setShowStitchTypePopup] = useState(false);
+  const [hoveredStitchSection, setHoveredStitchSection] = useState<string | null>(null);
+  const stitchTypeButtonRef = useRef<HTMLButtonElement>(null);
+  const stitchTypePopupRef = useRef<HTMLDivElement>(null);
+
+  // Close popup when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        showStitchTypePopup &&
+        stitchTypePopupRef.current &&
+        !stitchTypePopupRef.current.contains(event.target as Node) &&
+        stitchTypeButtonRef.current &&
+        !stitchTypeButtonRef.current.contains(event.target as Node)
+      ) {
+        setShowStitchTypePopup(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showStitchTypePopup]);
 
   // Helper to check if we have an area selection with stitches
   const hasAreaSelection = selection?.selectionType === 'area' &&
@@ -616,6 +1035,386 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPrev
           )}
         </div>
       )}
+
+      {/* Stitch Type Selector */}
+      <div className="p-2 space-y-2 border-b border-gray-200 w-14 relative">
+        <button
+          ref={stitchTypeButtonRef}
+          onClick={() => setShowStitchTypePopup(!showStitchTypePopup)}
+          className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200"
+          title={`Stitch Type: ${getStitchTypeName(activeStitchType)}`}
+        >
+          {getStitchTypeIcon(activeStitchType)}
+        </button>
+
+        {/* Stitch Type Popup */}
+        {showStitchTypePopup && (
+          <div
+            ref={stitchTypePopupRef}
+            className="absolute left-full ml-2 bottom-0 bg-white border border-gray-300 rounded-lg shadow-lg p-3 z-50 w-64 max-h-[80vh] overflow-y-auto"
+            onMouseLeave={() => setHoveredStitchSection(null)}
+          >
+            <div className="text-sm font-semibold text-gray-700 mb-2">Stitch Type</div>
+
+            {/* Warning if no color selected */}
+            {!selectedColorId && (
+              <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-2 mb-2">
+                Please select a color from the palette before drawing.
+              </p>
+            )}
+
+            {/* Basic stitch type options - square and circle-full */}
+            <div
+              className="grid grid-cols-3 gap-2 mb-3"
+              onMouseEnter={() => setHoveredStitchSection('basic')}
+            >
+              <button
+                onClick={() => {
+                  setActiveStitchType('square');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'square'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Square"
+              >
+                <SquareStitchIcon className="w-6 h-6" />
+              </button>
+              <button
+                onClick={() => {
+                  setActiveStitchType('circle-full');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'circle-full'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Circle"
+              >
+                <CircleFullIcon className="w-6 h-6" />
+              </button>
+              <button
+                onClick={() => {
+                  setActiveStitchType('circle');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'circle'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Small Circle"
+                onMouseEnter={() => setHoveredStitchSection('circle-positional')}
+              >
+                <CircleStitchIcon className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Half-square triangle options */}
+            <div
+              className="grid grid-cols-4 gap-2 mb-2"
+              onMouseEnter={() => setHoveredStitchSection('half-square')}
+            >
+              <button
+                onClick={() => {
+                  setActiveStitchType('half-tl');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'half-tl'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Top-Left"
+              >
+                <HalfSquareTLIcon className="w-6 h-6" />
+              </button>
+              <button
+                onClick={() => {
+                  setActiveStitchType('half-tr');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'half-tr'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Top-Right"
+              >
+                <HalfSquareTRIcon className="w-6 h-6" />
+              </button>
+              <button
+                onClick={() => {
+                  setActiveStitchType('half-bl');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'half-bl'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Bottom-Left"
+              >
+                <HalfSquareBLIcon className="w-6 h-6" />
+              </button>
+              <button
+                onClick={() => {
+                  setActiveStitchType('half-br');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'half-br'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Bottom-Right"
+              >
+                <HalfSquareBRIcon className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Half-square rectangle options */}
+            <div
+              className="grid grid-cols-4 gap-2 mb-2"
+              onMouseEnter={() => setHoveredStitchSection('half-square')}
+            >
+              <button
+                onClick={() => {
+                  setActiveStitchType('half-top');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'half-top'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Top"
+              >
+                <HalfSquareTopIcon className="w-6 h-6" />
+              </button>
+              <button
+                onClick={() => {
+                  setActiveStitchType('half-bottom');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'half-bottom'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Bottom"
+              >
+                <HalfSquareBottomIcon className="w-6 h-6" />
+              </button>
+              <button
+                onClick={() => {
+                  setActiveStitchType('half-left');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'half-left'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Left"
+              >
+                <HalfSquareLeftIcon className="w-6 h-6" />
+              </button>
+              <button
+                onClick={() => {
+                  setActiveStitchType('half-right');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'half-right'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Right"
+              >
+                <HalfSquareRightIcon className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Quarter-square options */}
+            <div
+              className="grid grid-cols-4 gap-2 mb-2"
+              onMouseEnter={() => setHoveredStitchSection('quarter')}
+            >
+              <button
+                onClick={() => {
+                  setActiveStitchType('quarter-tl');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'quarter-tl'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Top-Left"
+              >
+                <QuarterSquareTLIcon className="w-6 h-6" />
+              </button>
+              <button
+                onClick={() => {
+                  setActiveStitchType('quarter-tr');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'quarter-tr'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Top-Right"
+              >
+                <QuarterSquareTRIcon className="w-6 h-6" />
+              </button>
+              <button
+                onClick={() => {
+                  setActiveStitchType('quarter-bl');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'quarter-bl'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Bottom-Left"
+              >
+                <QuarterSquareBLIcon className="w-6 h-6" />
+              </button>
+              <button
+                onClick={() => {
+                  setActiveStitchType('quarter-br');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'quarter-br'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Bottom-Right"
+              >
+                <QuarterSquareBRIcon className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Border options */}
+            <div
+              className="grid grid-cols-4 gap-2 mb-2"
+              onMouseEnter={() => setHoveredStitchSection('border')}
+            >
+              <button
+                onClick={() => {
+                  setActiveStitchType('border-top');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'border-top'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Top Border"
+              >
+                <BorderTopIcon className="w-6 h-6" />
+              </button>
+              <button
+                onClick={() => {
+                  setActiveStitchType('border-bottom');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'border-bottom'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Bottom Border"
+              >
+                <BorderBottomIcon className="w-6 h-6" />
+              </button>
+              <button
+                onClick={() => {
+                  setActiveStitchType('border-left');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'border-left'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Left Border"
+              >
+                <BorderLeftIcon className="w-6 h-6" />
+              </button>
+              <button
+                onClick={() => {
+                  setActiveStitchType('border-right');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'border-right'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Right Border"
+              >
+                <BorderRightIcon className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Cross line options */}
+            <div
+              className="grid grid-cols-2 gap-2 mb-2"
+              onMouseEnter={() => setHoveredStitchSection('cross')}
+            >
+              <button
+                onClick={() => {
+                  setActiveStitchType('cross-tlbr');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'cross-tlbr'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Cross Line (Top-Left to Bottom-Right)"
+              >
+                <CrossTLBRIcon className="w-6 h-6" />
+              </button>
+              <button
+                onClick={() => {
+                  setActiveStitchType('cross-trbl');
+                  setShowStitchTypePopup(false);
+                }}
+                className={`flex items-center justify-center p-2 rounded border ${
+                  activeStitchType === 'cross-trbl'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Cross Line (Top-Right to Bottom-Left)"
+              >
+                <CrossTRBLIcon className="w-6 h-6" />
+              </button>
+            </div>
+
+            {/* Contextual help text based on hovered section */}
+            <div className="h-10 overflow-hidden">
+              <p className="text-xs text-gray-500">
+                {hoveredStitchSection === 'basic' && 'Fills entire cell.'}
+                {hoveredStitchSection === 'circle-positional' && 'Place on any one of nine cell areas.'}
+                {hoveredStitchSection === 'half-square' && 'Only one partial-square per cell. Different types overwrite each other.'}
+                {hoveredStitchSection === 'quarter' && 'Quarter squares fill one corner. Only one partial-square per cell.'}
+                {hoveredStitchSection === 'border' && 'Multiple borders can be added per cell (top, bottom, left, right).'}
+                {hoveredStitchSection === 'cross' && 'Cross lines can stack - both diagonals can be placed in the same cell.'}
+                {!hoveredStitchSection && '\u00A0'}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Undo/Redo */}
       {hasHistoryTools && (
