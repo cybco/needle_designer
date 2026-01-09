@@ -106,6 +106,10 @@ pub struct Stitch {
     pub y: u32,
     pub color_id: String,
     pub completed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stitch_type: Option<String>,  // "square" | "circle"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<String>,  // 9 positions for circles
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

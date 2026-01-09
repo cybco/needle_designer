@@ -22,11 +22,92 @@ export interface Color {
   symbol?: string;
 }
 
+// Stitch type - square is the default, circle can be placed at 9 positions
+// Half-square triangles: half-tl (top-left), half-tr (top-right), half-bl (bottom-left), half-br (bottom-right)
+// Half-square rectangles: half-top, half-bottom, half-left, half-right
+// Quarter-square: quarter-tl, quarter-tr, quarter-bl, quarter-br
+// Border: border-top, border-bottom, border-left, border-right
+// Cross lines: cross-tlbr (top-left to bottom-right), cross-trbl (top-right to bottom-left)
+// Full circle: circle-full (fills entire cell like square but with circle shape)
+export type StitchType = 'square' | 'circle' | 'circle-full' | 'half-tl' | 'half-tr' | 'half-bl' | 'half-br' | 'half-top' | 'half-bottom' | 'half-left' | 'half-right' | 'quarter-tl' | 'quarter-tr' | 'quarter-bl' | 'quarter-br' | 'border-top' | 'border-bottom' | 'border-left' | 'border-right' | 'cross-tlbr' | 'cross-trbl';
+
+// Helper to check if a stitch type is a partial-square (half, quarter, or full circle - NOT borders or crosses)
+// These types overwrite each other - only one per cell
+export function isHalfSquareType(type: StitchType | undefined): boolean {
+  return type === 'half-tl' || type === 'half-tr' || type === 'half-bl' || type === 'half-br' ||
+         type === 'half-top' || type === 'half-bottom' || type === 'half-left' || type === 'half-right' ||
+         type === 'quarter-tl' || type === 'quarter-tr' || type === 'quarter-bl' || type === 'quarter-br' ||
+         type === 'circle-full';
+}
+
+// Helper to check if a stitch type is a border (borders can stack - multiple per cell)
+export function isBorderType(type: StitchType | undefined): boolean {
+  return type === 'border-top' || type === 'border-bottom' || type === 'border-left' || type === 'border-right';
+}
+
+// Helper to check if a stitch type is a cross line (cross lines can stack - both per cell)
+export function isCrossType(type: StitchType | undefined): boolean {
+  return type === 'cross-tlbr' || type === 'cross-trbl';
+}
+
+// Circle position - 9 positions on a 3x3 grid within each cell
+export type CirclePosition =
+  | 'top-left' | 'top-center' | 'top-right'
+  | 'middle-left' | 'center' | 'middle-right'
+  | 'bottom-left' | 'bottom-center' | 'bottom-right';
+
+// All 9 circle positions for shape tools
+export const ALL_CIRCLE_POSITIONS: CirclePosition[] = [
+  'top-left', 'top-center', 'top-right',
+  'middle-left', 'center', 'middle-right',
+  'bottom-left', 'bottom-center', 'bottom-right',
+];
+
+// Helper to determine circle position from click location within a cell
+export function getCirclePositionFromClick(
+  clickX: number,
+  clickY: number,
+  cellX: number,
+  cellY: number,
+  cellSize: number
+): CirclePosition {
+  // Calculate relative position within the cell (0-1)
+  const relX = (clickX - cellX * cellSize) / cellSize;
+  const relY = (clickY - cellY * cellSize) / cellSize;
+
+  // Divide cell into 3x3 grid (each zone is ~33% of cell)
+  const getZone = (rel: number): 'start' | 'middle' | 'end' => {
+    if (rel < 0.33) return 'start';
+    if (rel > 0.67) return 'end';
+    return 'middle';
+  };
+
+  const xZone = getZone(relX);
+  const yZone = getZone(relY);
+
+  // Map zones to positions
+  if (yZone === 'start') {
+    if (xZone === 'start') return 'top-left';
+    if (xZone === 'middle') return 'top-center';
+    return 'top-right';
+  } else if (yZone === 'middle') {
+    if (xZone === 'start') return 'middle-left';
+    if (xZone === 'middle') return 'center';
+    return 'middle-right';
+  } else {
+    if (xZone === 'start') return 'bottom-left';
+    if (xZone === 'middle') return 'bottom-center';
+    return 'bottom-right';
+  }
+}
+
 export interface Stitch {
   x: number;
   y: number;
   colorId: string;
   completed: boolean;
+  type?: StitchType;  // Optional for backward compatibility, defaults to 'square'
+  position?: CirclePosition;  // For circles only - where to place it (defaults to 'center')
 }
 
 // Text orientation options
@@ -70,43 +151,6 @@ export interface Pattern {
 }
 
 export type Tool = 'pencil' | 'eraser' | 'fill' | 'pan' | 'select' | 'areaselect' | 'text' | 'line' | 'rectangle' | 'ellipse' | 'colorswap';
-
-// Stitch types for different stitch shapes
-export type StitchType =
-  | 'square'           // Full square stitch (default)
-  | 'circle'           // Circle outline
-  | 'circle-full'      // Filled circle
-  | 'half-tl'          // Half square - top-left triangle
-  | 'half-tr'          // Half square - top-right triangle
-  | 'half-bl'          // Half square - bottom-left triangle
-  | 'half-br'          // Half square - bottom-right triangle
-  | 'half-top'         // Half square - top half
-  | 'half-bottom'      // Half square - bottom half
-  | 'half-left'        // Half square - left half
-  | 'half-right'       // Half square - right half
-  | 'quarter-tl'       // Quarter square - top-left
-  | 'quarter-tr'       // Quarter square - top-right
-  | 'quarter-bl'       // Quarter square - bottom-left
-  | 'quarter-br'       // Quarter square - bottom-right
-  | 'border-top'       // Border stitch - top edge
-  | 'border-bottom'    // Border stitch - bottom edge
-  | 'border-left'      // Border stitch - left edge
-  | 'border-right'     // Border stitch - right edge
-  | 'cross-tlbr'       // Cross stitch - top-left to bottom-right
-  | 'cross-trbl';      // Cross stitch - top-right to bottom-left
-
-// Helper functions to categorize stitch types
-export function isHalfSquareType(type: StitchType): boolean {
-  return type.startsWith('half-') || type.startsWith('quarter-');
-}
-
-export function isBorderType(type: StitchType): boolean {
-  return type.startsWith('border-');
-}
-
-export function isCrossType(type: StitchType): boolean {
-  return type.startsWith('cross-');
-}
 
 export type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
@@ -169,6 +213,7 @@ interface PatternState {
   selectedColorId: string | null;
   activeTool: Tool;
   activeStitchType: StitchType;
+  activeCirclePosition: CirclePosition;
   zoom: number;
   panOffset: { x: number; y: number };
   showGrid: boolean;
@@ -199,8 +244,9 @@ interface PatternState {
   createNewPattern: (name: string, width: number, height: number, meshCount: number) => void;
   importPattern: (name: string, width: number, height: number, meshCount: number, colors: Color[], stitches: Stitch[]) => void;
   loadPattern: (pattern: Pattern, filePath: string) => void;
-  setStitch: (x: number, y: number, colorId: string) => void;
+  setStitch: (x: number, y: number, colorId: string, type?: StitchType, position?: CirclePosition) => void;
   removeStitch: (x: number, y: number) => void;
+  removeStitchAtPoint: (canvasX: number, canvasY: number, cellSize: number) => void;
   fillArea: (x: number, y: number, colorId: string) => void;
   drawLine: (x1: number, y1: number, x2: number, y2: number, colorId: string) => void;
   drawRectangle: (x1: number, y1: number, x2: number, y2: number, colorId: string, filled: boolean) => void;
@@ -209,7 +255,8 @@ interface PatternState {
   removeColor: (colorId: string) => void;
   selectColor: (colorId: string | null) => void;
   setTool: (tool: Tool) => void;
-  setActiveStitchType: (stitchType: StitchType) => void;
+  setActiveStitchType: (type: StitchType) => void;
+  setActiveCirclePosition: (position: CirclePosition) => void;
   setZoom: (zoom: number) => void;
   setPanOffset: (offset: { x: number; y: number }) => void;
   toggleGrid: () => void;
@@ -501,6 +548,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
   selectedColorId: null,
   activeTool: 'select',
   activeStitchType: 'square' as StitchType,
+  activeCirclePosition: 'center' as CirclePosition,
   zoom: 1,
   panOffset: { x: 0, y: 0 },
   showGrid: true,
@@ -578,7 +626,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
           stitches: [],
         }],
       },
-      selectedColorId: null,
+      selectedColorId: 'color-black', // Default to black
       activeLayerId: layerId,
       selection: null,
       zoom: 1,
@@ -610,7 +658,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
           stitches,
         }],
       },
-      selectedColorId: colorsWithSymbols.length > 0 ? colorsWithSymbols[0].id : null,
+      selectedColorId: colorsWithSymbols.find(c => c.name === 'Black')?.id ?? (colorsWithSymbols.length > 0 ? colorsWithSymbols[0].id : null),
       activeLayerId: layerId,
       selection: null,
       zoom: 1,
@@ -634,7 +682,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
     };
     set({
       pattern: patternWithSymbols,
-      selectedColorId: colorsWithSymbols.length > 0 ? colorsWithSymbols[0].id : null,
+      selectedColorId: colorsWithSymbols.find(c => c.name === 'Black')?.id ?? (colorsWithSymbols.length > 0 ? colorsWithSymbols[0].id : null),
       activeLayerId: firstLayerId,
       selection: null,
       zoom: 1,
@@ -646,8 +694,8 @@ export const usePatternStore = create<PatternState>((set, get) => {
     });
   },
 
-  setStitch: (x, y, colorId) => {
-    const { pattern, activeLayerId } = get();
+  setStitch: (x, y, colorId, type?, position?) => {
+    const { pattern, activeLayerId, activeStitchType, activeCirclePosition } = get();
     if (!pattern || !activeLayerId) return;
 
     const layerIndex = pattern.layers.findIndex(l => l.id === activeLayerId);
@@ -659,21 +707,59 @@ export const usePatternStore = create<PatternState>((set, get) => {
     // Check bounds
     if (x < 0 || x >= pattern.canvas.width || y < 0 || y >= pattern.canvas.height) return;
 
-    // Find existing stitch at position
-    const existingIndex = activeLayer.stitches.findIndex(s => s.x === x && s.y === y);
+    // Determine effective type and position
+    const effectiveType = type ?? activeStitchType;
+    const effectivePosition = position ?? (effectiveType === 'circle' ? activeCirclePosition : undefined);
+    const isNewHalfSquare = isHalfSquareType(effectiveType);
+
+    // Find existing stitch at position with same type and position
+    // Stitch uniqueness is by (x, y, type, position)
+    // Exception: half-square types overwrite each other (only one half-square per cell)
+    const existingIndex = activeLayer.stitches.findIndex(s =>
+      s.x === x &&
+      s.y === y &&
+      (s.type || 'square') === effectiveType &&
+      (effectiveType === 'circle' ? (s.position || 'center') === effectivePosition : true)
+    );
 
     // Check if stitch already exists with same color - no need to change anything
     if (existingIndex >= 0 && activeLayer.stitches[existingIndex].colorId === colorId) return;
 
     pushToHistory();
 
-    const updatedStitches = [...activeLayer.stitches];
-    if (existingIndex >= 0) {
+    let updatedStitches = [...activeLayer.stitches];
+
+    // If placing a half-square, remove any existing half-square at this position
+    // (different half-square type overwrites previous one)
+    if (isNewHalfSquare) {
+      updatedStitches = updatedStitches.filter(s =>
+        !(s.x === x && s.y === y && isHalfSquareType(s.type))
+      );
+    }
+
+    const newStitch: Stitch = {
+      x,
+      y,
+      colorId,
+      completed: false,
+      type: effectiveType === 'square' ? undefined : effectiveType, // Don't store 'square' for backward compatibility
+      position: effectiveType === 'circle' ? effectivePosition : undefined,
+    };
+
+    // Find existing after potential half-square removal
+    const updatedExistingIndex = updatedStitches.findIndex(s =>
+      s.x === x &&
+      s.y === y &&
+      (s.type || 'square') === effectiveType &&
+      (effectiveType === 'circle' ? (s.position || 'center') === effectivePosition : true)
+    );
+
+    if (updatedExistingIndex >= 0) {
       // Update existing stitch
-      updatedStitches[existingIndex] = { x, y, colorId, completed: false };
+      updatedStitches[updatedExistingIndex] = newStitch;
     } else {
       // Add new stitch
-      updatedStitches.push({ x, y, colorId, completed: false });
+      updatedStitches.push(newStitch);
     }
 
     const updatedLayers = [...pattern.layers];
@@ -711,6 +797,87 @@ export const usePatternStore = create<PatternState>((set, get) => {
     updatedLayers[layerIndex] = {
       ...activeLayer,
       stitches: activeLayer.stitches.filter(s => !(s.x === x && s.y === y)),
+    };
+
+    set({
+      pattern: {
+        ...pattern,
+        layers: updatedLayers,
+      },
+      hasUnsavedChanges: true,
+    });
+  },
+
+  removeStitchAtPoint: (canvasX, canvasY, cellSize) => {
+    const { pattern, activeLayerId } = get();
+    if (!pattern || !activeLayerId) return;
+
+    const layerIndex = pattern.layers.findIndex(l => l.id === activeLayerId);
+    if (layerIndex === -1) return;
+
+    const activeLayer = pattern.layers[layerIndex];
+    if (activeLayer.locked) return;
+
+    // Helper to get circle center position
+    const getCircleCenter = (stitch: Stitch): { centerX: number; centerY: number } => {
+      const baseX = stitch.x * cellSize;
+      const baseY = stitch.y * cellSize;
+      const half = cellSize / 2;
+      const pos = stitch.position || 'center';
+
+      switch (pos) {
+        case 'top-left': return { centerX: baseX, centerY: baseY };
+        case 'top-center': return { centerX: baseX + half, centerY: baseY };
+        case 'top-right': return { centerX: baseX + cellSize, centerY: baseY };
+        case 'middle-left': return { centerX: baseX, centerY: baseY + half };
+        case 'center': return { centerX: baseX + half, centerY: baseY + half };
+        case 'middle-right': return { centerX: baseX + cellSize, centerY: baseY + half };
+        case 'bottom-left': return { centerX: baseX, centerY: baseY + cellSize };
+        case 'bottom-center': return { centerX: baseX + half, centerY: baseY + cellSize };
+        case 'bottom-right': return { centerX: baseX + cellSize, centerY: baseY + cellSize };
+        default: return { centerX: baseX + half, centerY: baseY + half };
+      }
+    };
+
+    // Check if point is over a stitch
+    const isPointOverStitch = (stitch: Stitch): boolean => {
+      const stitchType = stitch.type || 'square';
+
+      if (stitchType === 'square') {
+        // Square: check if point is within cell bounds
+        const cellLeft = stitch.x * cellSize;
+        const cellTop = stitch.y * cellSize;
+        return (
+          canvasX >= cellLeft &&
+          canvasX < cellLeft + cellSize &&
+          canvasY >= cellTop &&
+          canvasY < cellTop + cellSize
+        );
+      } else if (stitchType === 'circle') {
+        // Circle: check if point is within circle radius (0.28 = 25% larger than half cell)
+        const { centerX, centerY } = getCircleCenter(stitch);
+        const radius = cellSize * 0.28;
+        const dx = canvasX - centerX;
+        const dy = canvasY - centerY;
+        return (dx * dx + dy * dy) <= (radius * radius);
+      }
+
+      return false;
+    };
+
+    // Find all stitches at this point
+    const stitchesToRemove = activeLayer.stitches.filter(isPointOverStitch);
+    if (stitchesToRemove.length === 0) return;
+
+    pushToHistory();
+
+    // Remove the stitches
+    const updatedStitches = activeLayer.stitches.filter(s => !isPointOverStitch(s));
+
+    const updatedLayers = [...pattern.layers];
+    updatedLayers[layerIndex] = {
+      ...activeLayer,
+      stitches: updatedStitches,
     };
 
     set({
@@ -794,7 +961,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
   },
 
   drawLine: (x1, y1, x2, y2, colorId) => {
-    const { pattern, activeLayerId } = get();
+    const { pattern, activeLayerId, activeStitchType } = get();
     if (!pattern || !activeLayerId) return;
 
     const layerIndex = pattern.layers.findIndex(l => l.id === activeLayerId);
@@ -818,7 +985,27 @@ export const usePatternStore = create<PatternState>((set, get) => {
 
     while (true) {
       if (x >= 0 && x < pattern.canvas.width && y >= 0 && y < pattern.canvas.height) {
-        newStitches.push({ x, y, colorId, completed: false });
+        // For circles, add all 9 positions per cell
+        if (activeStitchType === 'circle') {
+          for (const position of ALL_CIRCLE_POSITIONS) {
+            newStitches.push({
+              x,
+              y,
+              colorId,
+              completed: false,
+              type: 'circle',
+              position,
+            });
+          }
+        } else {
+          newStitches.push({
+            x,
+            y,
+            colorId,
+            completed: false,
+            type: activeStitchType === 'square' ? undefined : activeStitchType,
+          });
+        }
       }
 
       if (x === x2 && y === y2) break;
@@ -834,10 +1021,22 @@ export const usePatternStore = create<PatternState>((set, get) => {
       }
     }
 
-    // Merge new stitches with existing (new overwrites old at same positions)
+    // Merge new stitches with existing
+    // For stackable types (borders, crosses, circles), use composite key with type/position
+    // For non-stackable types, just use position
     const stitchMap = new Map<string, Stitch>();
-    activeLayer.stitches.forEach(s => stitchMap.set(`${s.x},${s.y}`, s));
-    newStitches.forEach(s => stitchMap.set(`${s.x},${s.y}`, s));
+    const getKey = (s: Stitch) => {
+      const type = s.type || 'square';
+      if (type === 'circle') {
+        return `${s.x},${s.y},circle,${s.position || 'center'}`;
+      }
+      if (isBorderType(type) || isCrossType(type)) {
+        return `${s.x},${s.y},${type}`;
+      }
+      return `${s.x},${s.y}`;
+    };
+    activeLayer.stitches.forEach(s => stitchMap.set(getKey(s), s));
+    newStitches.forEach(s => stitchMap.set(getKey(s), s));
 
     const updatedLayers = [...pattern.layers];
     updatedLayers[layerIndex] = {
@@ -855,7 +1054,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
   },
 
   drawRectangle: (x1, y1, x2, y2, colorId, filled) => {
-    const { pattern, activeLayerId } = get();
+    const { pattern, activeLayerId, activeStitchType } = get();
     if (!pattern || !activeLayerId) return;
 
     const layerIndex = pattern.layers.findIndex(l => l.id === activeLayerId);
@@ -872,30 +1071,53 @@ export const usePatternStore = create<PatternState>((set, get) => {
     const maxY = Math.min(pattern.canvas.height - 1, Math.max(y1, y2));
 
     const newStitches: Stitch[] = [];
+    const stitchType = activeStitchType === 'square' ? undefined : activeStitchType;
+
+    // Helper to add stitch(es) at a position - for circles, add all 9 positions
+    const addStitchAt = (x: number, y: number) => {
+      if (activeStitchType === 'circle') {
+        for (const position of ALL_CIRCLE_POSITIONS) {
+          newStitches.push({ x, y, colorId, completed: false, type: 'circle', position });
+        }
+      } else {
+        newStitches.push({ x, y, colorId, completed: false, type: stitchType });
+      }
+    };
 
     if (filled) {
       // Fill entire rectangle
       for (let y = minY; y <= maxY; y++) {
         for (let x = minX; x <= maxX; x++) {
-          newStitches.push({ x, y, colorId, completed: false });
+          addStitchAt(x, y);
         }
       }
     } else {
       // Draw outline only
       for (let x = minX; x <= maxX; x++) {
-        newStitches.push({ x, y: minY, colorId, completed: false });
-        newStitches.push({ x, y: maxY, colorId, completed: false });
+        addStitchAt(x, minY);
+        addStitchAt(x, maxY);
       }
       for (let y = minY + 1; y < maxY; y++) {
-        newStitches.push({ x: minX, y, colorId, completed: false });
-        newStitches.push({ x: maxX, y, colorId, completed: false });
+        addStitchAt(minX, y);
+        addStitchAt(maxX, y);
       }
     }
 
     // Merge new stitches with existing
+    // For stackable types (borders, crosses, circles), use composite key with type/position
     const stitchMap = new Map<string, Stitch>();
-    activeLayer.stitches.forEach(s => stitchMap.set(`${s.x},${s.y}`, s));
-    newStitches.forEach(s => stitchMap.set(`${s.x},${s.y}`, s));
+    const getKey = (s: Stitch) => {
+      const type = s.type || 'square';
+      if (type === 'circle') {
+        return `${s.x},${s.y},circle,${s.position || 'center'}`;
+      }
+      if (isBorderType(type) || isCrossType(type)) {
+        return `${s.x},${s.y},${type}`;
+      }
+      return `${s.x},${s.y}`;
+    };
+    activeLayer.stitches.forEach(s => stitchMap.set(getKey(s), s));
+    newStitches.forEach(s => stitchMap.set(getKey(s), s));
 
     const updatedLayers = [...pattern.layers];
     updatedLayers[layerIndex] = {
@@ -913,7 +1135,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
   },
 
   drawEllipse: (x1, y1, x2, y2, colorId, filled) => {
-    const { pattern, activeLayerId } = get();
+    const { pattern, activeLayerId, activeStitchType } = get();
     if (!pattern || !activeLayerId) return;
 
     const layerIndex = pattern.layers.findIndex(l => l.id === activeLayerId);
@@ -931,6 +1153,18 @@ export const usePatternStore = create<PatternState>((set, get) => {
     const ry = Math.abs(y2 - y1) / 2;
 
     const newStitches: Stitch[] = [];
+    const stitchType = activeStitchType === 'square' ? undefined : activeStitchType;
+
+    // Helper to add stitch(es) at a position - for circles, add all 9 positions
+    const addStitchAt = (x: number, y: number) => {
+      if (activeStitchType === 'circle') {
+        for (const position of ALL_CIRCLE_POSITIONS) {
+          newStitches.push({ x, y, colorId, completed: false, type: 'circle', position });
+        }
+      } else {
+        newStitches.push({ x, y, colorId, completed: false, type: stitchType });
+      }
+    };
 
     if (filled) {
       // Filled ellipse - check each point in bounding box
@@ -945,7 +1179,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
           const dx = (x + 0.5 - cx) / (rx || 0.5);
           const dy = (y + 0.5 - cy) / (ry || 0.5);
           if (dx * dx + dy * dy <= 1) {
-            newStitches.push({ x, y, colorId, completed: false });
+            addStitchAt(x, y);
           }
         }
       }
@@ -956,7 +1190,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
         const px = Math.round(cx);
         const py = Math.round(cy);
         if (px >= 0 && px < pattern.canvas.width && py >= 0 && py < pattern.canvas.height) {
-          newStitches.push({ x: px, y: py, colorId, completed: false });
+          addStitchAt(px, py);
         }
       } else {
         // Midpoint ellipse algorithm for outline
@@ -964,7 +1198,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
           const px = Math.round(cx + x);
           const py = Math.round(cy + y);
           if (px >= 0 && px < pattern.canvas.width && py >= 0 && py < pattern.canvas.height) {
-            newStitches.push({ x: px, y: py, colorId, completed: false });
+            addStitchAt(px, py);
           }
         };
 
@@ -1009,9 +1243,20 @@ export const usePatternStore = create<PatternState>((set, get) => {
     }
 
     // Remove duplicates and merge with existing
+    // For stackable types (borders, crosses, circles), use composite key with type/position
     const stitchMap = new Map<string, Stitch>();
-    activeLayer.stitches.forEach(s => stitchMap.set(`${s.x},${s.y}`, s));
-    newStitches.forEach(s => stitchMap.set(`${s.x},${s.y}`, s));
+    const getKey = (s: Stitch) => {
+      const type = s.type || 'square';
+      if (type === 'circle') {
+        return `${s.x},${s.y},circle,${s.position || 'center'}`;
+      }
+      if (isBorderType(type) || isCrossType(type)) {
+        return `${s.x},${s.y},${type}`;
+      }
+      return `${s.x},${s.y}`;
+    };
+    activeLayer.stitches.forEach(s => stitchMap.set(getKey(s), s));
+    newStitches.forEach(s => stitchMap.set(getKey(s), s));
 
     const updatedLayers = [...pattern.layers];
     updatedLayers[layerIndex] = {
@@ -1072,8 +1317,12 @@ export const usePatternStore = create<PatternState>((set, get) => {
     set({ activeTool: tool });
   },
 
-  setActiveStitchType: (stitchType) => {
-    set({ activeStitchType: stitchType });
+  setActiveStitchType: (type) => {
+    set({ activeStitchType: type });
+  },
+
+  setActiveCirclePosition: (position) => {
+    set({ activeCirclePosition: position });
   },
 
   setZoom: (zoom) => {

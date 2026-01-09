@@ -48,7 +48,9 @@
       "Bash(lsof:*)",
       "Bash(xargs kill -9)",
       "Bash(PATH=\"$HOME/.nvm/versions/node/v20.19.4/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\" npm run tauri ios dev -- \"16 Pro Max\")",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nBump version to 1.1.2\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
     ]
   }
 }

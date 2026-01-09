@@ -1,10 +1,257 @@
 import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
-import { usePatternStore, ResizeHandle, Color } from '../stores/patternStore';
+import { usePatternStore, ResizeHandle, Color, CirclePosition, getCirclePositionFromClick, StitchType, isHalfSquareType, isBorderType, isCrossType } from '../stores/patternStore';
 
 const CELL_SIZE = 20; // Base cell size in pixels
 const RULER_SIZE = 24; // Width/height of rulers in pixels
 const HANDLE_SIZE = 8; // Size of resize handles in pixels
 const SCROLLBAR_SIZE = 14; // Width/height of scrollbars
+const CIRCLE_RADIUS_FACTOR = 0.28; // Circle radius relative to cell size (25% larger than half cell)
+
+// Helper to get circle center offset within a cell based on position
+function getCircleCenterOffset(position: CirclePosition): { dx: number; dy: number } {
+  switch (position) {
+    case 'top-left':     return { dx: 0, dy: 0 };
+    case 'top-center':   return { dx: 0.5, dy: 0 };
+    case 'top-right':    return { dx: 1, dy: 0 };
+    case 'middle-left':  return { dx: 0, dy: 0.5 };
+    case 'center':       return { dx: 0.5, dy: 0.5 };
+    case 'middle-right': return { dx: 1, dy: 0.5 };
+    case 'bottom-left':  return { dx: 0, dy: 1 };
+    case 'bottom-center':return { dx: 0.5, dy: 1 };
+    case 'bottom-right': return { dx: 1, dy: 1 };
+    default:             return { dx: 0.5, dy: 0.5 }; // Default to center
+  }
+}
+
+// Helper to get the center point of a partial-square shape for symbol placement
+function getHalfSquareCentroid(
+  type: StitchType,
+  x: number,
+  y: number,
+  cellSize: number
+): { cx: number; cy: number } {
+  const left = x * cellSize;
+  const top = y * cellSize;
+  const right = left + cellSize;
+  const bottom = top + cellSize;
+  const midX = left + cellSize / 2;
+  const midY = top + cellSize / 2;
+
+  switch (type) {
+    // Triangle centroids (average of three vertices)
+    case 'half-tl': // Vertices: (left, top), (right, top), (left, bottom)
+      return { cx: (left + right + left) / 3, cy: (top + top + bottom) / 3 };
+    case 'half-tr': // Vertices: (left, top), (right, top), (right, bottom)
+      return { cx: (left + right + right) / 3, cy: (top + top + bottom) / 3 };
+    case 'half-bl': // Vertices: (left, top), (left, bottom), (right, bottom)
+      return { cx: (left + left + right) / 3, cy: (top + bottom + bottom) / 3 };
+    case 'half-br': // Vertices: (right, top), (left, bottom), (right, bottom)
+      return { cx: (right + left + right) / 3, cy: (top + bottom + bottom) / 3 };
+    // Half rectangle centers
+    case 'half-top':
+      return { cx: midX, cy: top + cellSize / 4 };
+    case 'half-bottom':
+      return { cx: midX, cy: bottom - cellSize / 4 };
+    case 'half-left':
+      return { cx: left + cellSize / 4, cy: midY };
+    case 'half-right':
+      return { cx: right - cellSize / 4, cy: midY };
+    // Quarter square centers
+    case 'quarter-tl':
+      return { cx: left + cellSize / 4, cy: top + cellSize / 4 };
+    case 'quarter-tr':
+      return { cx: right - cellSize / 4, cy: top + cellSize / 4 };
+    case 'quarter-bl':
+      return { cx: left + cellSize / 4, cy: bottom - cellSize / 4 };
+    case 'quarter-br':
+      return { cx: right - cellSize / 4, cy: bottom - cellSize / 4 };
+    // Border centers (borders are thin, so center symbol in middle of border)
+    case 'border-top':
+      return { cx: midX, cy: top + cellSize * 0.1 };
+    case 'border-bottom':
+      return { cx: midX, cy: bottom - cellSize * 0.1 };
+    case 'border-left':
+      return { cx: left + cellSize * 0.1, cy: midY };
+    case 'border-right':
+      return { cx: right - cellSize * 0.1, cy: midY };
+    default:
+      return { cx: midX, cy: midY };
+  }
+}
+
+// Helper to draw partial-square shape on canvas (triangle, rectangle, or quarter)
+function drawHalfSquare(
+  ctx: CanvasRenderingContext2D,
+  type: StitchType,
+  x: number,
+  y: number,
+  cellSize: number,
+  fillStyle: string
+) {
+  const left = x * cellSize;
+  const top = y * cellSize;
+  const right = left + cellSize;
+  const bottom = top + cellSize;
+  const midX = left + cellSize / 2;
+  const midY = top + cellSize / 2;
+
+  ctx.fillStyle = fillStyle;
+
+  switch (type) {
+    // Triangles
+    case 'half-tl': // Top-left corner - diagonal from top-left to bottom-right
+      ctx.beginPath();
+      ctx.moveTo(left, top);
+      ctx.lineTo(right, top);
+      ctx.lineTo(left, bottom);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    case 'half-tr': // Top-right corner - diagonal from top-right to bottom-left
+      ctx.beginPath();
+      ctx.moveTo(left, top);
+      ctx.lineTo(right, top);
+      ctx.lineTo(right, bottom);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    case 'half-bl': // Bottom-left corner - diagonal from bottom-left to top-right
+      ctx.beginPath();
+      ctx.moveTo(left, top);
+      ctx.lineTo(left, bottom);
+      ctx.lineTo(right, bottom);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    case 'half-br': // Bottom-right corner - diagonal from bottom-right to top-left
+      ctx.beginPath();
+      ctx.moveTo(right, top);
+      ctx.lineTo(left, bottom);
+      ctx.lineTo(right, bottom);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    // Half rectangles (horizontal/vertical halves)
+    case 'half-top':
+      ctx.fillRect(left, top, cellSize, cellSize / 2);
+      break;
+    case 'half-bottom':
+      ctx.fillRect(left, midY, cellSize, cellSize / 2);
+      break;
+    case 'half-left':
+      ctx.fillRect(left, top, cellSize / 2, cellSize);
+      break;
+    case 'half-right':
+      ctx.fillRect(midX, top, cellSize / 2, cellSize);
+      break;
+    // Quarter squares
+    case 'quarter-tl':
+      ctx.fillRect(left, top, cellSize / 2, cellSize / 2);
+      break;
+    case 'quarter-tr':
+      ctx.fillRect(midX, top, cellSize / 2, cellSize / 2);
+      break;
+    case 'quarter-bl':
+      ctx.fillRect(left, midY, cellSize / 2, cellSize / 2);
+      break;
+    case 'quarter-br':
+      ctx.fillRect(midX, midY, cellSize / 2, cellSize / 2);
+      break;
+    // Borders (thin rectangles along edges, extend slightly beyond cell)
+    // Border thickness is ~20% of cell, extends 10% beyond each end
+    case 'border-top': {
+      const extend = cellSize * 0.1;
+      const thickness = cellSize * 0.2;
+      drawRoundedRect(ctx, left - extend, top, cellSize + extend * 2, thickness, thickness / 2);
+      break;
+    }
+    case 'border-bottom': {
+      const extend = cellSize * 0.1;
+      const thickness = cellSize * 0.2;
+      drawRoundedRect(ctx, left - extend, bottom - thickness, cellSize + extend * 2, thickness, thickness / 2);
+      break;
+    }
+    case 'border-left': {
+      const extend = cellSize * 0.1;
+      const thickness = cellSize * 0.2;
+      drawRoundedRect(ctx, left, top - extend, thickness, cellSize + extend * 2, thickness / 2);
+      break;
+    }
+    case 'border-right': {
+      const extend = cellSize * 0.1;
+      const thickness = cellSize * 0.2;
+      drawRoundedRect(ctx, right - thickness, top - extend, thickness, cellSize + extend * 2, thickness / 2);
+      break;
+    }
+    // Cross lines (diagonal lines from corner to corner, extend beyond cell)
+    case 'cross-tlbr': {
+      const extend = cellSize * 0.1;
+      const thickness = cellSize * 0.2;
+      drawRoundedLine(ctx, left - extend, top - extend, right + extend, bottom + extend, thickness);
+      break;
+    }
+    case 'cross-trbl': {
+      const extend = cellSize * 0.1;
+      const thickness = cellSize * 0.2;
+      drawRoundedLine(ctx, right + extend, top - extend, left - extend, bottom + extend, thickness);
+      break;
+    }
+    // Full circle (fills entire cell like square but with circle shape)
+    case 'circle-full': {
+      const radius = cellSize * 0.45;
+      ctx.beginPath();
+      ctx.arc(midX, midY, radius, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
+  }
+}
+
+// Helper to draw a rounded line (thick line with rounded ends)
+// Uses fillStyle as the stroke color for consistency with other shapes
+function drawRoundedLine(
+  ctx: CanvasRenderingContext2D,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  thickness: number
+) {
+  ctx.beginPath();
+  ctx.lineCap = 'round';
+  ctx.lineWidth = thickness;
+  // Use fillStyle as the stroke color (fillStyle is set before calling this)
+  ctx.strokeStyle = ctx.fillStyle;
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+  // Reset line cap
+  ctx.lineCap = 'butt';
+}
+
+// Helper to draw a rounded rectangle
+function drawRoundedRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number
+) {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  ctx.fill();
+}
 
 interface PatternCanvasProps {
   showSymbols?: boolean;
@@ -26,7 +273,7 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
   const progressDragRef = useRef<{ targetState: boolean; lastCellX: number; lastCellY: number } | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
-  const [lastCell, setLastCell] = useState<{ x: number; y: number } | null>(null);
+  const [lastCell, setLastCell] = useState<{ x: number; y: number; type?: StitchType } | null>(null);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
   // Shape drawing state
   const [shapeStart, setShapeStart] = useState<{ x: number; y: number } | null>(null);
@@ -45,7 +292,6 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     overlayImages,
     selectedOverlayId,
     setStitch,
-    removeStitch,
     fillArea,
     drawLine,
     drawRectangle,
@@ -75,6 +321,8 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     startAreaSelection,
     updateAreaSelection,
     endAreaSelection,
+    activeStitchType,
+    removeStitchAtPoint,
   } = usePatternStore();
 
   // Ensure shading values have defaults
@@ -322,64 +570,91 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, width * cellSize, height * cellSize);
 
-    // Draw all visible layers (bottom to top)
+    // Helper to get fill style with progress mode blending
+    const getStitchFillStyle = (rgb: [number, number, number], isCompleted: boolean): string => {
+      if (isCompleted) {
+        const blendFactor = progressShadingOpacity / 100;
+        const blendedR = Math.round(rgb[0] * (1 - blendFactor) + progressShadingColor[0] * blendFactor);
+        const blendedG = Math.round(rgb[1] * (1 - blendFactor) + progressShadingColor[1] * blendFactor);
+        const blendedB = Math.round(rgb[2] * (1 - blendFactor) + progressShadingColor[2] * blendFactor);
+        return `rgb(${blendedR}, ${blendedG}, ${blendedB})`;
+      }
+      return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+    };
+
+    // Helper to get symbol fill style with progress mode blending
+    const getSymbolFillStyle = (rgb: [number, number, number], isCompleted: boolean): string => {
+      if (isCompleted) {
+        const blendFactor = progressShadingOpacity / 100;
+        const blendedRgb: [number, number, number] = [
+          Math.round(rgb[0] * (1 - blendFactor) + progressShadingColor[0] * blendFactor),
+          Math.round(rgb[1] * (1 - blendFactor) + progressShadingColor[1] * blendFactor),
+          Math.round(rgb[2] * (1 - blendFactor) + progressShadingColor[2] * blendFactor),
+        ];
+        const baseContrastColor = getContrastColor(blendedRgb);
+        const contrastRgb = baseContrastColor === '#ffffff' ? [255, 255, 255] : [0, 0, 0];
+        const shadedSymbolR = Math.round(contrastRgb[0] * (1 - blendFactor) + progressShadingColor[0] * blendFactor);
+        const shadedSymbolG = Math.round(contrastRgb[1] * (1 - blendFactor) + progressShadingColor[1] * blendFactor);
+        const shadedSymbolB = Math.round(contrastRgb[2] * (1 - blendFactor) + progressShadingColor[2] * blendFactor);
+        return `rgb(${shadedSymbolR}, ${shadedSymbolG}, ${shadedSymbolB})`;
+      }
+      return getContrastColor(rgb);
+    };
+
+    // Draw all visible layers (bottom to top) - Square and half-square stitches first
+    // Skip circles and borders - they'll be drawn in later passes
     for (const layer of pattern.layers) {
       if (!layer.visible) continue;
 
       for (const stitch of layer.stitches) {
+        // Skip circle, border, and cross stitches - they'll be drawn in later passes
+        if (stitch.type === 'circle' || isBorderType(stitch.type) || isCrossType(stitch.type)) continue;
+
         const colorObj = getColorObject(stitch.colorId);
         if (colorObj) {
           const rgb = colorObj.rgb;
-          // In progress mode, grey out completed stitches
           const isCompleted = isProgressMode && stitch.completed;
+          const fillStyle = getStitchFillStyle(rgb, isCompleted);
+          const stitchType = stitch.type || 'square';
 
-          // Draw the stitch background
-          if (isCompleted) {
-            // Blend stitch color with shading color based on opacity
-            const blendFactor = progressShadingOpacity / 100;
-            const blendedR = Math.round(rgb[0] * (1 - blendFactor) + progressShadingColor[0] * blendFactor);
-            const blendedG = Math.round(rgb[1] * (1 - blendFactor) + progressShadingColor[1] * blendFactor);
-            const blendedB = Math.round(rgb[2] * (1 - blendFactor) + progressShadingColor[2] * blendFactor);
-            ctx.fillStyle = `rgb(${blendedR}, ${blendedG}, ${blendedB})`;
-          } else {
-            ctx.fillStyle = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
-          }
-          ctx.fillRect(
-            stitch.x * cellSize,
-            stitch.y * cellSize,
-            cellSize,
-            cellSize
-          );
+          // Draw based on stitch type
+          if (isHalfSquareType(stitchType)) {
+            // Draw half-square shape (triangle or rectangle)
+            drawHalfSquare(ctx, stitchType, stitch.x, stitch.y, cellSize, fillStyle);
 
-          // Draw symbol if enabled and cell is large enough
-          if (showSymbols && colorObj.symbol && cellSize >= 12) {
-            const fontSize = Math.max(8, Math.min(cellSize * 0.7, 16));
-            ctx.font = `bold ${fontSize}px sans-serif`;
-            if (isCompleted) {
-              // Calculate blended background color
-              const blendFactor = progressShadingOpacity / 100;
-              const blendedRgb: [number, number, number] = [
-                Math.round(rgb[0] * (1 - blendFactor) + progressShadingColor[0] * blendFactor),
-                Math.round(rgb[1] * (1 - blendFactor) + progressShadingColor[1] * blendFactor),
-                Math.round(rgb[2] * (1 - blendFactor) + progressShadingColor[2] * blendFactor),
-              ];
-              // Get contrast color and blend it with shading color too
-              const baseContrastColor = getContrastColor(blendedRgb);
-              const contrastRgb = baseContrastColor === '#ffffff' ? [255, 255, 255] : [0, 0, 0];
-              const shadedSymbolR = Math.round(contrastRgb[0] * (1 - blendFactor) + progressShadingColor[0] * blendFactor);
-              const shadedSymbolG = Math.round(contrastRgb[1] * (1 - blendFactor) + progressShadingColor[1] * blendFactor);
-              const shadedSymbolB = Math.round(contrastRgb[2] * (1 - blendFactor) + progressShadingColor[2] * blendFactor);
-              ctx.fillStyle = `rgb(${shadedSymbolR}, ${shadedSymbolG}, ${shadedSymbolB})`;
-            } else {
-              ctx.fillStyle = getContrastColor(rgb);
+            // Draw symbol centered in the shape
+            if (showSymbols && colorObj.symbol && cellSize >= 12) {
+              const { cx, cy } = getHalfSquareCentroid(stitchType, stitch.x, stitch.y, cellSize);
+              const fontSize = Math.max(8, Math.min(cellSize * 0.5, 14)); // Slightly smaller for half-squares
+              ctx.font = `bold ${fontSize}px sans-serif`;
+              ctx.fillStyle = getSymbolFillStyle(rgb, isCompleted);
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(colorObj.symbol, cx, cy);
             }
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(
-              colorObj.symbol,
-              stitch.x * cellSize + cellSize / 2,
-              stitch.y * cellSize + cellSize / 2
+          } else {
+            // Draw the square stitch background
+            ctx.fillStyle = fillStyle;
+            ctx.fillRect(
+              stitch.x * cellSize,
+              stitch.y * cellSize,
+              cellSize,
+              cellSize
             );
+
+            // Draw symbol if enabled and cell is large enough
+            if (showSymbols && colorObj.symbol && cellSize >= 12) {
+              const fontSize = Math.max(8, Math.min(cellSize * 0.7, 16));
+              ctx.font = `bold ${fontSize}px sans-serif`;
+              ctx.fillStyle = getSymbolFillStyle(rgb, isCompleted);
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(
+                colorObj.symbol,
+                stitch.x * cellSize + cellSize / 2,
+                stitch.y * cellSize + cellSize / 2
+              );
+            }
           }
         }
       }
@@ -410,6 +685,70 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
         ctx.moveTo(0, y * cellSize);
         ctx.lineTo(width * cellSize, y * cellSize);
         ctx.stroke();
+      }
+    }
+
+    // Draw all visible layers - Circle stitches on top of grid (they overlap cells)
+    const circleRadius = cellSize * CIRCLE_RADIUS_FACTOR;
+    for (const layer of pattern.layers) {
+      if (!layer.visible) continue;
+
+      for (const stitch of layer.stitches) {
+        // Only draw circle stitches in this pass
+        if (stitch.type !== 'circle') continue;
+
+        const colorObj = getColorObject(stitch.colorId);
+        if (colorObj) {
+          const rgb = colorObj.rgb;
+          const isCompleted = isProgressMode && stitch.completed;
+
+          // Get circle center position based on position property
+          const position = stitch.position || 'center';
+          const offset = getCircleCenterOffset(position);
+          const cx = stitch.x * cellSize + offset.dx * cellSize;
+          const cy = stitch.y * cellSize + offset.dy * cellSize;
+
+          // Draw circle fill
+          ctx.beginPath();
+          ctx.arc(cx, cy, circleRadius, 0, Math.PI * 2);
+          ctx.fillStyle = getStitchFillStyle(rgb, isCompleted);
+          ctx.fill();
+
+          // Draw circle outline (black)
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = Math.max(1, cellSize * 0.05);
+          ctx.stroke();
+
+          // Draw symbol if enabled and circle is large enough
+          if (showSymbols && colorObj.symbol && circleRadius >= 8) {
+            const fontSize = Math.max(8, Math.min(circleRadius * 0.8, 16));
+            ctx.font = `bold ${fontSize}px sans-serif`;
+            ctx.fillStyle = getSymbolFillStyle(rgb, isCompleted);
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(colorObj.symbol, cx, cy);
+          }
+        }
+      }
+    }
+
+    // Draw all visible layers - Border and cross stitches on top (they extend beyond cells)
+    for (const layer of pattern.layers) {
+      if (!layer.visible) continue;
+
+      for (const stitch of layer.stitches) {
+        // Only draw border and cross stitches in this pass
+        if (!isBorderType(stitch.type) && !isCrossType(stitch.type)) continue;
+
+        const colorObj = getColorObject(stitch.colorId);
+        if (colorObj) {
+          const rgb = colorObj.rgb;
+          const isCompleted = isProgressMode && stitch.completed;
+          const fillStyle = getStitchFillStyle(rgb, isCompleted);
+
+          // Draw border
+          drawHalfSquare(ctx, stitch.type!, stitch.x, stitch.y, cellSize, fillStyle);
+        }
       }
     }
 
@@ -513,9 +852,10 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       const selWidth = bounds.width * cellSize;
       const selHeight = bounds.height * cellSize;
 
-      // Draw floating stitches (new content being placed)
+      // Draw floating stitches (new content being placed) - squares first
       if (selection.floatingStitches) {
         for (const stitch of selection.floatingStitches) {
+          if (stitch.type === 'circle') continue; // Draw circles in second pass
           const colorObj = getColorObject(stitch.colorId);
           if (colorObj) {
             const rgb = colorObj.rgb;
@@ -539,6 +879,39 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
                 stitch.x * cellSize + cellSize / 2,
                 stitch.y * cellSize + cellSize / 2
               );
+            }
+          }
+        }
+        // Draw floating circle stitches on top
+        for (const stitch of selection.floatingStitches) {
+          if (stitch.type !== 'circle') continue;
+          const colorObj = getColorObject(stitch.colorId);
+          if (colorObj) {
+            const rgb = colorObj.rgb;
+            const position = stitch.position || 'center';
+            const offset = getCircleCenterOffset(position);
+            const cx = stitch.x * cellSize + offset.dx * cellSize;
+            const cy = stitch.y * cellSize + offset.dy * cellSize;
+
+            // Draw circle fill
+            ctx.beginPath();
+            ctx.arc(cx, cy, circleRadius, 0, Math.PI * 2);
+            ctx.fillStyle = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+            ctx.fill();
+
+            // Draw circle outline (black)
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = Math.max(1, cellSize * 0.05);
+            ctx.stroke();
+
+            // Draw symbol if enabled and circle is large enough
+            if (showSymbols && colorObj.symbol && circleRadius >= 8) {
+              const fontSize = Math.max(8, Math.min(circleRadius * 0.8, 16));
+              ctx.font = `bold ${fontSize}px sans-serif`;
+              ctx.fillStyle = getContrastColor(rgb);
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(colorObj.symbol, cx, cy);
             }
           }
         }
@@ -1498,11 +1871,18 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     if (!cell) return;
 
     if (activeTool === 'pencil') {
-      setStitch(cell.x, cell.y, selectedColorId);
+      // For circles, determine position from click location within cell
+      const cellSize = CELL_SIZE * zoom;
+      const circlePosition = activeStitchType === 'circle'
+        ? getCirclePositionFromClick(x - panOffset.x, y - panOffset.y, cell.x, cell.y, cellSize)
+        : undefined;
+      setStitch(cell.x, cell.y, selectedColorId, activeStitchType, circlePosition);
       setIsDrawing(true);
       setLastCell(cell);
     } else if (activeTool === 'eraser') {
-      removeStitch(cell.x, cell.y);
+      // Use precise eraser that removes specific stitches at the click point
+      const cellSize = CELL_SIZE * zoom;
+      removeStitchAtPoint(x - panOffset.x, y - panOffset.y, cellSize);
       setIsDrawing(true);
       setLastCell(cell);
     } else if (activeTool === 'fill') {
@@ -1713,14 +2093,22 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       return;
     }
 
-    // For pencil/eraser, skip if same cell
-    if (lastCell && cell.x === lastCell.x && cell.y === lastCell.y) return;
+    // For pencil/eraser, skip if same cell AND same stitch type
+    // This allows stacking different cross/border types in the same cell while preventing duplicates
+    if (lastCell && cell.x === lastCell.x && cell.y === lastCell.y && lastCell.type === activeStitchType) return;
 
     if (activeTool === 'pencil' && selectedColorId) {
-      setStitch(cell.x, cell.y, selectedColorId);
-      setLastCell(cell);
+      // For circles, determine position from click location within cell
+      const cellSize = CELL_SIZE * zoom;
+      const circlePosition = activeStitchType === 'circle'
+        ? getCirclePositionFromClick(x - panOffset.x, y - panOffset.y, cell.x, cell.y, cellSize)
+        : undefined;
+      setStitch(cell.x, cell.y, selectedColorId, activeStitchType, circlePosition);
+      setLastCell({ ...cell, type: activeStitchType });
     } else if (activeTool === 'eraser') {
-      removeStitch(cell.x, cell.y);
+      // Use precise eraser
+      const cellSize = CELL_SIZE * zoom;
+      removeStitchAtPoint(x - panOffset.x, y - panOffset.y, cellSize);
       setLastCell(cell);
     }
   };
@@ -2121,12 +2509,19 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
         const cell = canvasToCell(x, y);
         if (cell) {
           if (activeTool === 'pencil' && selectedColorId) {
-            setStitch(cell.x, cell.y, selectedColorId);
+            // For circles, determine position from click location within cell
+            const cellSize = CELL_SIZE * zoom;
+            const circlePosition = activeStitchType === 'circle'
+              ? getCirclePositionFromClick(x - panOffset.x, y - panOffset.y, cell.x, cell.y, cellSize)
+              : undefined;
+            setStitch(cell.x, cell.y, selectedColorId, activeStitchType, circlePosition);
             setIsDrawing(true);
             setLastCell(cell);
             return;
           } else if (activeTool === 'eraser') {
-            removeStitch(cell.x, cell.y);
+            // Use precise eraser
+            const cellSize = CELL_SIZE * zoom;
+            removeStitchAtPoint(x - panOffset.x, y - panOffset.y, cellSize);
             setIsDrawing(true);
             setLastCell(cell);
             return;
@@ -2379,15 +2774,23 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
         }
 
         // Pencil and eraser - continuous drawing
-        if (cell && (!lastCell || cell.x !== lastCell.x || cell.y !== lastCell.y)) {
+        // Allow same cell if different stitch type (for stacking cross/border types)
+        if (cell && (!lastCell || cell.x !== lastCell.x || cell.y !== lastCell.y || lastCell.type !== activeStitchType)) {
           if (activeTool === 'pencil' && selectedColorId) {
             e.preventDefault();
-            setStitch(cell.x, cell.y, selectedColorId);
-            setLastCell(cell);
+            // For circles, determine position from click location within cell
+            const cellSize = CELL_SIZE * zoom;
+            const circlePosition = activeStitchType === 'circle'
+              ? getCirclePositionFromClick(x - panOffset.x, y - panOffset.y, cell.x, cell.y, cellSize)
+              : undefined;
+            setStitch(cell.x, cell.y, selectedColorId, activeStitchType, circlePosition);
+            setLastCell({ ...cell, type: activeStitchType });
             return;
           } else if (activeTool === 'eraser') {
             e.preventDefault();
-            removeStitch(cell.x, cell.y);
+            // Use precise eraser
+            const cellSize = CELL_SIZE * zoom;
+            removeStitchAtPoint(x - panOffset.x, y - panOffset.y, cellSize);
             setLastCell(cell);
             return;
           }
