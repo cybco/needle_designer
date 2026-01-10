@@ -130,6 +130,7 @@ interface Preferences {
   confirmLayerDelete: boolean; // Show confirmation when deleting layers
   showSymbols: boolean; // Show symbols on color swatches
   showCenterMarker: boolean; // Show green X at canvas center
+  showToolbarLabels: boolean; // Show text labels below toolbar icons
   toolVisibility: ToolVisibility;
 }
 
@@ -169,6 +170,7 @@ const DEFAULT_PREFERENCES: Preferences = {
   confirmLayerDelete: true,
   showSymbols: true,
   showCenterMarker: true,
+  showToolbarLabels: false,
   toolVisibility: DEFAULT_TOOL_VISIBILITY,
 };
 
@@ -191,7 +193,19 @@ function App() {
   const [preferences, setPreferences] = useState<Preferences>(() => {
     try {
       const stored = localStorage.getItem(PREFERENCES_KEY);
-      return stored ? { ...DEFAULT_PREFERENCES, ...JSON.parse(stored) } : DEFAULT_PREFERENCES;
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        // Deep merge toolVisibility to ensure new tools default to visible
+        return {
+          ...DEFAULT_PREFERENCES,
+          ...parsed,
+          toolVisibility: {
+            ...DEFAULT_TOOL_VISIBILITY,
+            ...(parsed.toolVisibility || {}),
+          },
+        };
+      }
+      return DEFAULT_PREFERENCES;
     } catch {
       return DEFAULT_PREFERENCES;
     }
@@ -1461,6 +1475,13 @@ function App() {
                         label="Show Center Marker"
                       />
                     </div>
+                    <div className="px-4 py-3 border-t border-gray-600">
+                      <ToggleSwitch
+                        checked={preferences.showToolbarLabels}
+                        onChange={(checked) => updatePreferences({ showToolbarLabels: checked })}
+                        label="Show Toolbar Labels"
+                      />
+                    </div>
                     {/* Toolbar Visibility - opens modal */}
                     <button
                       className="w-full px-4 py-2 text-left hover:bg-gray-600 border-t border-gray-600 flex items-center justify-between"
@@ -1544,7 +1565,7 @@ function App() {
           <>
             {/* Left Toolbar - hidden in progress mode */}
             {!isProgressMode && (
-              <Toolbar onTextToolClick={() => setShowTextEditor(true)} onFitToCanvas={handleFitToCanvas} onMoveToCenter={handleMoveToCenter} onPreviewClick={() => setShowPreviewDialog(true)} toolVisibility={preferences.toolVisibility} />
+              <Toolbar onTextToolClick={() => setShowTextEditor(true)} onFitToCanvas={handleFitToCanvas} onMoveToCenter={handleMoveToCenter} onPreviewClick={() => setShowPreviewDialog(true)} toolVisibility={preferences.toolVisibility} showLabels={preferences.showToolbarLabels} />
             )}
 
             {/* Canvas Area */}
@@ -1801,21 +1822,25 @@ function App() {
 
       {/* Toolbar Visibility Dialog */}
       {showToolbarVisibilityDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl w-[500px] max-h-[80vh] flex flex-col">
-            {/* Header */}
-            <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">Toolbar Visibility</h2>
-              <button
-                onClick={() => setShowToolbarVisibilityDialog(false)}
-                className="text-gray-400 hover:text-gray-600 text-xl"
-              >
-                ×
-              </button>
-            </div>
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-50 overflow-y-auto"
+          style={{ WebkitOverflowScrolling: 'touch' }}
+        >
+          <div className="min-h-full flex items-start justify-center p-4 py-8">
+            <div className="bg-white rounded-lg shadow-xl w-[500px] max-w-full">
+              {/* Header */}
+              <div className="p-4 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white rounded-t-lg z-10">
+                <h2 className="text-lg font-semibold text-gray-900">Toolbar Visibility</h2>
+                <button
+                  onClick={() => setShowToolbarVisibilityDialog(false)}
+                  className="text-gray-400 hover:text-gray-600 text-xl"
+                >
+                  ×
+                </button>
+              </div>
 
-            {/* Content - 2 columns */}
-            <div className="p-4 overflow-y-auto grid grid-cols-2 gap-6">
+              {/* Content - 2 columns */}
+              <div className="p-4 grid grid-cols-2 gap-6">
               {/* Left Column */}
               <div className="space-y-4">
                 <div>
@@ -1883,16 +1908,17 @@ function App() {
                   </div>
                 </div>
               </div>
-            </div>
+              </div>
 
-            {/* Footer */}
-            <div className="p-4 border-t border-gray-200 flex justify-end">
-              <button
-                onClick={() => setShowToolbarVisibilityDialog(false)}
-                className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
-              >
-                Done
-              </button>
+              {/* Footer */}
+              <div className="p-4 border-t border-gray-200 flex justify-end">
+                <button
+                  onClick={() => setShowToolbarVisibilityDialog(false)}
+                  className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
+                >
+                  Done
+                </button>
+              </div>
             </div>
           </div>
         </div>

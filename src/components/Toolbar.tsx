@@ -1,5 +1,5 @@
-import React, { ReactNode, useState, useRef, useEffect } from 'react';
-import { usePatternStore, Tool, StitchType, isHalfSquareType, isBorderType, isCrossType } from '../stores/patternStore';
+import React, { ReactNode, useState, useRef, useEffect, useCallback } from 'react';
+import { usePatternStore, Tool, StitchType } from '../stores/patternStore';
 import handMoveIcon from '../assets/hand-move.svg';
 
 // Icons for selection actions
@@ -197,12 +197,36 @@ interface ToolButtonProps {
   tool: Tool;
   icon: ReactNode;
   label: string;
+  shortLabel?: string; // Short label for display below icon
   activeTool: Tool;
   onClick: (tool: Tool) => void;
+  showLabel?: boolean;
 }
 
-function ToolButton({ tool, icon, label, activeTool, onClick }: ToolButtonProps) {
+function ToolButton({ tool, icon, label, shortLabel, activeTool, onClick, showLabel = false }: ToolButtonProps) {
   const isActive = activeTool === tool;
+  const displayLabel = shortLabel || label.split(' ')[0]; // Use shortLabel or first word
+
+  if (showLabel) {
+    return (
+      <button
+        onClick={() => onClick(tool)}
+        className={`
+          w-full h-full flex flex-col items-center justify-center rounded gap-0.5
+          transition-colors
+          ${isActive
+            ? 'bg-blue-500 text-white'
+            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          }
+        `}
+        title={label}
+      >
+        <span className="text-lg">{icon}</span>
+        <span className="text-[10px] leading-tight truncate w-full text-center px-0.5">{displayLabel}</span>
+      </button>
+    );
+  }
+
   return (
     <button
       onClick={() => onClick(tool)}
@@ -214,6 +238,55 @@ function ToolButton({ tool, icon, label, activeTool, onClick }: ToolButtonProps)
           : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
         }
       `}
+      title={label}
+    >
+      {icon}
+    </button>
+  );
+}
+
+// ActionButton for non-tool buttons (undo, redo, zoom, etc.)
+interface ActionButtonProps {
+  icon: ReactNode;
+  label: string;
+  shortLabel?: string;
+  onClick: () => void;
+  disabled?: boolean;
+  active?: boolean;
+  showLabel?: boolean;
+  buttonRef?: React.RefObject<HTMLButtonElement | null>;
+}
+
+function ActionButton({ icon, label, shortLabel, onClick, disabled = false, active = false, showLabel = false, buttonRef }: ActionButtonProps) {
+  const displayLabel = shortLabel || label.split(' ')[0];
+
+  const baseClasses = disabled
+    ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
+    : active
+      ? 'bg-blue-500 text-white'
+      : 'bg-gray-100 text-gray-700 hover:bg-gray-200';
+
+  if (showLabel) {
+    return (
+      <button
+        ref={buttonRef}
+        onClick={onClick}
+        disabled={disabled}
+        className={`w-full h-full flex flex-col items-center justify-center rounded gap-0.5 transition-colors ${baseClasses}`}
+        title={label}
+      >
+        <span className="text-lg">{icon}</span>
+        <span className="text-[10px] leading-tight truncate w-full text-center px-0.5">{displayLabel}</span>
+      </button>
+    );
+  }
+
+  return (
+    <button
+      ref={buttonRef}
+      onClick={onClick}
+      disabled={disabled}
+      className={`w-10 h-10 flex items-center justify-center rounded transition-colors text-lg ${baseClasses}`}
       title={label}
     >
       {icon}
@@ -836,9 +909,10 @@ interface ToolbarProps {
   onMoveToCenter?: () => void;
   onPreviewClick?: () => void;
   toolVisibility?: ToolVisibility;
+  showLabels?: boolean;
 }
 
-export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPreviewClick, toolVisibility = DEFAULT_VISIBILITY }: ToolbarProps) {
+export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPreviewClick, toolVisibility = DEFAULT_VISIBILITY, showLabels = false }: ToolbarProps) {
   const {
     pattern,
     activeTool,
@@ -915,739 +989,371 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPrev
     );
   }
 
-  // Check if any tools in a section are visible
-  const hasDrawingTools = toolVisibility.pencil || toolVisibility.eraser || toolVisibility.fill || toolVisibility.colorswap || toolVisibility.pan || toolVisibility.select || toolVisibility.text;
-  const hasShapeTools = toolVisibility.line || toolVisibility.rectangle || toolVisibility.ellipse;
-  const hasHistoryTools = toolVisibility.undo || toolVisibility.redo;
-  const hasZoomControls = toolVisibility.zoomIn || toolVisibility.zoomOut || toolVisibility.zoomFit;
+  // Collect all tool buttons to render in a grid
+  const toolButtons: React.ReactNode[] = [];
+
+  // Drawing tools
+  if (toolVisibility.select) {
+    toolButtons.push(
+      <ToolButton key="select" tool="select" icon={<CursorIcon />} label="Move (V)" shortLabel="Move" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+  toolButtons.push(
+    <ActionButton key="center" icon={<CenterViewIcon />} label="Move to Center" shortLabel="Center" onClick={onMoveToCenter || (() => {})} showLabel={showLabels} />
+  );
+  if (toolVisibility.pencil) {
+    toolButtons.push(
+      <ToolButton key="pencil" tool="pencil" icon="✏️" label="Pencil (P)" shortLabel="Pencil" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.eraser) {
+    toolButtons.push(
+      <ToolButton key="eraser" tool="eraser" icon={<EraserIcon />} label="Eraser (E)" shortLabel="Eraser" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.fill) {
+    toolButtons.push(
+      <ToolButton key="fill" tool="fill" icon={<FillIcon />} label="Fill (G)" shortLabel="Fill" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.colorswap) {
+    toolButtons.push(
+      <ToolButton key="colorswap" tool="colorswap" icon={<ColorSwapIcon />} label="Color Swap (C)" shortLabel="Swap" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.pan) {
+    toolButtons.push(
+      <ToolButton key="pan" tool="pan" icon={<PanIcon />} label="Pan (Space)" shortLabel="Pan" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.text) {
+    toolButtons.push(
+      <ToolButton key="text" tool="text" icon={<TextIcon />} label="Text (T)" shortLabel="Text" activeTool={activeTool} onClick={() => { if (onTextToolClick) onTextToolClick(); }} showLabel={showLabels} />
+    );
+  }
+
+  // Shape tools
+  if (toolVisibility.line) {
+    toolButtons.push(
+      <ToolButton key="line" tool="line" icon="╱" label="Line (L)" shortLabel="Line" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.rectangle) {
+    toolButtons.push(
+      <ToolButton key="rectangle" tool="rectangle" icon="▢" label="Rectangle (R)" shortLabel="Rect" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.ellipse) {
+    toolButtons.push(
+      <ToolButton key="ellipse" tool="ellipse" icon="◯" label="Ellipse (O)" shortLabel="Ellipse" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+
+  // Stitch type button
+  toolButtons.push(
+    <ActionButton key="stitchtype" icon={getStitchTypeIcon(activeStitchType)} label={`Stitch Type: ${getStitchTypeName(activeStitchType)}`} shortLabel="Stitch" onClick={() => setShowStitchTypePopup(!showStitchTypePopup)} buttonRef={stitchTypeButtonRef} showLabel={showLabels} />
+  );
+
+  // History tools
+  if (toolVisibility.undo) {
+    toolButtons.push(
+      <ActionButton key="undo" icon="↩️" label="Undo (Ctrl+Z)" shortLabel="Undo" onClick={undo} disabled={history.length === 0} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.redo) {
+    toolButtons.push(
+      <ActionButton key="redo" icon="↪️" label="Redo (Ctrl+Shift+Z)" shortLabel="Redo" onClick={redo} disabled={future.length === 0} showLabel={showLabels} />
+    );
+  }
+
+  // Zoom controls
+  if (toolVisibility.zoomIn) {
+    toolButtons.push(
+      <ActionButton key="zoomin" icon="🔍+" label="Zoom In (+)" shortLabel="Zoom+" onClick={() => setZoom(Math.min(10, zoom + 0.1))} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.zoomOut) {
+    toolButtons.push(
+      <ActionButton key="zoomout" icon="🔍−" label="Zoom Out (-)" shortLabel="Zoom-" onClick={() => setZoom(Math.max(0.1, zoom - 0.1))} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.zoomFit) {
+    toolButtons.push(
+      <ActionButton key="zoomfit" icon={<span className="text-xs font-medium">Fit</span>} label="Fit to Window (0)" shortLabel="Fit" onClick={onFitToCanvas || (() => {})} showLabel={showLabels} />
+    );
+  }
+
+  // Grid toggle
+  if (toolVisibility.grid) {
+    toolButtons.push(
+      <ActionButton key="grid" icon="#" label="Toggle Grid (G)" shortLabel="Grid" onClick={toggleGrid} active={showGrid} showLabel={showLabels} />
+    );
+  }
+
+  // Preview
+  if (toolVisibility.preview) {
+    toolButtons.push(
+      <ActionButton key="preview" icon={<PreviewCanvasIcon />} label="Preview Canvas" shortLabel="Preview" onClick={onPreviewClick || (() => {})} showLabel={showLabels} />
+    );
+  }
+
+  // Area select
+  if (toolVisibility.areaselect) {
+    toolButtons.push(
+      <ToolButton key="areaselect" tool="areaselect" icon={<AreaSelectIcon />} label="Area Select (S)" shortLabel="Select" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+
+  // Selection actions
+  const hasSelectionEnabled = selection && selection.selectionType === 'area' && selection.selectedStitches?.length;
+  if (toolVisibility.selectionMove) {
+    toolButtons.push(
+      <ActionButton key="selmove" icon={<SelectionMoveIcon />} label="Move Selection" shortLabel="Move" onClick={moveSelection} disabled={!hasSelectionEnabled} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.selectionDuplicate) {
+    toolButtons.push(
+      <ActionButton key="seldup" icon={<SelectionDuplicateIcon />} label="Duplicate Selection" shortLabel="Copy" onClick={duplicateSelection} disabled={!hasSelectionEnabled} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.selectionNewLayer) {
+    toolButtons.push(
+      <ActionButton key="selnewlayer" icon={<SelectionNewLayerIcon />} label="Move to New Layer" shortLabel="ToLayer" onClick={selectionToNewLayer} disabled={!hasSelectionEnabled} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.selectionDuplicateToNewLayer) {
+    toolButtons.push(
+      <ActionButton key="seldupnewlayer" icon={<SelectionDuplicateToNewLayerIcon />} label="Duplicate to New Layer" shortLabel="DupLayer" onClick={() => hasLayerSelection ? duplicateLayerToNewLayer() : duplicateSelectionToNewLayer()} disabled={!hasTransformableSelection} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.selectionFlipHorizontal) {
+    toolButtons.push(
+      <ActionButton key="selfliph" icon={<FlipHorizontalIcon />} label="Flip Horizontal" shortLabel="FlipH" onClick={() => hasLayerSelection ? flipLayerHorizontal() : flipSelectionHorizontal()} disabled={!hasTransformableSelection} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.selectionFlipVertical) {
+    toolButtons.push(
+      <ActionButton key="selflipv" icon={<FlipVerticalIcon />} label="Flip Vertical" shortLabel="FlipV" onClick={() => hasLayerSelection ? flipLayerVertical() : flipSelectionVertical()} disabled={!hasTransformableSelection} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.selectionRotateLeft) {
+    toolButtons.push(
+      <ActionButton key="selrotl" icon={<RotateLeftIcon />} label="Rotate Left (90° CCW)" shortLabel="RotL" onClick={() => hasLayerSelection ? rotateLayerLeft() : rotateSelectionLeft()} disabled={!hasTransformableSelection} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.selectionRotateRight) {
+    toolButtons.push(
+      <ActionButton key="selrotr" icon={<RotateRightIcon />} label="Rotate Right (90° CW)" shortLabel="RotR" onClick={() => hasLayerSelection ? rotateLayerRight() : rotateSelectionRight()} disabled={!hasTransformableSelection} showLabel={showLabels} />
+    );
+  }
+
+  // Calculate number of columns needed based on available height
+  // Button sizes: without labels: 48px (40px + 8px gap), with labels: 56px (48px + 8px gap)
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const toolButtonCount = toolButtons.length;
+
+  // Button dimensions based on whether labels are shown
+  const buttonHeight = showLabels ? 56 : 48; // includes gap
+  const buttonWidth = showLabels ? 56 : 48; // wider to fit labels
+  const columnWidth = showLabels ? 64 : 56; // includes gap
+
+  // Calculate columns once on mount, then only on actual window resize
+  // This uses a stable calculation that won't change with zoom
+  const calculateColumnCount = useCallback(() => {
+    const availableHeight = window.innerHeight - 56; // menu bar + some padding
+    const buttonsPerColumn = Math.floor(availableHeight / buttonHeight);
+    return Math.max(1, Math.ceil(toolButtonCount / Math.max(1, buttonsPerColumn)));
+  }, [toolButtonCount, buttonHeight]);
+
+  // Initialize with calculated value
+  const [columns, setColumns] = useState(() => calculateColumnCount());
+
+  // Only update columns on actual window resize events or showLabels change
+  useEffect(() => {
+    let resizeTimeout: ReturnType<typeof setTimeout>;
+
+    const handleResize = () => {
+      // Debounce resize handler to avoid rapid updates
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        const newColumns = calculateColumnCount();
+        setColumns(prev => prev !== newColumns ? newColumns : prev);
+      }, 100);
+    };
+
+    // Recalculate immediately when showLabels changes
+    const newColumns = calculateColumnCount();
+    setColumns(newColumns);
+
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      clearTimeout(resizeTimeout);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [calculateColumnCount]);
+
+  // Calculate fixed width to prevent any layout shifts
+  const toolbarWidth = columns * columnWidth;
 
   return (
-    <div className="shrink-0 bg-white border-r border-gray-300 flex flex-col flex-wrap h-full content-start" style={{ maxHeight: '100%' }}>
-      {/* Drawing tools */}
-      {hasDrawingTools && (
-        <div className="p-2 space-y-2 border-b border-gray-200 w-14">
-          {toolVisibility.select && (
-            <ToolButton
-              tool="select"
-              icon={<CursorIcon />}
-              label="Move (V)"
-              activeTool={activeTool}
-              onClick={setTool}
-            />
-          )}
-          <button
-            onClick={onMoveToCenter}
-            className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200"
-            title="Move to Center"
-          >
-            <CenterViewIcon />
-          </button>
-          {toolVisibility.pencil && (
-            <ToolButton
-              tool="pencil"
-              icon="✏️"
-              label="Pencil (P)"
-              activeTool={activeTool}
-              onClick={setTool}
-            />
-          )}
-          {toolVisibility.eraser && (
-            <ToolButton
-              tool="eraser"
-              icon={<EraserIcon />}
-              label="Eraser (E)"
-              activeTool={activeTool}
-              onClick={setTool}
-            />
-          )}
-          {toolVisibility.fill && (
-            <ToolButton
-              tool="fill"
-              icon={<FillIcon />}
-              label="Fill (G)"
-              activeTool={activeTool}
-              onClick={setTool}
-            />
-          )}
-          {toolVisibility.colorswap && (
-            <ToolButton
-              tool="colorswap"
-              icon={<ColorSwapIcon />}
-              label="Color Swap (C)"
-              activeTool={activeTool}
-              onClick={setTool}
-            />
-          )}
-          {toolVisibility.pan && (
-            <ToolButton
-              tool="pan"
-              icon={<PanIcon />}
-              label="Pan (Space)"
-              activeTool={activeTool}
-              onClick={setTool}
-            />
-          )}
-          {toolVisibility.text && (
-            <ToolButton
-              tool="text"
-              icon={<TextIcon />}
-              label="Text (T)"
-              activeTool={activeTool}
-              onClick={() => {
-                if (onTextToolClick) {
-                  onTextToolClick();
-                }
-              }}
-            />
-          )}
-        </div>
-      )}
+    <div
+      ref={toolbarRef}
+      className="shrink-0 bg-white border-r border-gray-300 h-full p-2"
+      style={{
+        display: 'grid',
+        gridTemplateRows: `repeat(auto-fill, ${buttonHeight}px)`,
+        gridAutoFlow: 'column',
+        gridAutoColumns: `${buttonWidth}px`,
+        gap: '8px',
+        alignContent: 'start',
+        width: toolbarWidth,
+        minWidth: toolbarWidth,
+        maxWidth: toolbarWidth,
+        maxHeight: '100%',
+        overflow: 'hidden',
+        contain: 'layout size', // Isolate from parent layout changes
+      }}
+    >
+      {toolButtons}
 
-      {/* Shape tools */}
-      {hasShapeTools && (
-        <div className="p-2 space-y-2 border-b border-gray-200 w-14">
-          {toolVisibility.line && (
-            <ToolButton
-              tool="line"
-              icon="╱"
-              label="Line (L)"
-              activeTool={activeTool}
-              onClick={setTool}
-            />
-          )}
-          {toolVisibility.rectangle && (
-            <ToolButton
-              tool="rectangle"
-              icon="▢"
-              label="Rectangle (R)"
-              activeTool={activeTool}
-              onClick={setTool}
-            />
-          )}
-          {toolVisibility.ellipse && (
-            <ToolButton
-              tool="ellipse"
-              icon="◯"
-              label="Ellipse (O)"
-              activeTool={activeTool}
-              onClick={setTool}
-            />
-          )}
-        </div>
-      )}
-
-      {/* Stitch Type Selector */}
-      <div className="p-2 space-y-2 border-b border-gray-200 w-14 relative">
-        <button
-          ref={stitchTypeButtonRef}
-          onClick={() => setShowStitchTypePopup(!showStitchTypePopup)}
-          className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200"
-          title={`Stitch Type: ${getStitchTypeName(activeStitchType)}`}
+      {/* Stitch Type Popup - rendered outside the grid flow */}
+      {showStitchTypePopup && (
+        <div
+          ref={stitchTypePopupRef}
+          className="fixed bg-white border border-gray-300 rounded-lg shadow-lg p-3 z-50 w-64 max-h-[80vh] overflow-y-auto"
+          style={{
+            left: stitchTypeButtonRef.current ? stitchTypeButtonRef.current.getBoundingClientRect().right + 8 : 0,
+            top: stitchTypeButtonRef.current ? stitchTypeButtonRef.current.getBoundingClientRect().top : 0
+          }}
+          onMouseLeave={() => setHoveredStitchSection(null)}
         >
-          {getStitchTypeIcon(activeStitchType)}
-        </button>
+          <div className="text-sm font-semibold text-gray-700 mb-2">Stitch Type</div>
 
-        {/* Stitch Type Popup */}
-        {showStitchTypePopup && (
+          {/* Warning if no color selected */}
+          {!selectedColorId && (
+            <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-2 mb-2">
+              Please select a color from the palette before drawing.
+            </p>
+          )}
+
+          {/* Basic stitch type options - square and circle-full */}
           <div
-            ref={stitchTypePopupRef}
-            className="absolute left-full ml-2 bottom-0 bg-white border border-gray-300 rounded-lg shadow-lg p-3 z-50 w-64 max-h-[80vh] overflow-y-auto"
-            onMouseLeave={() => setHoveredStitchSection(null)}
+            className="grid grid-cols-3 gap-2 mb-3"
+            onMouseEnter={() => setHoveredStitchSection('basic')}
           >
-            <div className="text-sm font-semibold text-gray-700 mb-2">Stitch Type</div>
-
-            {/* Warning if no color selected */}
-            {!selectedColorId && (
-              <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-2 mb-2">
-                Please select a color from the palette before drawing.
-              </p>
-            )}
-
-            {/* Basic stitch type options - square and circle-full */}
-            <div
-              className="grid grid-cols-3 gap-2 mb-3"
-              onMouseEnter={() => setHoveredStitchSection('basic')}
+            <button
+              onClick={() => {
+                setActiveStitchType('square');
+                setShowStitchTypePopup(false);
+              }}
+              className={`flex items-center justify-center p-2 rounded border ${
+                activeStitchType === 'square'
+                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                  : 'border-gray-300 hover:bg-gray-50'
+              }`}
+              title="Square"
             >
-              <button
-                onClick={() => {
-                  setActiveStitchType('square');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'square'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Square"
-              >
-                <SquareStitchIcon className="w-6 h-6" />
-              </button>
-              <button
-                onClick={() => {
-                  setActiveStitchType('circle-full');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'circle-full'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Circle"
-              >
-                <CircleFullIcon className="w-6 h-6" />
-              </button>
-              <button
-                onClick={() => {
-                  setActiveStitchType('circle');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'circle'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Small Circle"
-                onMouseEnter={() => setHoveredStitchSection('circle-positional')}
-              >
-                <CircleStitchIcon className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Half-square triangle options */}
-            <div
-              className="grid grid-cols-4 gap-2 mb-2"
-              onMouseEnter={() => setHoveredStitchSection('half-square')}
+              <SquareStitchIcon className="w-6 h-6" />
+            </button>
+            <button
+              onClick={() => {
+                setActiveStitchType('circle-full');
+                setShowStitchTypePopup(false);
+              }}
+              className={`flex items-center justify-center p-2 rounded border ${
+                activeStitchType === 'circle-full'
+                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                  : 'border-gray-300 hover:bg-gray-50'
+              }`}
+              title="Circle"
             >
-              <button
-                onClick={() => {
-                  setActiveStitchType('half-tl');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'half-tl'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Top-Left"
-              >
-                <HalfSquareTLIcon className="w-6 h-6" />
-              </button>
-              <button
-                onClick={() => {
-                  setActiveStitchType('half-tr');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'half-tr'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Top-Right"
-              >
-                <HalfSquareTRIcon className="w-6 h-6" />
-              </button>
-              <button
-                onClick={() => {
-                  setActiveStitchType('half-bl');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'half-bl'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Bottom-Left"
-              >
-                <HalfSquareBLIcon className="w-6 h-6" />
-              </button>
-              <button
-                onClick={() => {
-                  setActiveStitchType('half-br');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'half-br'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Bottom-Right"
-              >
-                <HalfSquareBRIcon className="w-6 h-6" />
-              </button>
-            </div>
-
-            {/* Half-square rectangle options */}
-            <div
-              className="grid grid-cols-4 gap-2 mb-2"
-              onMouseEnter={() => setHoveredStitchSection('half-square')}
+              <CircleFullIcon className="w-6 h-6" />
+            </button>
+            <button
+              onClick={() => {
+                setActiveStitchType('circle');
+                setShowStitchTypePopup(false);
+              }}
+              className={`flex items-center justify-center p-2 rounded border ${
+                activeStitchType === 'circle'
+                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                  : 'border-gray-300 hover:bg-gray-50'
+              }`}
+              title="Small Circle"
+              onMouseEnter={() => setHoveredStitchSection('circle-positional')}
             >
-              <button
-                onClick={() => {
-                  setActiveStitchType('half-top');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'half-top'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Top"
-              >
-                <HalfSquareTopIcon className="w-6 h-6" />
-              </button>
-              <button
-                onClick={() => {
-                  setActiveStitchType('half-bottom');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'half-bottom'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Bottom"
-              >
-                <HalfSquareBottomIcon className="w-6 h-6" />
-              </button>
-              <button
-                onClick={() => {
-                  setActiveStitchType('half-left');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'half-left'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Left"
-              >
-                <HalfSquareLeftIcon className="w-6 h-6" />
-              </button>
-              <button
-                onClick={() => {
-                  setActiveStitchType('half-right');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'half-right'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Right"
-              >
-                <HalfSquareRightIcon className="w-6 h-6" />
-              </button>
-            </div>
-
-            {/* Quarter-square options */}
-            <div
-              className="grid grid-cols-4 gap-2 mb-2"
-              onMouseEnter={() => setHoveredStitchSection('quarter')}
-            >
-              <button
-                onClick={() => {
-                  setActiveStitchType('quarter-tl');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'quarter-tl'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Top-Left"
-              >
-                <QuarterSquareTLIcon className="w-6 h-6" />
-              </button>
-              <button
-                onClick={() => {
-                  setActiveStitchType('quarter-tr');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'quarter-tr'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Top-Right"
-              >
-                <QuarterSquareTRIcon className="w-6 h-6" />
-              </button>
-              <button
-                onClick={() => {
-                  setActiveStitchType('quarter-bl');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'quarter-bl'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Bottom-Left"
-              >
-                <QuarterSquareBLIcon className="w-6 h-6" />
-              </button>
-              <button
-                onClick={() => {
-                  setActiveStitchType('quarter-br');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'quarter-br'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Bottom-Right"
-              >
-                <QuarterSquareBRIcon className="w-6 h-6" />
-              </button>
-            </div>
-
-            {/* Border options */}
-            <div
-              className="grid grid-cols-4 gap-2 mb-2"
-              onMouseEnter={() => setHoveredStitchSection('border')}
-            >
-              <button
-                onClick={() => {
-                  setActiveStitchType('border-top');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'border-top'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Top Border"
-              >
-                <BorderTopIcon className="w-6 h-6" />
-              </button>
-              <button
-                onClick={() => {
-                  setActiveStitchType('border-bottom');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'border-bottom'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Bottom Border"
-              >
-                <BorderBottomIcon className="w-6 h-6" />
-              </button>
-              <button
-                onClick={() => {
-                  setActiveStitchType('border-left');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'border-left'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Left Border"
-              >
-                <BorderLeftIcon className="w-6 h-6" />
-              </button>
-              <button
-                onClick={() => {
-                  setActiveStitchType('border-right');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'border-right'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Right Border"
-              >
-                <BorderRightIcon className="w-6 h-6" />
-              </button>
-            </div>
-
-            {/* Cross line options */}
-            <div
-              className="grid grid-cols-2 gap-2 mb-2"
-              onMouseEnter={() => setHoveredStitchSection('cross')}
-            >
-              <button
-                onClick={() => {
-                  setActiveStitchType('cross-tlbr');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'cross-tlbr'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Cross Line (Top-Left to Bottom-Right)"
-              >
-                <CrossTLBRIcon className="w-6 h-6" />
-              </button>
-              <button
-                onClick={() => {
-                  setActiveStitchType('cross-trbl');
-                  setShowStitchTypePopup(false);
-                }}
-                className={`flex items-center justify-center p-2 rounded border ${
-                  activeStitchType === 'cross-trbl'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-300 hover:bg-gray-50'
-                }`}
-                title="Cross Line (Top-Right to Bottom-Left)"
-              >
-                <CrossTRBLIcon className="w-6 h-6" />
-              </button>
-            </div>
-
-            {/* Contextual help text based on hovered section */}
-            <div className="h-10 overflow-hidden">
-              <p className="text-xs text-gray-500">
-                {hoveredStitchSection === 'basic' && 'Fills entire cell.'}
-                {hoveredStitchSection === 'circle-positional' && 'Place on any one of nine cell areas.'}
-                {hoveredStitchSection === 'half-square' && 'Only one partial-square per cell. Different types overwrite each other.'}
-                {hoveredStitchSection === 'quarter' && 'Quarter squares fill one corner. Only one partial-square per cell.'}
-                {hoveredStitchSection === 'border' && 'Multiple borders can be added per cell (top, bottom, left, right).'}
-                {hoveredStitchSection === 'cross' && 'Cross lines can stack - both diagonals can be placed in the same cell.'}
-                {!hoveredStitchSection && '\u00A0'}
-              </p>
-            </div>
+              <CircleStitchIcon className="w-5 h-5" />
+            </button>
           </div>
-        )}
-      </div>
 
-      {/* Undo/Redo */}
-      {hasHistoryTools && (
-        <div className="p-2 space-y-2 border-b border-gray-200 w-14">
-          {toolVisibility.undo && (
-            <button
-              onClick={undo}
-              disabled={history.length === 0}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-                history.length === 0
-                  ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-              title="Undo (Ctrl+Z)"
-            >
-              ↩️
-            </button>
-          )}
-          {toolVisibility.redo && (
-            <button
-              onClick={redo}
-              disabled={future.length === 0}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-                future.length === 0
-                  ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-              title="Redo (Ctrl+Shift+Z)"
-            >
-              ↪️
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Zoom controls */}
-      {hasZoomControls && (
-        <div className="p-2 space-y-2 border-b border-gray-200 w-14">
-          {toolVisibility.zoomIn && (
-            <button
-              onClick={() => setZoom(Math.min(10, zoom + 0.1))}
-              className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-lg"
-              title="Zoom In (+)"
-            >
-              🔍+
-            </button>
-          )}
-          {toolVisibility.zoomOut && (
-            <button
-              onClick={() => setZoom(Math.max(0.1, zoom - 0.1))}
-              className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-lg"
-              title="Zoom Out (-)"
-            >
-              🔍−
-            </button>
-          )}
-          {toolVisibility.zoomFit && (
-            <button
-              onClick={onFitToCanvas}
-              className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-xs font-medium"
-              title="Fit to Window (0)"
-            >
-              Fit
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Grid toggle */}
-      {toolVisibility.grid && (
-        <div className="p-2 space-y-2 border-b border-gray-200 w-14">
-          <button
-            onClick={toggleGrid}
-            className={`
-              w-10 h-10 flex items-center justify-center rounded
-              transition-colors text-lg
-              ${showGrid
-                ? 'bg-blue-500 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }
-            `}
-            title="Toggle Grid (G)"
+          {/* Half-square triangle options */}
+          <div
+            className="grid grid-cols-4 gap-2 mb-2"
+            onMouseEnter={() => setHoveredStitchSection('half-square')}
           >
-            #
-          </button>
-        </div>
-      )}
+            <button onClick={() => { setActiveStitchType('half-tl'); setShowStitchTypePopup(false); }} className={`flex items-center justify-center p-2 rounded border ${activeStitchType === 'half-tl' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`} title="Top-Left"><HalfSquareTLIcon className="w-6 h-6" /></button>
+            <button onClick={() => { setActiveStitchType('half-tr'); setShowStitchTypePopup(false); }} className={`flex items-center justify-center p-2 rounded border ${activeStitchType === 'half-tr' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`} title="Top-Right"><HalfSquareTRIcon className="w-6 h-6" /></button>
+            <button onClick={() => { setActiveStitchType('half-bl'); setShowStitchTypePopup(false); }} className={`flex items-center justify-center p-2 rounded border ${activeStitchType === 'half-bl' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`} title="Bottom-Left"><HalfSquareBLIcon className="w-6 h-6" /></button>
+            <button onClick={() => { setActiveStitchType('half-br'); setShowStitchTypePopup(false); }} className={`flex items-center justify-center p-2 rounded border ${activeStitchType === 'half-br' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`} title="Bottom-Right"><HalfSquareBRIcon className="w-6 h-6" /></button>
+          </div>
 
-      {/* Preview Canvas */}
-      {toolVisibility.preview && (
-        <div className="p-2 space-y-2 border-b border-gray-200 w-14">
-          <button
-            onClick={onPreviewClick}
-            className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200"
-            title="Preview Canvas"
+          {/* Half-square rectangle options */}
+          <div
+            className="grid grid-cols-4 gap-2 mb-2"
+            onMouseEnter={() => setHoveredStitchSection('half-square')}
           >
-            <PreviewCanvasIcon />
-          </button>
+            <button onClick={() => { setActiveStitchType('half-top'); setShowStitchTypePopup(false); }} className={`flex items-center justify-center p-2 rounded border ${activeStitchType === 'half-top' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`} title="Top"><HalfSquareTopIcon className="w-6 h-6" /></button>
+            <button onClick={() => { setActiveStitchType('half-bottom'); setShowStitchTypePopup(false); }} className={`flex items-center justify-center p-2 rounded border ${activeStitchType === 'half-bottom' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`} title="Bottom"><HalfSquareBottomIcon className="w-6 h-6" /></button>
+            <button onClick={() => { setActiveStitchType('half-left'); setShowStitchTypePopup(false); }} className={`flex items-center justify-center p-2 rounded border ${activeStitchType === 'half-left' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`} title="Left"><HalfSquareLeftIcon className="w-6 h-6" /></button>
+            <button onClick={() => { setActiveStitchType('half-right'); setShowStitchTypePopup(false); }} className={`flex items-center justify-center p-2 rounded border ${activeStitchType === 'half-right' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`} title="Right"><HalfSquareRightIcon className="w-6 h-6" /></button>
+          </div>
+
+          {/* Quarter-square options */}
+          <div
+            className="grid grid-cols-4 gap-2 mb-2"
+            onMouseEnter={() => setHoveredStitchSection('quarter')}
+          >
+            <button onClick={() => { setActiveStitchType('quarter-tl'); setShowStitchTypePopup(false); }} className={`flex items-center justify-center p-2 rounded border ${activeStitchType === 'quarter-tl' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`} title="Top-Left"><QuarterSquareTLIcon className="w-6 h-6" /></button>
+            <button onClick={() => { setActiveStitchType('quarter-tr'); setShowStitchTypePopup(false); }} className={`flex items-center justify-center p-2 rounded border ${activeStitchType === 'quarter-tr' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`} title="Top-Right"><QuarterSquareTRIcon className="w-6 h-6" /></button>
+            <button onClick={() => { setActiveStitchType('quarter-bl'); setShowStitchTypePopup(false); }} className={`flex items-center justify-center p-2 rounded border ${activeStitchType === 'quarter-bl' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`} title="Bottom-Left"><QuarterSquareBLIcon className="w-6 h-6" /></button>
+            <button onClick={() => { setActiveStitchType('quarter-br'); setShowStitchTypePopup(false); }} className={`flex items-center justify-center p-2 rounded border ${activeStitchType === 'quarter-br' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`} title="Bottom-Right"><QuarterSquareBRIcon className="w-6 h-6" /></button>
+          </div>
+
+          {/* Border options */}
+          <div
+            className="grid grid-cols-4 gap-2 mb-2"
+            onMouseEnter={() => setHoveredStitchSection('border')}
+          >
+            <button onClick={() => { setActiveStitchType('border-top'); setShowStitchTypePopup(false); }} className={`flex items-center justify-center p-2 rounded border ${activeStitchType === 'border-top' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`} title="Top Border"><BorderTopIcon className="w-6 h-6" /></button>
+            <button onClick={() => { setActiveStitchType('border-bottom'); setShowStitchTypePopup(false); }} className={`flex items-center justify-center p-2 rounded border ${activeStitchType === 'border-bottom' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`} title="Bottom Border"><BorderBottomIcon className="w-6 h-6" /></button>
+            <button onClick={() => { setActiveStitchType('border-left'); setShowStitchTypePopup(false); }} className={`flex items-center justify-center p-2 rounded border ${activeStitchType === 'border-left' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`} title="Left Border"><BorderLeftIcon className="w-6 h-6" /></button>
+            <button onClick={() => { setActiveStitchType('border-right'); setShowStitchTypePopup(false); }} className={`flex items-center justify-center p-2 rounded border ${activeStitchType === 'border-right' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`} title="Right Border"><BorderRightIcon className="w-6 h-6" /></button>
+          </div>
+
+          {/* Cross line options */}
+          <div
+            className="grid grid-cols-2 gap-2 mb-2"
+            onMouseEnter={() => setHoveredStitchSection('cross')}
+          >
+            <button onClick={() => { setActiveStitchType('cross-tlbr'); setShowStitchTypePopup(false); }} className={`flex items-center justify-center p-2 rounded border ${activeStitchType === 'cross-tlbr' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`} title="Cross Line (Top-Left to Bottom-Right)"><CrossTLBRIcon className="w-6 h-6" /></button>
+            <button onClick={() => { setActiveStitchType('cross-trbl'); setShowStitchTypePopup(false); }} className={`flex items-center justify-center p-2 rounded border ${activeStitchType === 'cross-trbl' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 hover:bg-gray-50'}`} title="Cross Line (Top-Right to Bottom-Left)"><CrossTRBLIcon className="w-6 h-6" /></button>
+          </div>
+
+          {/* Contextual help text based on hovered section */}
+          <div className="h-10 overflow-hidden">
+            <p className="text-xs text-gray-500">
+              {hoveredStitchSection === 'basic' && 'Fills entire cell.'}
+              {hoveredStitchSection === 'circle-positional' && 'Place on any one of nine cell areas.'}
+              {hoveredStitchSection === 'half-square' && 'Only one partial-square per cell. Different types overwrite each other.'}
+              {hoveredStitchSection === 'quarter' && 'Quarter squares fill one corner. Only one partial-square per cell.'}
+              {hoveredStitchSection === 'border' && 'Multiple borders can be added per cell (top, bottom, left, right).'}
+              {hoveredStitchSection === 'cross' && 'Cross lines can stack - both diagonals can be placed in the same cell.'}
+              {!hoveredStitchSection && '\u00A0'}
+            </p>
+          </div>
         </div>
       )}
-
-      {/* Area Select tool */}
-      {toolVisibility.areaselect && (
-        <div className="p-2 space-y-2 border-b border-gray-200 w-14">
-          <ToolButton
-            tool="areaselect"
-            icon={<AreaSelectIcon />}
-            label="Select (S)"
-            activeTool={activeTool}
-            onClick={setTool}
-          />
-        </div>
-      )}
-
-      {/* Selection Actions */}
-      {(toolVisibility.selectionMove || toolVisibility.selectionDuplicate || toolVisibility.selectionNewLayer || toolVisibility.selectionDuplicateToNewLayer || toolVisibility.selectionFlipHorizontal || toolVisibility.selectionFlipVertical || toolVisibility.selectionRotateLeft || toolVisibility.selectionRotateRight) && (
-        <div className="p-2 space-y-2 w-14">
-          <div className="text-[9px] text-gray-400 text-center font-medium -mb-1">Selection</div>
-          {toolVisibility.selectionMove && (
-            <button
-              onClick={moveSelection}
-              disabled={!selection || selection.selectionType !== 'area' || !selection.selectedStitches?.length}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-                selection && selection.selectionType === 'area' && selection.selectedStitches?.length
-                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
-              }`}
-              title="Move Selection"
-            >
-              <SelectionMoveIcon />
-            </button>
-          )}
-          {toolVisibility.selectionDuplicate && (
-            <button
-              onClick={duplicateSelection}
-              disabled={!selection || selection.selectionType !== 'area' || !selection.selectedStitches?.length}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-                selection && selection.selectionType === 'area' && selection.selectedStitches?.length
-                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
-              }`}
-              title="Duplicate Selection"
-            >
-              <SelectionDuplicateIcon />
-            </button>
-          )}
-          {toolVisibility.selectionNewLayer && (
-            <button
-              onClick={selectionToNewLayer}
-              disabled={!selection || selection.selectionType !== 'area' || !selection.selectedStitches?.length}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-                selection && selection.selectionType === 'area' && selection.selectedStitches?.length
-                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
-              }`}
-              title="Move to New Layer"
-            >
-              <SelectionNewLayerIcon />
-            </button>
-          )}
-          {toolVisibility.selectionDuplicateToNewLayer && (
-            <button
-              onClick={() => hasLayerSelection ? duplicateLayerToNewLayer() : duplicateSelectionToNewLayer()}
-              disabled={!hasTransformableSelection}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-                hasTransformableSelection
-                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
-              }`}
-              title="Duplicate to New Layer"
-            >
-              <SelectionDuplicateToNewLayerIcon />
-            </button>
-          )}
-          {toolVisibility.selectionFlipHorizontal && (
-            <button
-              onClick={() => hasLayerSelection ? flipLayerHorizontal() : flipSelectionHorizontal()}
-              disabled={!hasTransformableSelection}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-                hasTransformableSelection
-                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
-              }`}
-              title="Flip Horizontal"
-            >
-              <FlipHorizontalIcon />
-            </button>
-          )}
-          {toolVisibility.selectionFlipVertical && (
-            <button
-              onClick={() => hasLayerSelection ? flipLayerVertical() : flipSelectionVertical()}
-              disabled={!hasTransformableSelection}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-                hasTransformableSelection
-                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
-              }`}
-              title="Flip Vertical"
-            >
-              <FlipVerticalIcon />
-            </button>
-          )}
-          {toolVisibility.selectionRotateLeft && (
-            <button
-              onClick={() => hasLayerSelection ? rotateLayerLeft() : rotateSelectionLeft()}
-              disabled={!hasTransformableSelection}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-                hasTransformableSelection
-                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
-              }`}
-              title="Rotate Left (90° CCW)"
-            >
-              <RotateLeftIcon />
-            </button>
-          )}
-          {toolVisibility.selectionRotateRight && (
-            <button
-              onClick={() => hasLayerSelection ? rotateLayerRight() : rotateSelectionRight()}
-              disabled={!hasTransformableSelection}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-                hasTransformableSelection
-                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
-              }`}
-              title="Rotate Right (90° CW)"
-            >
-              <RotateRightIcon />
-            </button>
-          )}
-        </div>
-      )}
-
     </div>
   );
 }

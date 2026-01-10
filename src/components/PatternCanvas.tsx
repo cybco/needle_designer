@@ -2075,6 +2075,47 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
         return;
       }
 
+      // Area select tool: handle floating selection, dragging, and new selection
+      if (activeTool === 'areaselect') {
+        // If there's a floating selection, check if touching inside to drag or outside to commit
+        if (selection?.floatingStitches) {
+          if (isPointInSelectionBounds(x, y)) {
+            // Touching inside floating selection - start dragging it
+            e.preventDefault();
+            const cell = canvasToCellUnbounded(x, y);
+            if (cell) {
+              startDrag(cell);
+              setIsDrawing(true);
+            }
+            return;
+          } else {
+            // Touching outside - commit the floating selection
+            commitFloatingSelection();
+            return;
+          }
+        }
+
+        // Check if touching inside an existing area selection bounds (for drag)
+        if (selection && selection.selectionType === 'area' && isPointInSelectionBounds(x, y)) {
+          e.preventDefault();
+          const cell = canvasToCellUnbounded(x, y);
+          if (cell) {
+            startDrag(cell);
+            setIsDrawing(true);
+          }
+          return;
+        }
+
+        // Start new area selection
+        e.preventDefault();
+        const cell = canvasToCellUnbounded(x, y);
+        if (cell) {
+          startAreaSelection(cell);
+          setIsDrawing(true);
+        }
+        return;
+      }
+
       // Drawing tools - handle pencil, eraser, fill, and shape tools
       if (selectedColorId || activeTool === 'eraser') {
         const cell = canvasToCell(x, y);
@@ -2312,6 +2353,20 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
         return;
       }
 
+      // Handle areaselect tool dragging/area selection
+      if (activeTool === 'areaselect' && isDrawing && selection) {
+        e.preventDefault();
+        const cell = canvasToCellUnbounded(x, y);
+        if (cell) {
+          if (selection.isSelectingArea) {
+            updateAreaSelection(cell);
+          } else if (selection.isDragging) {
+            updateDrag(cell);
+          }
+        }
+        return;
+      }
+
       // Handle drawing tools during touch drag
       if (isDrawing) {
         const cell = canvasToCell(x, y);
@@ -2372,6 +2427,15 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     if (activeTool === 'select' && selection) {
       if (selection.isResizing) {
         endResize();
+      } else if (selection.isDragging) {
+        endDrag();
+      }
+    }
+
+    // End areaselect tool area selection or drag
+    if (activeTool === 'areaselect' && selection) {
+      if (selection.isSelectingArea) {
+        endAreaSelection();
       } else if (selection.isDragging) {
         endDrag();
       }

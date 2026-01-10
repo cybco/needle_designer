@@ -71,6 +71,43 @@ export interface Pattern {
 
 export type Tool = 'pencil' | 'eraser' | 'fill' | 'pan' | 'select' | 'areaselect' | 'text' | 'line' | 'rectangle' | 'ellipse' | 'colorswap';
 
+// Stitch types for different stitch shapes
+export type StitchType =
+  | 'square'           // Full square stitch (default)
+  | 'circle'           // Circle outline
+  | 'circle-full'      // Filled circle
+  | 'half-tl'          // Half square - top-left triangle
+  | 'half-tr'          // Half square - top-right triangle
+  | 'half-bl'          // Half square - bottom-left triangle
+  | 'half-br'          // Half square - bottom-right triangle
+  | 'half-top'         // Half square - top half
+  | 'half-bottom'      // Half square - bottom half
+  | 'half-left'        // Half square - left half
+  | 'half-right'       // Half square - right half
+  | 'quarter-tl'       // Quarter square - top-left
+  | 'quarter-tr'       // Quarter square - top-right
+  | 'quarter-bl'       // Quarter square - bottom-left
+  | 'quarter-br'       // Quarter square - bottom-right
+  | 'border-top'       // Border stitch - top edge
+  | 'border-bottom'    // Border stitch - bottom edge
+  | 'border-left'      // Border stitch - left edge
+  | 'border-right'     // Border stitch - right edge
+  | 'cross-tlbr'       // Cross stitch - top-left to bottom-right
+  | 'cross-trbl';      // Cross stitch - top-right to bottom-left
+
+// Helper functions to categorize stitch types
+export function isHalfSquareType(type: StitchType): boolean {
+  return type.startsWith('half-') || type.startsWith('quarter-');
+}
+
+export function isBorderType(type: StitchType): boolean {
+  return type.startsWith('border-');
+}
+
+export function isCrossType(type: StitchType): boolean {
+  return type.startsWith('cross-');
+}
+
 export type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
 export type AnchorPosition =
@@ -131,6 +168,7 @@ interface PatternState {
   // Editor state
   selectedColorId: string | null;
   activeTool: Tool;
+  activeStitchType: StitchType;
   zoom: number;
   panOffset: { x: number; y: number };
   showGrid: boolean;
@@ -171,6 +209,7 @@ interface PatternState {
   removeColor: (colorId: string) => void;
   selectColor: (colorId: string | null) => void;
   setTool: (tool: Tool) => void;
+  setActiveStitchType: (stitchType: StitchType) => void;
   setZoom: (zoom: number) => void;
   setPanOffset: (offset: { x: number; y: number }) => void;
   toggleGrid: () => void;
@@ -461,6 +500,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
   maxHistorySize: 50,
   selectedColorId: null,
   activeTool: 'select',
+  activeStitchType: 'square' as StitchType,
   zoom: 1,
   panOffset: { x: 0, y: 0 },
   showGrid: true,
@@ -1030,6 +1070,10 @@ export const usePatternStore = create<PatternState>((set, get) => {
 
   setTool: (tool) => {
     set({ activeTool: tool });
+  },
+
+  setActiveStitchType: (stitchType) => {
+    set({ activeStitchType: stitchType });
   },
 
   setZoom: (zoom) => {
