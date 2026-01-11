@@ -1100,7 +1100,7 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPrev
   // Grid toggle
   if (toolVisibility.grid) {
     toolButtons.push(
-      <ActionButton key="grid" icon="#" label="Toggle Grid (G)" onClick={toggleGrid} active={showGrid} showLabel={showLabels} />
+      <ActionButton key="grid" icon="#" label="Toggle Grid (G)" onClick={toggleGrid} active={!showGrid} showLabel={showLabels} />
     );
   }
 
