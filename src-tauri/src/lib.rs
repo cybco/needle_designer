@@ -11,6 +11,7 @@ use std::path::Path;
 use tauri::Manager;
 
 mod threads;
+mod licensing;
 use threads::color_matching::ColorMatchAlgorithm;
 
 // NDP File Format structures
@@ -1335,7 +1336,15 @@ pub fn run() {
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             capture_screen,
             save_session_history,
-            load_session_history
+            load_session_history,
+            // License management commands
+            licensing::commands::init_license,
+            licensing::commands::get_license_status,
+            licensing::commands::start_trial,
+            licensing::commands::get_platform_info,
+            licensing::commands::should_watermark_export,
+            #[cfg(debug_assertions)]
+            licensing::commands::reset_license_state
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

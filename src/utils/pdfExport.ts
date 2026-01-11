@@ -21,6 +21,7 @@ interface ExportOptions {
   includeGridNumbers: boolean;
   useSymbols: boolean; // Use symbols instead of colors (for B&W printing)
   title?: string;
+  shouldWatermark?: boolean; // Add trial watermark to all pages
 }
 
 const DEFAULT_OPTIONS: ExportOptions = {
@@ -29,12 +30,41 @@ const DEFAULT_OPTIONS: ExportOptions = {
   includeStitchCounts: true,
   includeGridNumbers: true,
   useSymbols: false,
+  shouldWatermark: false,
 };
 
 // Constants for preview page
 const PREVIEW_MAX_WIDTH = 140; // mm - max width for preview image
 const PREVIEW_MAX_HEIGHT = 120; // mm - max height for preview image
 const MM_PER_INCH = 25.4;
+const WATERMARK_TEXT = 'TRIAL VERSION - stitchalot.studio';
+
+// Add trial watermark to a PDF page
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function addTrialWatermark(pdf: any, pageWidth: number, pageHeight: number): void {
+  // Save current graphics state
+  pdf.saveGraphicsState();
+
+  // Set watermark style - semi-transparent gray
+  pdf.setGState(new pdf.GState({ opacity: 0.15 }));
+  pdf.setFontSize(40);
+  pdf.setTextColor(128, 128, 128);
+
+  // Draw diagonal watermark text across the page
+  const centerX = pageWidth / 2;
+  const centerY = pageHeight / 2;
+
+  // Calculate rotation angle (diagonal from bottom-left to top-right)
+  const angle = Math.atan2(pageHeight, pageWidth) * (180 / Math.PI);
+
+  pdf.text(WATERMARK_TEXT, centerX, centerY, {
+    align: 'center',
+    angle: angle,
+  });
+
+  // Restore graphics state
+  pdf.restoreGraphicsState();
+}
 
 // Get all stitches from all visible layers
 function getAllStitches(pattern: Pattern): Stitch[] {
@@ -603,6 +633,15 @@ export async function exportPatternToPdf(
         pdf.setTextColor(100, 100, 100);
         pdf.text(`${count} stitches`, textX, y + 7);
       }
+    }
+  }
+
+  // Add watermark to all pages if in trial mode
+  if (opts.shouldWatermark) {
+    const totalPages = pdf.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      pdf.setPage(i);
+      addTrialWatermark(pdf, pageWidth, pageHeight);
     }
   }
 

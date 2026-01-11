@@ -3,6 +3,7 @@ import { Pattern } from '../stores/patternStore';
 import { exportPatternToPdf } from '../utils/pdfExport';
 import { save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
+import { useLicenseStore } from '../stores/licenseStore';
 
 interface ExportPdfDialogProps {
   isOpen: boolean;
@@ -17,6 +18,9 @@ export function ExportPdfDialog({ isOpen, onClose, pattern }: ExportPdfDialogPro
   const [includeGridNumbers, setIncludeGridNumbers] = useState(true);
   const [useSymbols, setUseSymbols] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+
+  // Get watermark status from license store
+  const shouldWatermark = useLicenseStore((state) => state.shouldWatermark());
 
   if (!isOpen) return null;
 
@@ -34,13 +38,14 @@ export function ExportPdfDialog({ isOpen, onClose, pattern }: ExportPdfDialogPro
 
     setIsExporting(true);
     try {
-      // Generate PDF
+      // Generate PDF (with watermark if in trial mode)
       const pdfData = await exportPatternToPdf(pattern, {
         includePreviewPage,
         includeColorLegend,
         includeStitchCounts,
         includeGridNumbers,
         useSymbols,
+        shouldWatermark,
       });
 
       // Convert ArrayBuffer to base64 for sending to Rust
@@ -100,6 +105,16 @@ export function ExportPdfDialog({ isOpen, onClose, pattern }: ExportPdfDialogPro
             <p><strong>Colors used:</strong> {usedColorsCount}</p>
             <p><strong>Estimated pages:</strong> {totalPages}</p>
           </div>
+
+          {/* Trial watermark notice */}
+          {shouldWatermark && (
+            <div className="bg-blue-50 border border-blue-200 rounded p-3 text-sm text-blue-700">
+              <p className="font-medium">Trial Version</p>
+              <p className="text-xs mt-1">
+                PDF will include a watermark. Purchase a license to remove it.
+              </p>
+            </div>
+          )}
 
           {/* Export options */}
           <div className="space-y-3">

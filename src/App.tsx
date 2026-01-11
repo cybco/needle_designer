@@ -19,6 +19,8 @@ import { UploadImageDialog } from './components/UploadImageDialog';
 import { PreviewCanvasDialog } from './components/PreviewCanvasDialog';
 import { CanvasLayoutDialog } from './components/CanvasLayoutDialog';
 import { ToggleSwitch } from './components/ToggleSwitch';
+import { LicenseGate } from './components/LicenseGate';
+import { TrialBanner } from './components/TrialBanner';
 import { usePatternStore, Pattern, RulerUnit, Stitch, TextLayerMetadata } from './stores/patternStore';
 import { useSessionHistoryStore } from './stores/sessionHistoryStore';
 import { loadBundledFonts } from './data/bundledFonts';
@@ -1184,7 +1186,11 @@ function App() {
   }, [handleSave, handleSaveAs, handleOpen, undo, redo]);
 
   return (
+    <LicenseGate>
     <div className="h-screen flex flex-col bg-gray-100 overflow-hidden">
+      {/* Trial Banner (shown only during trial) */}
+      <TrialBanner />
+
       {/* Title Bar / Menu */}
       <header
         className="bg-gray-800 text-white px-4 py-2 flex items-center justify-between shrink-0"
@@ -1933,6 +1939,7 @@ function App() {
         </div>
       )}
     </div>
+    </LicenseGate>
   );
 }
 

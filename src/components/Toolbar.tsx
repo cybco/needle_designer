@@ -1,5 +1,5 @@
 import React, { ReactNode, useState, useRef, useEffect } from 'react';
-import { usePatternStore, Tool, StitchType, isHalfSquareType, isBorderType, isCrossType } from '../stores/patternStore';
+import { usePatternStore, Tool, StitchType } from '../stores/patternStore';
 import handMoveIcon from '../assets/hand-move.svg';
 
 // Icons for selection actions
