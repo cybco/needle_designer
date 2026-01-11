@@ -390,7 +390,7 @@ export async function exportPatternToPdf(
       pdf.setFontSize(8);
       pdf.setTextColor(150, 150, 150);
       const date = new Date().toLocaleDateString();
-      pdf.text(`Generated on ${date} with NeedlePoint Designer`, pageWidth / 2, pageHeight - PAGE_MARGIN, {
+      pdf.text(`Generated on ${date} with Stitch A Lot Studio`, pageWidth / 2, pageHeight - PAGE_MARGIN, {
         align: 'center',
       });
     } catch (error) {

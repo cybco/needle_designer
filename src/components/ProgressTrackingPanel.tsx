@@ -217,7 +217,7 @@ export function ProgressTrackingPanel() {
   // Get display name from file path or pattern name
   const getDisplayFileName = useCallback(() => {
     if (currentFilePath) {
-      return currentFilePath.split(/[/\\]/).pop()?.replace('.ndp', '') || 'Untitled';
+      return currentFilePath.split(/[/\\]/).pop()?.replace('.stitchalot', '') || 'Untitled';
     }
     return pattern?.name || 'Untitled';
   }, [currentFilePath, pattern?.name]);

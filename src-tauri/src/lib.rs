@@ -727,15 +727,15 @@ fn list_ndp_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
         .document_dir()
         .map_err(|e| format!("Failed to get documents directory: {}", e))?;
 
-    // List all .ndp files in the directory
+    // List all .stitchalot files in the directory
     let mut files = Vec::new();
 
     if let Ok(entries) = fs::read_dir(&doc_dir) {
         for entry in entries.flatten() {
             if let Some(name) = entry.file_name().to_str() {
-                if name.to_lowercase().ends_with(".ndp") {
+                if name.to_lowercase().ends_with(".stitchalot") {
                     // Return filename without extension
-                    let name_without_ext = name.trim_end_matches(".ndp").trim_end_matches(".NDP");
+                    let name_without_ext = name.trim_end_matches(".stitchalot").trim_end_matches(".STITCHALOT");
                     files.push(name_without_ext.to_string());
                 }
             }
@@ -769,7 +769,7 @@ fn save_project(app: tauri::AppHandle, path: String, project: NdpFile) -> Result
             .unwrap_or_else(|| {
                 // Generate a filename from project name
                 let name = project.metadata.name.replace(' ', "_");
-                format!("{}.ndp", name)
+                format!("{}.stitchalot", name)
             });
 
         doc_dir.join(filename)
@@ -843,7 +843,7 @@ fn save_pdf(path: String, data: String) -> Result<(), String> {
 #[tauri::command]
 fn get_save_path(default_name: String) -> Result<Option<String>, String> {
     // This is a placeholder - actual file dialog will be handled in frontend
-    Ok(Some(format!("{}.ndp", default_name)))
+    Ok(Some(format!("{}.stitchalot", default_name)))
 }
 
 /// Get the color of the pixel at the specified screen coordinates

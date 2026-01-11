@@ -130,7 +130,6 @@ interface Preferences {
   confirmLayerDelete: boolean; // Show confirmation when deleting layers
   showSymbols: boolean; // Show symbols on color swatches
   showCenterMarker: boolean; // Show green X at canvas center
-  showToolbarLabels: boolean; // Show text labels below toolbar icons
   toolVisibility: ToolVisibility;
 }
 
@@ -170,7 +169,6 @@ const DEFAULT_PREFERENCES: Preferences = {
   confirmLayerDelete: true,
   showSymbols: true,
   showCenterMarker: true,
-  showToolbarLabels: false,
   toolVisibility: DEFAULT_TOOL_VISIBILITY,
 };
 
@@ -193,19 +191,7 @@ function App() {
   const [preferences, setPreferences] = useState<Preferences>(() => {
     try {
       const stored = localStorage.getItem(PREFERENCES_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        // Deep merge toolVisibility to ensure new tools default to visible
-        return {
-          ...DEFAULT_PREFERENCES,
-          ...parsed,
-          toolVisibility: {
-            ...DEFAULT_TOOL_VISIBILITY,
-            ...(parsed.toolVisibility || {}),
-          },
-        };
-      }
-      return DEFAULT_PREFERENCES;
+      return stored ? { ...DEFAULT_PREFERENCES, ...JSON.parse(stored) } : DEFAULT_PREFERENCES;
     } catch {
       return DEFAULT_PREFERENCES;
     }
@@ -223,6 +209,10 @@ function App() {
 
   // Ref to store the tool before space-bar pan (to restore on release)
   const toolBeforePanRef = useRef<string | null>(null);
+
+  // Panel collapsed states
+  const [isLeftPanelCollapsed, setIsLeftPanelCollapsed] = useState(false);
+  const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
 
   // Helper to close all menus
   const closeAllMenus = useCallback(() => {
@@ -403,7 +393,7 @@ function App() {
       // Fall back to extracting from recent files
       const namesFromRecent = recentFiles.map(filePath => {
         const fileName = filePath.split(/[/\\]/).pop() || '';
-        return decodeURIComponent(fileName.replace(/\.ndp$/i, ''));
+        return decodeURIComponent(fileName.replace(/\.stitchalot$/i, ''));
       });
       setExistingFileNames(namesFromRecent);
     }
@@ -607,7 +597,7 @@ function App() {
         author: null,
         created_at: now,
         modified_at: now,
-        software: 'NeedlePoint Designer v1.0',
+        software: 'Stitch A Lot Studio v1.0',
       },
       canvas: {
         width: p.canvas.width,
@@ -786,8 +776,8 @@ function App() {
       // If no current file path, show save dialog
       if (!filePath) {
         const result = await save({
-          filters: [{ name: 'NeedlePoint Design', extensions: ['ndp'] }],
-          defaultPath: `${pattern.name}.ndp`,
+          filters: [{ name: 'Stitch A Lot Design', extensions: ['stitchalot'] }],
+          defaultPath: `${pattern.name}.stitchalot`,
         });
 
         if (!result) return; // User cancelled
@@ -813,8 +803,8 @@ function App() {
 
     try {
       const result = await save({
-        filters: [{ name: 'NeedlePoint Design', extensions: ['ndp'] }],
-        defaultPath: `${pattern.name}.ndp`,
+        filters: [{ name: 'Stitch A Lot Design', extensions: ['stitchalot'] }],
+        defaultPath: `${pattern.name}.stitchalot`,
       });
 
       if (!result) return; // User cancelled
@@ -846,7 +836,7 @@ function App() {
   const handleOpen = useCallback(async () => {
     try {
       const result = await open({
-        filters: [{ name: 'NeedlePoint Design', extensions: ['ndp'] }],
+        filters: [{ name: 'Stitch A Lot Design', extensions: ['stitchalot'] }],
         multiple: false,
       });
 
@@ -1028,8 +1018,8 @@ function App() {
       viewportHeight = rect.height;
       console.log('Viewport:', { w: viewportWidth, h: viewportHeight });
     } else {
-      const toolbarWidth = isProgressMode ? 0 : 56;
-      const rightPanelWidth = 256;
+      const toolbarWidth = isProgressMode ? 0 : (isLeftPanelCollapsed ? 32 : 56);
+      const rightPanelWidth = isRightPanelCollapsed ? 32 : 256;
       viewportWidth = window.innerWidth - toolbarWidth - rightPanelWidth - RULER_SIZE * 2;
       viewportHeight = window.innerHeight - 40 - 28 - RULER_SIZE;
       console.log('Fallback viewport:', { w: viewportWidth, h: viewportHeight });
@@ -1206,7 +1196,7 @@ function App() {
         }}
       >
         <div className="flex items-center gap-6">
-          <h1 className="text-lg font-semibold">NeedlePoint Designer</h1>
+          <h1 className="text-lg font-semibold">Stitch A Lot Studio</h1>
           <nav className="flex gap-4 text-sm relative z-50">
             {/* Global backdrop to close menus when clicking outside */}
             {(showFileMenu || showToolsMenu || showPreferencesMenu) && (
@@ -1475,13 +1465,6 @@ function App() {
                         label="Show Center Marker"
                       />
                     </div>
-                    <div className="px-4 py-3 border-t border-gray-600">
-                      <ToggleSwitch
-                        checked={preferences.showToolbarLabels}
-                        onChange={(checked) => updatePreferences({ showToolbarLabels: checked })}
-                        label="Show Toolbar Labels"
-                      />
-                    </div>
                     {/* Toolbar Visibility - opens modal */}
                     <button
                       className="w-full px-4 py-2 text-left hover:bg-gray-600 border-t border-gray-600 flex items-center justify-between"
@@ -1565,28 +1548,59 @@ function App() {
           <>
             {/* Left Toolbar - hidden in progress mode */}
             {!isProgressMode && (
-              <Toolbar onTextToolClick={() => setShowTextEditor(true)} onFitToCanvas={handleFitToCanvas} onMoveToCenter={handleMoveToCenter} onPreviewClick={() => setShowPreviewDialog(true)} toolVisibility={preferences.toolVisibility} showLabels={preferences.showToolbarLabels} />
+              <Toolbar
+                onTextToolClick={() => setShowTextEditor(true)}
+                onFitToCanvas={handleFitToCanvas}
+                onMoveToCenter={handleMoveToCenter}
+                onPreviewClick={() => setShowPreviewDialog(true)}
+                toolVisibility={preferences.toolVisibility}
+                collapsed={isLeftPanelCollapsed}
+                onToggleCollapse={() => setIsLeftPanelCollapsed(!isLeftPanelCollapsed)}
+              />
             )}
 
             {/* Canvas Area */}
             <PatternCanvas showSymbols={preferences.showSymbols} showCenterMarker={preferences.showCenterMarker} />
 
             {/* Right Panel - either Progress Tracking or Layers/Colors */}
-            {isProgressMode ? (
-              <ProgressTrackingPanel />
-            ) : (
-              <div className="w-64 flex flex-col border-l border-gray-300 overflow-hidden">
-                <LayerPanel onEditTextLayer={handleEditTextLayer} />
-                <ColorPalette showSymbols={preferences.showSymbols} />
-              </div>
-            )}
+            <div className={`flex flex-col border-l border-gray-300 overflow-hidden transition-all duration-200 ${isRightPanelCollapsed ? 'w-8' : 'w-64'}`}>
+              {/* Collapse/Expand Toggle - arrow aligned right */}
+              {/* When expanded: > to collapse (pointing right) */}
+              {/* When collapsed: < to expand (pointing left) */}
+              <button
+                onClick={() => setIsRightPanelCollapsed(!isRightPanelCollapsed)}
+                className="h-8 flex items-center justify-end pr-2 bg-gray-100 hover:bg-gray-200 border-b border-gray-300 shrink-0"
+                title={isRightPanelCollapsed ? 'Expand Panel' : 'Collapse Panel'}
+              >
+                <svg
+                  className="w-4 h-4 text-gray-600"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={isRightPanelCollapsed ? "M15 19l-7-7 7-7" : "M9 5l7 7-7 7"} />
+                </svg>
+              </button>
+
+              {/* Panel Content */}
+              {!isRightPanelCollapsed && (
+                isProgressMode ? (
+                  <ProgressTrackingPanel />
+                ) : (
+                  <>
+                    <LayerPanel onEditTextLayer={handleEditTextLayer} />
+                    <ColorPalette showSymbols={preferences.showSymbols} />
+                  </>
+                )
+              )}
+            </div>
           </>
         ) : (
           /* Welcome Screen */
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center max-w-lg">
               <h2 className="text-3xl font-bold text-gray-800 mb-4">
-                Welcome to NeedlePoint Designer
+                Welcome to Stitch A Lot Studio
               </h2>
               <p className="text-gray-600 mb-8">
                 Create beautiful needlepoint and cross-stitch patterns
@@ -1822,25 +1836,21 @@ function App() {
 
       {/* Toolbar Visibility Dialog */}
       {showToolbarVisibilityDialog && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 z-50 overflow-y-auto"
-          style={{ WebkitOverflowScrolling: 'touch' }}
-        >
-          <div className="min-h-full flex items-start justify-center p-4 py-8">
-            <div className="bg-white rounded-lg shadow-xl w-[500px] max-w-full">
-              {/* Header */}
-              <div className="p-4 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white rounded-t-lg z-10">
-                <h2 className="text-lg font-semibold text-gray-900">Toolbar Visibility</h2>
-                <button
-                  onClick={() => setShowToolbarVisibilityDialog(false)}
-                  className="text-gray-400 hover:text-gray-600 text-xl"
-                >
-                  ×
-                </button>
-              </div>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-[500px] max-h-[80vh] flex flex-col">
+            {/* Header */}
+            <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">Toolbar Visibility</h2>
+              <button
+                onClick={() => setShowToolbarVisibilityDialog(false)}
+                className="text-gray-400 hover:text-gray-600 text-xl"
+              >
+                ×
+              </button>
+            </div>
 
-              {/* Content - 2 columns */}
-              <div className="p-4 grid grid-cols-2 gap-6">
+            {/* Content - 2 columns */}
+            <div className="p-4 overflow-y-auto grid grid-cols-2 gap-6">
               {/* Left Column */}
               <div className="space-y-4">
                 <div>
@@ -1908,17 +1918,16 @@ function App() {
                   </div>
                 </div>
               </div>
-              </div>
+            </div>
 
-              {/* Footer */}
-              <div className="p-4 border-t border-gray-200 flex justify-end">
-                <button
-                  onClick={() => setShowToolbarVisibilityDialog(false)}
-                  className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
-                >
-                  Done
-                </button>
-              </div>
+            {/* Footer */}
+            <div className="p-4 border-t border-gray-200 flex justify-end">
+              <button
+                onClick={() => setShowToolbarVisibilityDialog(false)}
+                className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
+              >
+                Done
+              </button>
             </div>
           </div>
         </div>
