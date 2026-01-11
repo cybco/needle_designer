@@ -9,9 +9,19 @@ interface ExportPdfDialogProps {
   isOpen: boolean;
   onClose: () => void;
   pattern: Pattern;
+  currentFilePath: string | null;
 }
 
-export function ExportPdfDialog({ isOpen, onClose, pattern }: ExportPdfDialogProps) {
+export function ExportPdfDialog({ isOpen, onClose, pattern, currentFilePath }: ExportPdfDialogProps) {
+  // Get actual filename from path, fallback to pattern.name
+  const getDisplayName = () => {
+    if (currentFilePath) {
+      const fileName = currentFilePath.split(/[/\\]/).pop() || '';
+      return decodeURIComponent(fileName.replace(/\.stitchalot$/i, ''));
+    }
+    return pattern.name;
+  };
+  const displayName = getDisplayName();
   const [includePreviewPage, setIncludePreviewPage] = useState(true);
   const [includeColorLegend, setIncludeColorLegend] = useState(true);
   const [includeStitchCounts, setIncludeStitchCounts] = useState(true);
@@ -26,7 +36,7 @@ export function ExportPdfDialog({ isOpen, onClose, pattern }: ExportPdfDialogPro
 
   const handleExport = async () => {
     // Show save dialog first
-    const defaultName = `${pattern.name.replace(/[^a-zA-Z0-9]/g, '_')}_pattern.pdf`;
+    const defaultName = `${displayName.replace(/[^a-zA-Z0-9]/g, '_')}_pattern.pdf`;
     const filePath = await save({
       filters: [{ name: 'PDF Document', extensions: ['pdf'] }],
       defaultPath: defaultName,
@@ -46,6 +56,7 @@ export function ExportPdfDialog({ isOpen, onClose, pattern }: ExportPdfDialogPro
         includeGridNumbers,
         useSymbols,
         shouldWatermark,
+        title: displayName,
       });
 
       // Convert ArrayBuffer to base64 for sending to Rust
@@ -100,7 +111,7 @@ export function ExportPdfDialog({ isOpen, onClose, pattern }: ExportPdfDialogPro
         <div className="space-y-4 mb-6">
           {/* Pattern info */}
           <div className="bg-gray-50 rounded p-3 text-sm text-gray-600">
-            <p><strong>Pattern:</strong> {pattern.name}</p>
+            <p><strong>Pattern:</strong> {displayName}</p>
             <p><strong>Size:</strong> {pattern.canvas.width} x {pattern.canvas.height} stitches</p>
             <p><strong>Colors used:</strong> {usedColorsCount}</p>
             <p><strong>Estimated pages:</strong> {totalPages}</p>

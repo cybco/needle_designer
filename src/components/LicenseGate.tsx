@@ -61,7 +61,8 @@ export function LicenseGate({ children }: LicenseGateProps) {
       <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
         {/* Logo/Title */}
         <div className="text-center mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Stitch A Lot Studio</h1>
+          <img src="/app-icon.svg" alt="StitchALot Studio" className="w-20 h-20 mx-auto mb-3" />
+          <h1 className="text-2xl font-bold text-gray-900">StitchALot Studio</h1>
           <p className="text-gray-600 mt-1">Pattern Designer</p>
         </div>
 

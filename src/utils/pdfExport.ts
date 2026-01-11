@@ -39,28 +39,37 @@ const PREVIEW_MAX_HEIGHT = 120; // mm - max height for preview image
 const MM_PER_INCH = 25.4;
 const WATERMARK_TEXT = 'TRIAL VERSION - stitchalot.studio';
 
-// Add trial watermark to a PDF page
+// Add trial watermarks to a PDF page (multiple watermarks for better coverage)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function addTrialWatermark(pdf: any, pageWidth: number, pageHeight: number): void {
   // Save current graphics state
   pdf.saveGraphicsState();
 
   // Set watermark style - semi-transparent gray
-  pdf.setGState(new pdf.GState({ opacity: 0.15 }));
-  pdf.setFontSize(40);
+  pdf.setGState(new pdf.GState({ opacity: 0.12 }));
   pdf.setTextColor(128, 128, 128);
 
-  // Draw diagonal watermark text across the page
-  const centerX = pageWidth / 2;
-  const centerY = pageHeight / 2;
+  // Calculate rotation angle (diagonal)
+  const angle = -35;
 
-  // Calculate rotation angle (diagonal from bottom-left to top-right)
-  const angle = Math.atan2(pageHeight, pageWidth) * (180 / Math.PI);
+  // Add multiple watermarks in a grid pattern
+  const fontSize = 24;
+  pdf.setFontSize(fontSize);
 
-  pdf.text(WATERMARK_TEXT, centerX, centerY, {
-    align: 'center',
-    angle: angle,
-  });
+  // Create a grid of watermarks across the page
+  const spacingX = 120;
+  const spacingY = 60;
+
+  for (let y = -spacingY; y < pageHeight + spacingY; y += spacingY) {
+    for (let x = -spacingX; x < pageWidth + spacingX; x += spacingX) {
+      // Offset every other row for a more natural pattern
+      const offsetX = (Math.floor(y / spacingY) % 2) * (spacingX / 2);
+      pdf.text(WATERMARK_TEXT, x + offsetX, y, {
+        align: 'center',
+        angle: angle,
+      });
+    }
+  }
 
   // Restore graphics state
   pdf.restoreGraphicsState();
@@ -185,12 +194,75 @@ function drawCrossStitch(
   ctx.fill();
 }
 
-// Render pattern preview to a data URL for embedding in PDF
-function renderPatternPreview(pattern: Pattern, maxWidth: number, maxHeight: number): string {
+// Generate a thumbnail for file preview (200x200 max for fast loading, no grid)
+export function generatePatternThumbnail(pattern: Pattern): string {
+  return renderPatternPreview(pattern, 200, 200, { includeGrid: false });
+}
+
+// Render pattern at 1 pixel per stitch for smoothest PDF preview
+// This creates the cleanest possible image that PDF can scale smoothly
+function renderPatternPreviewSmooth(pattern: Pattern): string {
+  const width = pattern.canvas.width;
+  const height = pattern.canvas.height;
+
+  // Create offscreen canvas at exact pattern dimensions (1px per stitch)
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    throw new Error('Failed to get canvas context');
+  }
+
+  // Fill with white background
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, width, height);
+
+  // Create a color lookup map
+  const colorMap = new Map<string, [number, number, number]>();
+  for (const color of pattern.colorPalette) {
+    colorMap.set(color.id, color.rgb);
+  }
+
+  // Render all visible layers - each stitch is exactly 1 pixel
+  for (const layer of pattern.layers) {
+    if (!layer.visible) continue;
+
+    for (const stitch of layer.stitches) {
+      const rgb = colorMap.get(stitch.colorId);
+      if (!rgb) continue;
+
+      ctx.fillStyle = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+      ctx.fillRect(stitch.x, stitch.y, 1, 1);
+    }
+  }
+
+  // Convert to data URL
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = width;
+  tempCanvas.height = height;
+  const tempCtx = tempCanvas.getContext('2d');
+  if (!tempCtx) {
+    throw new Error('Failed to get temp canvas context');
+  }
+  tempCtx.putImageData(imageData, 0, 0);
+
+  return tempCanvas.toDataURL('image/png');
+}
+
+// Render pattern preview to a data URL for embedding in PDF or thumbnails
+// Export for use in generating file thumbnails
+interface RenderOptions {
+  includeGrid?: boolean;
+  maxCellSize?: number; // Max cell size in pixels (default 8 for thumbnails, higher for PDF)
+}
+
+export function renderPatternPreview(pattern: Pattern, maxWidth: number, maxHeight: number, options: RenderOptions = {}): string {
+  const { includeGrid = true, maxCellSize = 8 } = options;
+
   // Calculate cell size to fit within max dimensions
   const cellSizeForWidth = maxWidth / pattern.canvas.width;
   const cellSizeForHeight = maxHeight / pattern.canvas.height;
-  const cellSize = Math.min(cellSizeForWidth, cellSizeForHeight, 8); // Cap at 8px per cell for reasonable quality
+  const cellSize = Math.min(cellSizeForWidth, cellSizeForHeight, maxCellSize);
 
   const width = Math.round(pattern.canvas.width * cellSize);
   const height = Math.round(pattern.canvas.height * cellSize);
@@ -202,24 +274,26 @@ function renderPatternPreview(pattern: Pattern, maxWidth: number, maxHeight: num
     throw new Error('Failed to get canvas context');
   }
 
-  // Fill with canvas/fabric background color
-  ctx.fillStyle = '#F5F5F0';
+  // Fill with white background for clean preview, or fabric color for grid view
+  ctx.fillStyle = includeGrid ? '#F5F5F0' : '#FFFFFF';
   ctx.fillRect(0, 0, width, height);
 
-  // Add subtle fabric texture grid
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.05)';
-  ctx.lineWidth = 1;
-  for (let i = 0; i <= pattern.canvas.width; i++) {
-    ctx.beginPath();
-    ctx.moveTo(i * cellSize, 0);
-    ctx.lineTo(i * cellSize, height);
-    ctx.stroke();
-  }
-  for (let j = 0; j <= pattern.canvas.height; j++) {
-    ctx.beginPath();
-    ctx.moveTo(0, j * cellSize);
-    ctx.lineTo(width, j * cellSize);
-    ctx.stroke();
+  // Add subtle fabric texture grid (optional)
+  if (includeGrid) {
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.05)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= pattern.canvas.width; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * cellSize, 0);
+      ctx.lineTo(i * cellSize, height);
+      ctx.stroke();
+    }
+    for (let j = 0; j <= pattern.canvas.height; j++) {
+      ctx.beginPath();
+      ctx.moveTo(0, j * cellSize);
+      ctx.lineTo(width, j * cellSize);
+      ctx.stroke();
+    }
   }
 
   // Create a color lookup map
@@ -239,7 +313,14 @@ function renderPatternPreview(pattern: Pattern, maxWidth: number, maxHeight: num
       const x = stitch.x * cellSize;
       const y = stitch.y * cellSize;
 
-      drawCrossStitch(ctx, x, y, cellSize, rgb);
+      // Use flat colors for clean preview (no grid), cross-stitch effect otherwise
+      if (includeGrid) {
+        drawCrossStitch(ctx, x, y, cellSize, rgb);
+      } else {
+        // Simple solid color square
+        ctx.fillStyle = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+        ctx.fillRect(x, y, cellSize, cellSize);
+      }
     }
   }
 
@@ -319,13 +400,9 @@ export async function exportPatternToPdf(
 
     // Render and add preview image
     try {
-      // Calculate pixel dimensions for high quality (aim for ~400-600px on longest side)
-      const maxPixels = 600;
-      const scaleFactor = maxPixels / Math.max(pattern.canvas.width, pattern.canvas.height);
-      const previewPixelWidth = Math.round(pattern.canvas.width * scaleFactor);
-      const previewPixelHeight = Math.round(pattern.canvas.height * scaleFactor);
-
-      const previewDataUrl = renderPatternPreview(pattern, previewPixelWidth, previewPixelHeight);
+      // Render at exactly 1 pixel per stitch for smoothest result
+      // The PDF will scale this up smoothly without visible grid artifacts
+      const previewDataUrl = renderPatternPreviewSmooth(pattern);
 
       // Calculate image dimensions in mm for PDF (fit within available area)
       const aspectRatio = pattern.canvas.width / pattern.canvas.height;
@@ -420,7 +497,7 @@ export async function exportPatternToPdf(
       pdf.setFontSize(8);
       pdf.setTextColor(150, 150, 150);
       const date = new Date().toLocaleDateString();
-      pdf.text(`Generated on ${date} with Stitch A Lot Studio`, pageWidth / 2, pageHeight - PAGE_MARGIN, {
+      pdf.text(`Generated on ${date} with StitchALot Studio`, pageWidth / 2, pageHeight - PAGE_MARGIN, {
         align: 'center',
       });
     } catch (error) {

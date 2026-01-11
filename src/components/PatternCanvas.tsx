@@ -982,6 +982,168 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       }
     }
 
+    // Draw guide lines for selected overlay or layer
+    const selectedOverlay = selectedOverlayId ? overlayImages.find(o => o.id === selectedOverlayId) : null;
+    const hasSelection = selection?.selectionType === 'layer' || selectedOverlay;
+
+    if (hasSelection) {
+      const meshCount = pattern.canvas.meshCount;
+      const canvasWidthPx = width * cellSize;
+      const canvasHeightPx = height * cellSize;
+
+      // Get bounds of selected item (in pixels)
+      let itemLeft: number, itemTop: number, itemWidth: number, itemHeight: number;
+
+      if (selectedOverlay) {
+        itemLeft = selectedOverlay.x * cellSize;
+        itemTop = selectedOverlay.y * cellSize;
+        itemWidth = selectedOverlay.width * cellSize;
+        itemHeight = selectedOverlay.height * cellSize;
+      } else if (selection) {
+        itemLeft = selection.bounds.x * cellSize;
+        itemTop = selection.bounds.y * cellSize;
+        itemWidth = selection.bounds.width * cellSize;
+        itemHeight = selection.bounds.height * cellSize;
+      } else {
+        itemLeft = 0; itemTop = 0; itemWidth = 0; itemHeight = 0;
+      }
+
+      const itemRight = itemLeft + itemWidth;
+      const itemBottom = itemTop + itemHeight;
+      const itemCenterX = itemLeft + itemWidth / 2;
+      const itemCenterY = itemTop + itemHeight / 2;
+      const canvasCenterX = canvasWidthPx / 2;
+      const canvasCenterY = canvasHeightPx / 2;
+
+      // Check if centered (within 0.5 cells tolerance)
+      const centerTolerancePx = cellSize * 0.5;
+      const isCenteredH = Math.abs(itemCenterX - canvasCenterX) < centerTolerancePx;
+      const isCenteredV = Math.abs(itemCenterY - canvasCenterY) < centerTolerancePx;
+
+      // Format distance based on ruler unit
+      const formatDistance = (pixels: number): string => {
+        const cells = pixels / cellSize;
+        if (rulerUnit === 'squares') {
+          return `${cells.toFixed(1)}`;
+        } else if (rulerUnit === 'mm') {
+          const mm = (cells / meshCount) * 25.4;
+          return `${mm.toFixed(1)}mm`;
+        } else {
+          // inches
+          const inches = cells / meshCount;
+          return `${inches.toFixed(2)}"`;
+        }
+      };
+
+      // Guide line style
+      const guideColor = '#3b82f6'; // Blue
+      const centerColor = '#22c55e'; // Green for centered
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.font = 'bold 11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // Distance from left edge
+      if (itemLeft > 5) {
+        ctx.strokeStyle = isCenteredH ? centerColor : guideColor;
+        ctx.beginPath();
+        ctx.moveTo(0, itemCenterY);
+        ctx.lineTo(itemLeft, itemCenterY);
+        ctx.stroke();
+
+        // Label
+        const leftDist = formatDistance(itemLeft);
+        const labelX = itemLeft / 2;
+        ctx.fillStyle = '#ffffff';
+        const textWidth = ctx.measureText(leftDist).width + 6;
+        ctx.fillRect(labelX - textWidth / 2, itemCenterY - 8, textWidth, 16);
+        ctx.fillStyle = isCenteredH ? centerColor : guideColor;
+        ctx.fillText(leftDist, labelX, itemCenterY);
+      }
+
+      // Distance from right edge
+      if (canvasWidthPx - itemRight > 5) {
+        ctx.strokeStyle = isCenteredH ? centerColor : guideColor;
+        ctx.beginPath();
+        ctx.moveTo(itemRight, itemCenterY);
+        ctx.lineTo(canvasWidthPx, itemCenterY);
+        ctx.stroke();
+
+        // Label
+        const rightDist = formatDistance(canvasWidthPx - itemRight);
+        const labelX = itemRight + (canvasWidthPx - itemRight) / 2;
+        ctx.fillStyle = '#ffffff';
+        const textWidth = ctx.measureText(rightDist).width + 6;
+        ctx.fillRect(labelX - textWidth / 2, itemCenterY - 8, textWidth, 16);
+        ctx.fillStyle = isCenteredH ? centerColor : guideColor;
+        ctx.fillText(rightDist, labelX, itemCenterY);
+      }
+
+      // Distance from top edge
+      if (itemTop > 5) {
+        ctx.strokeStyle = isCenteredV ? centerColor : guideColor;
+        ctx.beginPath();
+        ctx.moveTo(itemCenterX, 0);
+        ctx.lineTo(itemCenterX, itemTop);
+        ctx.stroke();
+
+        // Label
+        const topDist = formatDistance(itemTop);
+        const labelY = itemTop / 2;
+        ctx.fillStyle = '#ffffff';
+        const textWidth = ctx.measureText(topDist).width + 6;
+        ctx.fillRect(itemCenterX - textWidth / 2, labelY - 8, textWidth, 16);
+        ctx.fillStyle = isCenteredV ? centerColor : guideColor;
+        ctx.fillText(topDist, itemCenterX, labelY);
+      }
+
+      // Distance from bottom edge
+      if (canvasHeightPx - itemBottom > 5) {
+        ctx.strokeStyle = isCenteredV ? centerColor : guideColor;
+        ctx.beginPath();
+        ctx.moveTo(itemCenterX, itemBottom);
+        ctx.lineTo(itemCenterX, canvasHeightPx);
+        ctx.stroke();
+
+        // Label
+        const bottomDist = formatDistance(canvasHeightPx - itemBottom);
+        const labelY = itemBottom + (canvasHeightPx - itemBottom) / 2;
+        ctx.fillStyle = '#ffffff';
+        const textWidth = ctx.measureText(bottomDist).width + 6;
+        ctx.fillRect(itemCenterX - textWidth / 2, labelY - 8, textWidth, 16);
+        ctx.fillStyle = isCenteredV ? centerColor : guideColor;
+        ctx.fillText(bottomDist, itemCenterX, labelY);
+      }
+
+      // Draw center indicator if centered
+      if (isCenteredH && isCenteredV) {
+        ctx.setLineDash([]);
+        ctx.strokeStyle = centerColor;
+        ctx.lineWidth = 2;
+        // Draw a small crosshair at the center
+        const crossSize = 10;
+        ctx.beginPath();
+        ctx.moveTo(itemCenterX - crossSize, itemCenterY);
+        ctx.lineTo(itemCenterX + crossSize, itemCenterY);
+        ctx.moveTo(itemCenterX, itemCenterY - crossSize);
+        ctx.lineTo(itemCenterX, itemCenterY + crossSize);
+        ctx.stroke();
+
+        // "Centered" label above the item
+        ctx.font = 'bold 12px sans-serif';
+        const centeredText = 'CENTERED';
+        const textWidth = ctx.measureText(centeredText).width + 10;
+        const labelY = itemTop - 20;
+        ctx.fillStyle = centerColor;
+        ctx.fillRect(itemCenterX - textWidth / 2, labelY - 10, textWidth, 20);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(centeredText, itemCenterX, labelY);
+      }
+
+      ctx.setLineDash([]);
+    }
+
     // Draw shape preview while dragging
     if (shapeStart && shapeEnd && selectedColorId) {
       const rgb = getColor(selectedColorId);
@@ -1008,8 +1170,18 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
           // Draw ellipse preview
           const cx = ((shapeStart.x + shapeEnd.x) / 2 + 0.5) * cellSize;
           const cy = ((shapeStart.y + shapeEnd.y) / 2 + 0.5) * cellSize;
-          const rx = (Math.abs(shapeEnd.x - shapeStart.x) + 1) * cellSize / 2;
-          const ry = (Math.abs(shapeEnd.y - shapeStart.y) + 1) * cellSize / 2;
+          const ellipseWidth = Math.abs(shapeEnd.x - shapeStart.x) + 1;
+          const ellipseHeight = Math.abs(shapeEnd.y - shapeStart.y) + 1;
+          const rx = ellipseWidth * cellSize / 2;
+          const ry = ellipseHeight * cellSize / 2;
+
+          // Check if it's a perfect circle (width equals height)
+          const isCircle = ellipseWidth === ellipseHeight;
+          if (isCircle) {
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.5)'; // Red fill
+            ctx.strokeStyle = 'rgb(239, 68, 68)'; // Red stroke
+          }
+
           ctx.beginPath();
           ctx.ellipse(cx, cy, rx, ry, 0, 0, 2 * Math.PI);
           ctx.fill();
@@ -1019,7 +1191,7 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     }
 
     ctx.restore();
-  }, [pattern, zoom, panOffset, showGrid, gridDivisions, getColor, getColorObject, getContrastColor, showSymbols, showCenterMarker, selection, shapeStart, shapeEnd, selectedColorId, activeTool, overlayImages, overlayImageElements, selectedOverlayId, isProgressMode, progressShadingColor, progressShadingOpacity]);
+  }, [pattern, zoom, panOffset, showGrid, gridDivisions, getColor, getColorObject, getContrastColor, showSymbols, showCenterMarker, selection, shapeStart, shapeEnd, selectedColorId, activeTool, overlayImages, overlayImageElements, selectedOverlayId, isProgressMode, progressShadingColor, progressShadingOpacity, rulerUnit]);
 
   // Draw horizontal ruler (top)
   const drawTopRuler = useCallback(() => {

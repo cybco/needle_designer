@@ -4,6 +4,7 @@ interface UnsavedChangesDialogProps {
   onDontSave: () => void;
   onCancel: () => void;
   fileName: string;
+  actionText?: string; // e.g., "closing", "creating a new file", "opening another file"
 }
 
 export function UnsavedChangesDialog({
@@ -12,6 +13,7 @@ export function UnsavedChangesDialog({
   onDontSave,
   onCancel,
   fileName,
+  actionText = 'closing',
 }: UnsavedChangesDialogProps) {
   if (!isOpen) return null;
 
@@ -21,7 +23,7 @@ export function UnsavedChangesDialog({
         <h2 className="text-lg font-semibold text-gray-800 mb-4">Unsaved Changes</h2>
 
         <p className="text-gray-600 mb-6">
-          Do you want to save changes to "{fileName}" before closing?
+          Do you want to save changes to "{fileName}" before {actionText}?
         </p>
 
         <p className="text-sm text-gray-500 mb-6">
@@ -30,16 +32,16 @@ export function UnsavedChangesDialog({
 
         <div className="flex justify-end gap-3">
           <button
-            onClick={onDontSave}
-            className="px-4 py-2 text-gray-700 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
-          >
-            Don't Save
-          </button>
-          <button
             onClick={onCancel}
             className="px-4 py-2 text-gray-700 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
           >
             Cancel
+          </button>
+          <button
+            onClick={onDontSave}
+            className="px-4 py-2 text-gray-700 bg-gray-100 rounded hover:bg-gray-200 transition-colors"
+          >
+            Continue
           </button>
           <button
             onClick={onSave}

@@ -32,6 +32,8 @@ pub struct NdpFile {
     pub progress_shading_color: Option<[u8; 3]>,
     #[serde(default = "default_shading_opacity")]
     pub progress_shading_opacity: Option<u32>,
+    #[serde(default)]
+    pub thumbnail: Option<String>, // Base64 PNG thumbnail for fast preview
 }
 
 fn default_zoom() -> Option<f64> {
@@ -200,6 +202,7 @@ fn create_new_project(
         is_progress_mode: Some(false),
         progress_shading_color: Some([128, 128, 128]),
         progress_shading_opacity: Some(70),
+        thumbnail: None,
     })
 }
 
@@ -829,6 +832,25 @@ fn open_project(app: tauri::AppHandle, path: String) -> Result<NdpFile, String> 
 }
 
 #[tauri::command]
+fn delete_file(path: String) -> Result<(), String> {
+    fs::remove_file(&path)
+        .map_err(|e| format!("Failed to delete file: {}", e))?;
+    Ok(())
+}
+
+/// Get just the thumbnail from a file (fast preview loading)
+#[tauri::command]
+fn get_file_thumbnail(path: String) -> Result<Option<String>, String> {
+    let contents = fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    let project: NdpFile = serde_json::from_str(&contents)
+        .map_err(|e| format!("Failed to parse file: {}", e))?;
+
+    Ok(project.thumbnail)
+}
+
+#[tauri::command]
 fn save_pdf(path: String, data: String) -> Result<(), String> {
     // Decode base64 data
     let bytes = STANDARD.decode(&data)
@@ -1330,6 +1352,8 @@ pub fn run() {
             list_ndp_files,
             save_project,
             open_project,
+            delete_file,
+            get_file_thumbnail,
             save_pdf,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             pick_screen_color,

@@ -185,7 +185,6 @@ export interface ToolVisibility {
   grid: boolean;
   preview: boolean;
   // Selection action buttons
-  selectionMove: boolean;
   selectionDuplicate: boolean;
   selectionNewLayer: boolean;
   selectionDuplicateToNewLayer: boolean;
@@ -209,9 +208,18 @@ function ToolButton({ tool, icon, label, activeTool, onClick, showLabel = false 
   // Extract short label (first word or before parenthesis)
   const shortLabel = label.split(' (')[0].split(' ')[0];
 
+  const handleClick = () => {
+    if (isActive && tool !== 'pan') {
+      // Clicking on the active tool switches to pan tool
+      onClick('pan');
+    } else {
+      onClick(tool);
+    }
+  };
+
   return (
     <button
-      onClick={() => onClick(tool)}
+      onClick={handleClick}
       className={`
         flex items-center justify-center rounded
         transition-colors
@@ -828,7 +836,6 @@ const DEFAULT_VISIBILITY: ToolVisibility = {
   zoomFit: true,
   grid: true,
   preview: true,
-  selectionMove: true,
   selectionDuplicate: true,
   selectionNewLayer: true,
   selectionDuplicateToNewLayer: true,
@@ -920,7 +927,6 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPrev
     toggleGrid,
     undo,
     redo,
-    moveSelection,
     duplicateSelection,
     selectionToNewLayer,
     duplicateSelectionToNewLayer,
@@ -933,6 +939,7 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPrev
     rotateLayerLeft,
     rotateLayerRight,
     duplicateLayerToNewLayer,
+    duplicateLayer,
     activeStitchType,
     setActiveStitchType,
   } = usePatternStore();
@@ -949,32 +956,47 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPrev
   const buttonHeight = showLabels ? 56 : 48;
   const buttonWidth = showLabels ? 56 : 48;
 
-  const calculateGridLayout = useCallback((buttonCount: number) => {
-    const availableHeight = window.innerHeight - 96;
+  const calculateGridLayout = useCallback((buttonCount: number, height: number) => {
     const gapSize = 8;
     // Each button slot takes buttonHeight + gap (except the last one)
     const slotHeight = buttonHeight + gapSize;
-    const buttonsPerColumn = Math.max(1, Math.floor((availableHeight + gapSize) / slotHeight));
+    const buttonsPerColumn = Math.max(1, Math.floor((height + gapSize) / slotHeight));
     const columns = Math.max(1, Math.ceil(buttonCount / buttonsPerColumn));
     return { columns, buttonsPerColumn };
   }, [buttonHeight]);
 
   const [columns, setColumns] = useState(1);
+  const [availableHeight, setAvailableHeight] = useState(window.innerHeight - 150);
+  const containerRef = useRef<HTMLDivElement>(null);
 
+  // Track container height using ResizeObserver
   useEffect(() => {
-    let resizeTimeout: ReturnType<typeof setTimeout>;
-    const handleResize = () => {
-      clearTimeout(resizeTimeout);
-      resizeTimeout = setTimeout(() => {
-        // This will be updated when toolButtons are calculated
-      }, 100);
+    const updateHeight = () => {
+      if (containerRef.current) {
+        // Use actual container height minus collapse button (32px) and padding (16px)
+        const containerHeight = containerRef.current.clientHeight;
+        setAvailableHeight(Math.max(100, containerHeight - 48));
+      }
     };
-    window.addEventListener('resize', handleResize);
+
+    // Use ResizeObserver for accurate size tracking
+    const resizeObserver = new ResizeObserver(() => {
+      updateHeight();
+    });
+
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+      updateHeight();
+    }
+
+    // Also listen to window resize as fallback
+    window.addEventListener('resize', updateHeight);
+
     return () => {
-      clearTimeout(resizeTimeout);
-      window.removeEventListener('resize', handleResize);
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateHeight);
     };
-  }, []);
+  }, [pattern]); // Re-run when pattern changes (container may mount/unmount)
 
   // Close popup when clicking outside
   useEffect(() => {
@@ -1006,6 +1028,13 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPrev
   // Collect all tool buttons to render in a grid
   const toolButtons: React.ReactNode[] = [];
 
+  // Pan tool at the top (default tool)
+  if (toolVisibility.pan) {
+    toolButtons.push(
+      <ToolButton key="pan" tool="pan" icon={<PanIcon />} label="Pan (Space)" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+
   // Drawing tools
   if (toolVisibility.select) {
     toolButtons.push(
@@ -1033,11 +1062,6 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPrev
   if (toolVisibility.colorswap) {
     toolButtons.push(
       <ToolButton key="colorswap" tool="colorswap" icon={<ColorSwapIcon />} label="Color Swap (C)" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
-    );
-  }
-  if (toolVisibility.pan) {
-    toolButtons.push(
-      <ToolButton key="pan" tool="pan" icon={<PanIcon />} label="Pan (Space)" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
     );
   }
   if (toolVisibility.text) {
@@ -1114,20 +1138,24 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPrev
   // Area select
   if (toolVisibility.areaselect) {
     toolButtons.push(
-      <ToolButton key="areaselect" tool="areaselect" icon={<AreaSelectIcon />} label="Area Select (S)" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+      <ToolButton key="areaselect" tool="areaselect" icon={<AreaSelectIcon />} label="Select (S)" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
     );
   }
 
   // Selection actions
   const hasSelectionEnabled = selection && selection.selectionType === 'area' && selection.selectedStitches?.length;
-  if (toolVisibility.selectionMove) {
-    toolButtons.push(
-      <ActionButton key="selmove" icon={<SelectionMoveIcon />} label="Move Selection" onClick={moveSelection} disabled={!hasSelectionEnabled} showLabel={showLabels} />
-    );
-  }
+  // Note: Move Selection button removed - area selections are now directly draggable
   if (toolVisibility.selectionDuplicate) {
+    // For layer selection, duplicate the entire layer; for area selection, duplicate selected stitches
+    const handleDuplicate = () => {
+      if (hasLayerSelection && selection?.layerId) {
+        duplicateLayer(selection.layerId);
+      } else {
+        duplicateSelection();
+      }
+    };
     toolButtons.push(
-      <ActionButton key="seldup" icon={<SelectionDuplicateIcon />} label="Duplicate Selection" onClick={duplicateSelection} disabled={!hasSelectionEnabled} showLabel={showLabels} />
+      <ActionButton key="seldup" icon={<SelectionDuplicateIcon />} label="Duplicate Selection" onClick={handleDuplicate} disabled={!hasSelectionEnabled && !hasLayerSelection} showLabel={showLabels} />
     );
   }
   if (toolVisibility.selectionNewLayer) {
@@ -1163,7 +1191,7 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPrev
 
   // Calculate columns based on button count - do this synchronously during render
   const toolButtonCount = toolButtons.length;
-  const { columns: calculatedColumns, buttonsPerColumn } = calculateGridLayout(toolButtonCount);
+  const { columns: calculatedColumns, buttonsPerColumn } = calculateGridLayout(toolButtonCount, availableHeight);
 
   // Update columns state when calculated value changes
   useEffect(() => {
@@ -1208,7 +1236,7 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPrev
   }
 
   return (
-    <div className="shrink-0 bg-white border-r border-gray-300 flex flex-col transition-all duration-200 overflow-hidden">
+    <div ref={containerRef} className="shrink-0 bg-white border-r border-gray-300 flex flex-col transition-all duration-200 overflow-hidden">
       {/* Collapse/Expand Toggle */}
       <button
         onClick={onToggleCollapse}

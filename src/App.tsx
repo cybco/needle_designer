@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { TextCursor, BookCopy, Trash2 } from 'lucide-react';
 import { PatternCanvas } from './components/PatternCanvas';
 import { ColorPalette } from './components/ColorPalette';
-import { Toolbar, ToolVisibility, EraserIcon, FillIcon, PanIcon, CursorIcon, TextIcon, ColorSwapIcon, AreaSelectIcon, PreviewCanvasIcon, SelectionMoveIcon, SelectionDuplicateIcon, SelectionNewLayerIcon, SelectionDuplicateToNewLayerIcon, FlipHorizontalIcon, FlipVerticalIcon, RotateLeftIcon, RotateRightIcon } from './components/Toolbar';
+import { Toolbar, ToolVisibility, EraserIcon, FillIcon, PanIcon, CursorIcon, TextIcon, ColorSwapIcon, AreaSelectIcon, PreviewCanvasIcon, SelectionDuplicateIcon, SelectionNewLayerIcon, SelectionDuplicateToNewLayerIcon, FlipHorizontalIcon, FlipVerticalIcon, RotateLeftIcon, RotateRightIcon } from './components/Toolbar';
 import { LayerPanel } from './components/LayerPanel';
 import { ProgressTrackingPanel } from './components/ProgressTrackingPanel';
 import { NewProjectDialog } from './components/NewProjectDialog';
@@ -24,6 +25,7 @@ import { TrialBanner } from './components/TrialBanner';
 import { usePatternStore, Pattern, RulerUnit, Stitch, TextLayerMetadata } from './stores/patternStore';
 import { useSessionHistoryStore } from './stores/sessionHistoryStore';
 import { loadBundledFonts } from './data/bundledFonts';
+import { generatePatternThumbnail } from './utils/pdfExport';
 import { invoke } from '@tauri-apps/api/core';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -97,11 +99,75 @@ interface NdpFile {
   is_progress_mode?: boolean;
   progress_shading_color?: [number, number, number];
   progress_shading_opacity?: number;
+  thumbnail?: string; // Base64 PNG thumbnail for fast preview
 }
 
 const RECENT_FILES_KEY = 'needlepoint-recent-files';
-const MAX_RECENT_FILES = 10;
+const MAX_RECENT_FILES = 50;
 const PREFERENCES_KEY = 'needlepoint-preferences';
+
+// Recent file preview component
+function RecentFilePreview({ filePath }: { filePath: string }) {
+  const [thumbnail, setThumbnail] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadPreview = async () => {
+      try {
+        // Try to get pre-generated thumbnail first (fast)
+        const thumb = await invoke<string | null>('get_file_thumbnail', { path: filePath });
+        if (!mounted) return;
+
+        if (thumb) {
+          setThumbnail(thumb);
+          setLoading(false);
+        } else {
+          // No thumbnail - show placeholder (file was saved before thumbnails were implemented)
+          setError(true);
+          setLoading(false);
+        }
+      } catch (err) {
+        if (mounted) {
+          setError(true);
+          setLoading(false);
+        }
+      }
+    };
+
+    loadPreview();
+    return () => { mounted = false; };
+  }, [filePath]);
+
+  if (error || (!loading && !thumbnail)) {
+    return (
+      <div className="w-full h-full flex items-center justify-center text-gray-400">
+        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full h-full flex items-center justify-center">
+      {loading && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="w-6 h-6 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
+        </div>
+      )}
+      {thumbnail && (
+        <img
+          src={thumbnail}
+          alt="Preview"
+          className={`max-w-full max-h-full object-contain ${loading ? 'opacity-0' : 'opacity-100'} transition-opacity`}
+        />
+      )}
+    </div>
+  );
+}
 
 // Tool visibility row component for the dialog
 function ToolVisibilityRow({ checked, onChange, icon, label }: { checked: boolean; onChange: (checked: boolean) => void; icon: React.ReactNode; label: string }) {
@@ -155,7 +221,6 @@ const DEFAULT_TOOL_VISIBILITY: ToolVisibility = {
   zoomFit: true,
   grid: true,
   preview: true,
-  selectionMove: true,
   selectionDuplicate: true,
   selectionNewLayer: true,
   selectionDuplicateToNewLayer: true,
@@ -179,6 +244,9 @@ const DEFAULT_PREFERENCES: Preferences = {
 function App() {
   const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [renameDialog, setRenameDialog] = useState<{ filePath: string; currentName: string } | null>(null);
+  const [renameInputValue, setRenameInputValue] = useState('');
+  const [deleteDialog, setDeleteDialog] = useState<{ filePath: string; fileName: string } | null>(null);
   const [showFileMenu, setShowFileMenu] = useState(false);
   const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [showPreferencesMenu, setShowPreferencesMenu] = useState(false);
@@ -187,7 +255,17 @@ function App() {
   const [recentFiles, setRecentFiles] = useState<string[]>(() => {
     try {
       const stored = localStorage.getItem(RECENT_FILES_KEY);
-      return stored ? JSON.parse(stored) : [];
+      if (stored) {
+        // Filter out any old .ndp files - only .stitchalot is supported
+        const files = JSON.parse(stored) as string[];
+        const filtered = files.filter((f: string) => f.toLowerCase().endsWith('.stitchalot'));
+        // Update localStorage if we filtered anything out
+        if (filtered.length !== files.length) {
+          localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(filtered));
+        }
+        return filtered;
+      }
+      return [];
     } catch {
       return [];
     }
@@ -261,6 +339,8 @@ function App() {
 
   // Unsaved changes dialog state
   const [showUnsavedChangesDialog, setShowUnsavedChangesDialog] = useState(false);
+  const [unsavedChangesAction, setUnsavedChangesAction] = useState<'exit' | 'new' | 'open' | 'openRecent' | 'home'>('exit');
+  const [pendingOpenFilePath, setPendingOpenFilePath] = useState<string | null>(null);
 
   // Preview canvas dialog state
   const [showPreviewDialog, setShowPreviewDialog] = useState(false);
@@ -283,6 +363,7 @@ function App() {
     setZoom,
     setPanOffset,
     loadPattern,
+    closePattern,
     setCurrentFilePath,
     markSaved,
     undo,
@@ -298,6 +379,8 @@ function App() {
     commitFloatingSelection,
     selectLayerForTransform,
     setOverlayImages,
+    selectedOverlayId,
+    removeOverlayImage,
     isProgressMode,
     toggleProgressMode,
     setProgressMode,
@@ -358,6 +441,7 @@ function App() {
             // Prevent the window from closing
             event.preventDefault();
             // Show our custom dialog
+            setUnsavedChangesAction('exit');
             setShowUnsavedChangesDialog(true);
           } else {
             // No unsaved changes or no pattern - exit immediately
@@ -425,6 +509,18 @@ function App() {
 
   // Helper to show new project dialog after refreshing file list
   const showNewProject = useCallback(async () => {
+    // Check for unsaved changes
+    if (pattern && hasUnsavedChanges) {
+      setUnsavedChangesAction('new');
+      setShowUnsavedChangesDialog(true);
+      return;
+    }
+    await refreshExistingFiles();
+    setShowNewProjectDialog(true);
+  }, [refreshExistingFiles, pattern, hasUnsavedChanges]);
+
+  // Actually proceed with new project (called after save or continue)
+  const proceedWithNewProject = useCallback(async () => {
     await refreshExistingFiles();
     setShowNewProjectDialog(true);
   }, [refreshExistingFiles]);
@@ -437,8 +533,15 @@ function App() {
         return;
       }
 
-      // Handle Delete key for area selection or layer
+      // Handle Delete key for overlay, area selection, or layer
       if (e.key === 'Delete' || e.key === 'Backspace') {
+        // If an overlay image is selected, delete it
+        if (selectedOverlayId) {
+          e.preventDefault();
+          removeOverlayImage(selectedOverlayId);
+          return;
+        }
+
         // If there's an area selection with selected stitches, delete those
         if (selection?.selectionType === 'area' && selection.selectedStitches?.length) {
           e.preventDefault();
@@ -577,7 +680,7 @@ function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [zoom, activeTool, pattern, selection, activeLayerId, preferences.confirmLayerDelete, setTool, setZoom, removeLayer, clearSelection, deleteSelection, commitFloatingSelection, showNewProject]);
+  }, [zoom, activeTool, pattern, selection, activeLayerId, preferences.confirmLayerDelete, setTool, setZoom, removeLayer, clearSelection, deleteSelection, commitFloatingSelection, showNewProject, selectedOverlayId, removeOverlayImage]);
 
   // Add file to recent files list
   const addToRecentFiles = useCallback((filePath: string) => {
@@ -593,6 +696,16 @@ function App() {
   // Convert pattern to NDP file format
   const patternToNdp = useCallback((p: Pattern): NdpFile => {
     const now = new Date().toISOString();
+
+    // Generate thumbnail for fast preview on home screen
+    let thumbnail: string | undefined;
+    try {
+      thumbnail = generatePatternThumbnail(p);
+    } catch (error) {
+      console.warn('Failed to generate thumbnail:', error);
+      // Continue without thumbnail - file will still save correctly
+    }
+
     return {
       version: '1.0',
       metadata: {
@@ -601,7 +714,7 @@ function App() {
         author: null,
         created_at: now,
         modified_at: now,
-        software: 'Stitch A Lot Studio v1.0',
+        software: 'StitchALot Studio v1.0',
       },
       canvas: {
         width: p.canvas.width,
@@ -657,6 +770,7 @@ function App() {
       is_progress_mode: isProgressMode,
       progress_shading_color: progressShadingColor,
       progress_shading_opacity: progressShadingOpacity,
+      thumbnail,
     };
   }, [overlayImages, zoom, isProgressMode, progressShadingColor, progressShadingOpacity]);
 
@@ -705,6 +819,19 @@ function App() {
 
   // Open a specific file path (for recent files)
   const openFilePath = useCallback(async (filePath: string) => {
+    // Check for unsaved changes
+    if (pattern && hasUnsavedChanges) {
+      setPendingOpenFilePath(filePath);
+      setUnsavedChangesAction('openRecent');
+      setShowUnsavedChangesDialog(true);
+      return;
+    }
+
+    await doOpenFilePath(filePath);
+  }, [pattern, hasUnsavedChanges]);
+
+  // Actually open a file path (called directly or after save/continue)
+  const doOpenFilePath = useCallback(async (filePath: string) => {
     try {
       const ndpFile = await invoke<NdpFile>('open_project', { path: filePath });
       const loadedPattern = ndpToPattern(ndpFile);
@@ -780,7 +907,7 @@ function App() {
       // If no current file path, show save dialog
       if (!filePath) {
         const result = await save({
-          filters: [{ name: 'Stitch A Lot Design', extensions: ['stitchalot'] }],
+          filters: [{ name: 'StitchALot Design', extensions: ['stitchalot'] }],
           defaultPath: `${pattern.name}.stitchalot`,
         });
 
@@ -807,7 +934,7 @@ function App() {
 
     try {
       const result = await save({
-        filters: [{ name: 'Stitch A Lot Design', extensions: ['stitchalot'] }],
+        filters: [{ name: 'StitchALot Design', extensions: ['stitchalot'] }],
         defaultPath: `${pattern.name}.stitchalot`,
       });
 
@@ -836,11 +963,50 @@ function App() {
     }
   }, [pattern, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles, regenerateFileId, currentSessionId, endSession]);
 
+  // Close project (go home)
+  const handleClose = useCallback(async () => {
+    if (!pattern) return;
+
+    if (hasUnsavedChanges) {
+      setUnsavedChangesAction('home');
+      setShowUnsavedChangesDialog(true);
+      return;
+    }
+
+    // End current session if active
+    if (currentSessionId) {
+      endSession(currentSessionId, 0, 0, 0);
+    }
+
+    closePattern();
+  }, [pattern, hasUnsavedChanges, currentSessionId, endSession, closePattern]);
+
+  // Actually close pattern (called directly or after save/continue)
+  const doClosePattern = useCallback(() => {
+    // End current session if active
+    if (currentSessionId) {
+      endSession(currentSessionId, 0, 0, 0);
+    }
+    closePattern();
+  }, [currentSessionId, endSession, closePattern]);
+
   // Open project
   const handleOpen = useCallback(async () => {
+    // Check for unsaved changes
+    if (pattern && hasUnsavedChanges) {
+      setUnsavedChangesAction('open');
+      setShowUnsavedChangesDialog(true);
+      return;
+    }
+
+    await doHandleOpen();
+  }, [pattern, hasUnsavedChanges]);
+
+  // Actually open a file via dialog (called directly or after save/continue)
+  const doHandleOpen = useCallback(async () => {
     try {
       const result = await open({
-        filters: [{ name: 'Stitch A Lot Design', extensions: ['stitchalot'] }],
+        filters: [{ name: 'StitchALot Design', extensions: ['stitchalot'] }],
         multiple: false,
       });
 
@@ -930,32 +1096,74 @@ function App() {
   const handleUnsavedSave = useCallback(async () => {
     setShowUnsavedChangesDialog(false);
     await handleSave();
-    // After saving, exit the application
-    try {
-      await exit(0);
-    } catch (error) {
-      console.error('Failed to exit:', error);
+
+    // Proceed with the pending action after saving
+    switch (unsavedChangesAction) {
+      case 'exit':
+        try {
+          await exit(0);
+        } catch (error) {
+          console.error('Failed to exit:', error);
+        }
+        break;
+      case 'new':
+        await proceedWithNewProject();
+        break;
+      case 'open':
+        await doHandleOpen();
+        break;
+      case 'openRecent':
+        if (pendingOpenFilePath) {
+          await doOpenFilePath(pendingOpenFilePath);
+          setPendingOpenFilePath(null);
+        }
+        break;
+      case 'home':
+        doClosePattern();
+        break;
     }
-  }, [handleSave]);
+  }, [handleSave, unsavedChangesAction, proceedWithNewProject, doHandleOpen, doOpenFilePath, pendingOpenFilePath, doClosePattern]);
 
   const handleUnsavedDontSave = useCallback(async () => {
     setShowUnsavedChangesDialog(false);
-    // Exit without saving
-    try {
-      await exit(0);
-    } catch (error) {
-      console.error('Failed to exit:', error);
+
+    // Proceed with the pending action without saving
+    switch (unsavedChangesAction) {
+      case 'exit':
+        try {
+          await exit(0);
+        } catch (error) {
+          console.error('Failed to exit:', error);
+        }
+        break;
+      case 'new':
+        await proceedWithNewProject();
+        break;
+      case 'open':
+        await doHandleOpen();
+        break;
+      case 'openRecent':
+        if (pendingOpenFilePath) {
+          await doOpenFilePath(pendingOpenFilePath);
+          setPendingOpenFilePath(null);
+        }
+        break;
+      case 'home':
+        doClosePattern();
+        break;
     }
-  }, []);
+  }, [unsavedChangesAction, proceedWithNewProject, doHandleOpen, doOpenFilePath, pendingOpenFilePath, doClosePattern]);
 
   const handleUnsavedCancel = useCallback(() => {
     setShowUnsavedChangesDialog(false);
+    setPendingOpenFilePath(null);
   }, []);
 
   // Handle File > Exit menu action
   const handleExit = useCallback(async () => {
     const state = usePatternStore.getState();
     if (state.hasUnsavedChanges) {
+      setUnsavedChangesAction('exit');
       setShowUnsavedChangesDialog(true);
     } else {
       try {
@@ -1171,6 +1379,11 @@ function App() {
         e.preventDefault();
         handleOpen();
       }
+      // Close: Ctrl+W
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') {
+        e.preventDefault();
+        handleClose();
+      }
       // Undo: Ctrl+Z
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
         e.preventDefault();
@@ -1185,7 +1398,7 @@ function App() {
 
     window.addEventListener('keydown', handleSaveShortcut);
     return () => window.removeEventListener('keydown', handleSaveShortcut);
-  }, [handleSave, handleSaveAs, handleOpen, undo, redo]);
+  }, [handleSave, handleSaveAs, handleOpen, handleClose, undo, redo]);
 
   return (
     <LicenseGate>
@@ -1204,7 +1417,10 @@ function App() {
         }}
       >
         <div className="flex items-center gap-6">
-          <h1 className="text-lg font-semibold">Stitch A Lot Studio</h1>
+          <div className="flex items-center gap-2">
+            <img src="/app-icon.svg" alt="Logo" className="w-6 h-6" />
+            <h1 className="text-lg font-semibold">StitchALot Studio</h1>
+          </div>
           <nav className="flex gap-4 text-sm relative z-50">
             {/* Global backdrop to close menus when clicking outside */}
             {(showFileMenu || showToolsMenu || showPreferencesMenu) && (
@@ -1224,6 +1440,14 @@ function App() {
               </button>
               {showFileMenu && (
                 <div className="absolute top-full left-0 mt-1 bg-gray-700 rounded shadow-lg py-1 min-w-40 z-50">
+                  <button
+                    onClick={() => { handleClose(); setShowFileMenu(false); }}
+                    disabled={!pattern}
+                    className={`w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors ${!pattern ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    Home <span className="text-gray-400 text-xs float-right">Ctrl+W</span>
+                  </button>
+                  <div className="border-t border-gray-600 my-1" />
                   <button
                     onClick={() => { showNewProject(); setShowFileMenu(false); }}
                     className="w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors"
@@ -1276,6 +1500,7 @@ function App() {
                       </div>
                     )}
                   </div>
+                  <div className="border-t border-gray-600 my-1" />
                   <button
                     onClick={() => { handleSave(); setShowFileMenu(false); }}
                     disabled={!pattern}
@@ -1613,51 +1838,149 @@ function App() {
           </>
         ) : (
           /* Welcome Screen */
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center max-w-lg">
-              <h2 className="text-3xl font-bold text-gray-800 mb-4">
-                Welcome to Stitch A Lot Studio
-              </h2>
-              <p className="text-gray-600 mb-8">
-                Create beautiful needlepoint and cross-stitch patterns
-              </p>
-
-              <button
-                onClick={() => showNewProject()}
-                className="px-8 py-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-lg font-medium"
-              >
-                Create New Pattern
-              </button>
-
-              <div className="mt-6 text-sm text-gray-500">
-                <p>Press Ctrl+N to create a new pattern</p>
+          <div className="flex-1 flex flex-col bg-white min-h-0 overflow-hidden">
+            {/* Header Section */}
+            <div className="flex items-center justify-between px-8 py-6 border-b border-gray-100">
+              <div className="flex items-center gap-4">
+                <img src="/app-icon.svg" alt="StitchALot Studio" className="w-14 h-14" />
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-800">
+                    Welcome to StitchALot Studio
+                  </h2>
+                  <p className="text-gray-500 text-sm">
+                    Create beautiful needlepoint and cross-stitch patterns
+                  </p>
+                </div>
               </div>
+              <div className="text-right">
+                <button
+                  onClick={() => showNewProject()}
+                  className="px-6 py-3 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-colors font-medium"
+                >
+                  Create New Pattern
+                </button>
+                <p className="text-xs text-gray-400 mt-2">Press Ctrl+N to create a new pattern</p>
+              </div>
+            </div>
 
-              {/* Recent Files */}
-              {recentFiles.length > 0 && (
-                <div className="mt-8 text-left">
-                  <h3 className="text-sm font-semibold text-gray-700 mb-3">Recent Files</h3>
-                  <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
-                    {recentFiles.slice(0, 10).map((filePath, index) => (
+            {/* Recent Files Grid */}
+            <div className="flex-1 overflow-auto p-6">
+              {recentFiles.length > 0 ? (
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 gap-4">
+                  {recentFiles.map((filePath) => (
+                    <div key={filePath} className="group flex flex-col items-center">
                       <button
-                        key={index}
                         onClick={() => openFilePath(filePath)}
-                        className="w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors flex items-center gap-3"
+                        className="w-full aspect-square bg-white rounded-lg border border-gray-200 hover:border-blue-400 hover:shadow-md transition-all flex items-center justify-center p-2 mb-2"
                       >
-                        <svg className="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-gray-800 truncate">
-                            {decodeURIComponent(filePath.split(/[/\\]/).pop() || '')}
-                          </p>
-                          <p className="text-xs text-gray-500 truncate">
-                            {decodeURIComponent(filePath)}
-                          </p>
-                        </div>
+                        <RecentFilePreview filePath={filePath} />
                       </button>
-                    ))}
-                  </div>
+                      <p className="text-xs text-gray-600 text-center truncate w-full group-hover:text-blue-600">
+                        {decodeURIComponent(filePath.split(/[/\\]/).pop()?.replace('.stitchalot', '') || '')}
+                      </p>
+                      <div className="flex gap-1 mt-2">
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            try {
+                              // Refresh file list first to get current state
+                              const currentFiles = await invoke<string[]>('list_ndp_files');
+                              // Load the file
+                              const ndpFile = await invoke<NdpFile>('open_project', { path: filePath });
+                              // Get directory and original filename from path
+                              const pathParts = filePath.split(/[/\\]/);
+                              const fileName = pathParts.pop() || '';
+                              const directory = pathParts.join('/');
+                              // Use actual filename (without extension) as the base for duplicates
+                              const originalName = decodeURIComponent(fileName.replace(/\.stitchalot$/i, ''));
+                              // Check if name already ends with a number
+                              const numberMatch = originalName.match(/^(.+?)\s+(\d+)$/);
+                              let baseName: string;
+                              let nextNum: number;
+                              if (numberMatch) {
+                                baseName = numberMatch[1];
+                                nextNum = parseInt(numberMatch[2], 10) + 1;
+                              } else {
+                                baseName = originalName;
+                                nextNum = 2;
+                              }
+                              // Find next available number (check both file system and recent files)
+                              const allKnownFiles = [...currentFiles, ...recentFiles];
+                              let newName = `${baseName} ${nextNum}`;
+                              // Check if file exists (normalize path separators for comparison)
+                              const fileExists = (name: string) => {
+                                const targetName = name.toLowerCase();
+                                return allKnownFiles.some(f => {
+                                  const fileName = f.split(/[/\\]/).pop()?.replace('.stitchalot', '').toLowerCase();
+                                  return fileName === targetName;
+                                });
+                              };
+                              while (fileExists(newName)) {
+                                nextNum++;
+                                newName = `${baseName} ${nextNum}`;
+                              }
+                              const newPath = `${directory}/${newName}.stitchalot`;
+                              ndpFile.metadata.name = newName;
+                              // Generate new file ID for the duplicate
+                              ndpFile.metadata.file_id = `file-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+                              // Generate/regenerate thumbnail for the duplicate
+                              try {
+                                const tempPattern = ndpToPattern(ndpFile);
+                                ndpFile.thumbnail = generatePatternThumbnail(tempPattern);
+                              } catch (thumbError) {
+                                console.warn('Failed to generate thumbnail for duplicate:', thumbError);
+                              }
+                              // Save the duplicate
+                              const savedPath = await invoke<string>('save_project', { path: newPath, project: ndpFile });
+                              // Add duplicate at top (sorted by date - newest first)
+                              setRecentFiles((prev) => {
+                                const updated = [savedPath, ...prev];
+                                const limited = updated.slice(0, MAX_RECENT_FILES);
+                                localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(limited));
+                                return limited;
+                              });
+                              // Refresh file list
+                              refreshExistingFiles();
+                            } catch (error) {
+                              console.error('Failed to duplicate:', error);
+                              alert(`Failed to duplicate file: ${error}`);
+                            }
+                          }}
+                          className="text-gray-400 hover:text-blue-600 p-1.5 hover:bg-blue-50 rounded transition-colors"
+                          title="Duplicate file"
+                        >
+                          <BookCopy size={16} />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const currentFileName = decodeURIComponent(filePath.split(/[/\\]/).pop()?.replace('.stitchalot', '') || '');
+                            setRenameInputValue(currentFileName);
+                            setRenameDialog({ filePath, currentName: currentFileName });
+                          }}
+                          className="text-gray-400 hover:text-blue-600 p-1.5 hover:bg-blue-50 rounded transition-colors"
+                          title="Rename file"
+                        >
+                          <TextCursor size={16} />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const fileName = decodeURIComponent(filePath.split(/[/\\]/).pop() || '');
+                            setDeleteDialog({ filePath, fileName });
+                          }}
+                          className="text-gray-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded transition-colors"
+                          title="Delete file"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex-1 flex items-center justify-center text-gray-400">
+                  <p>No recent files. Create a new pattern to get started.</p>
                 </div>
               )}
             </div>
@@ -1801,6 +2124,7 @@ function App() {
           isOpen={showExportPdfDialog}
           onClose={() => setShowExportPdfDialog(false)}
           pattern={pattern}
+          currentFilePath={currentFilePath}
         />
       )}
 
@@ -1811,6 +2135,13 @@ function App() {
         onDontSave={handleUnsavedDontSave}
         onCancel={handleUnsavedCancel}
         fileName={currentFilePath ? decodeURIComponent(currentFilePath.split(/[/\\]/).pop() || '') : pattern?.name || 'Untitled'}
+        actionText={
+          unsavedChangesAction === 'new' ? 'creating a new file' :
+          unsavedChangesAction === 'open' ? 'opening another file' :
+          unsavedChangesAction === 'openRecent' ? 'opening another file' :
+          unsavedChangesAction === 'home' ? 'returning home' :
+          'closing'
+        }
       />
 
       {/* Color Match Dialog */}
@@ -1818,6 +2149,126 @@ function App() {
         isOpen={showColorMatchDialog}
         onClose={() => setShowColorMatchDialog(false)}
       />
+
+      {/* Rename File Dialog */}
+      {renameDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-96">
+            <h2 className="text-lg font-semibold text-gray-800 mb-4">Rename File</h2>
+            <input
+              type="text"
+              value={renameInputValue}
+              onChange={(e) => setRenameInputValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  document.getElementById('rename-ok-btn')?.click();
+                } else if (e.key === 'Escape') {
+                  setRenameDialog(null);
+                }
+              }}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              autoFocus
+            />
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setRenameDialog(null)}
+                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                id="rename-ok-btn"
+                onClick={async () => {
+                  const newName = renameInputValue.trim();
+                  if (!newName || newName === renameDialog.currentName) {
+                    setRenameDialog(null);
+                    return;
+                  }
+                  try {
+                    const filePath = renameDialog.filePath;
+                    // Load the file
+                    const ndpFile = await invoke<NdpFile>('open_project', { path: filePath });
+                    // Update the name in metadata
+                    ndpFile.metadata.name = newName;
+                    // Get directory from original path
+                    const pathParts = filePath.split(/[/\\]/);
+                    pathParts.pop();
+                    const directory = pathParts.join('/');
+                    const newPath = `${directory}/${newName}.stitchalot`;
+                    // Save with new name
+                    const savedPath = await invoke<string>('save_project', { path: newPath, project: ndpFile });
+                    // Delete old file
+                    await invoke('delete_file', { path: filePath });
+                    // Update recent files
+                    setRecentFiles((prev) => {
+                      const updated = prev.map((f) => f === filePath ? savedPath : f);
+                      localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(updated));
+                      return updated;
+                    });
+                    refreshExistingFiles();
+                    setRenameDialog(null);
+                  } catch (error) {
+                    console.error('Failed to rename:', error);
+                    alert(`Failed to rename file: ${error}`);
+                  }
+                }}
+                className="px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete File Dialog */}
+      {deleteDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-96">
+            <h2 className="text-lg font-semibold text-gray-800 mb-4">Delete File</h2>
+            <p className="text-gray-600 mb-2">
+              Are you sure you want to delete this file?
+            </p>
+            <p className="text-gray-800 font-medium mb-2 break-all">
+              {deleteDialog.fileName}
+            </p>
+            <p className="text-red-600 text-sm">
+              This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setDeleteDialog(null)}
+                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+                autoFocus
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    await invoke('delete_file', { path: deleteDialog.filePath });
+                    // Remove from recent files
+                    setRecentFiles((prev) => {
+                      const updated = prev.filter((f) => f !== deleteDialog.filePath);
+                      localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(updated));
+                      return updated;
+                    });
+                    refreshExistingFiles();
+                    setDeleteDialog(null);
+                  } catch (error) {
+                    console.error('Failed to delete:', error);
+                    alert(`Failed to delete file: ${error}`);
+                  }
+                }}
+                className="px-4 py-2 text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Symbol Assignment Dialog */}
       <SymbolAssignmentDialog
@@ -1916,14 +2367,13 @@ function App() {
                   <div className="space-y-2">
                     <ToolVisibilityRow checked={preferences.toolVisibility.grid} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, grid: checked } })} icon={<span className="text-lg">#</span>} label="Grid Toggle" />
                     <ToolVisibilityRow checked={preferences.toolVisibility.preview} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, preview: checked } })} icon={<PreviewCanvasIcon className="w-5 h-5" />} label="Preview Canvas" />
-                    <ToolVisibilityRow checked={preferences.toolVisibility.areaselect} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, areaselect: checked } })} icon={<AreaSelectIcon className="w-5 h-5" />} label="Area Select (S)" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.areaselect} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, areaselect: checked } })} icon={<AreaSelectIcon className="w-5 h-5" />} label="Select (S)" />
                   </div>
                 </div>
 
                 <div>
                   <h3 className="text-sm font-medium text-gray-700 mb-2">Selection Actions</h3>
                   <div className="space-y-2">
-                    <ToolVisibilityRow checked={preferences.toolVisibility.selectionMove} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, selectionMove: checked } })} icon={<SelectionMoveIcon className="w-5 h-5" />} label="Move Selection" />
                     <ToolVisibilityRow checked={preferences.toolVisibility.selectionDuplicate} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, selectionDuplicate: checked } })} icon={<SelectionDuplicateIcon className="w-5 h-5" />} label="Duplicate Selection" />
                     <ToolVisibilityRow checked={preferences.toolVisibility.selectionNewLayer} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, selectionNewLayer: checked } })} icon={<SelectionNewLayerIcon className="w-5 h-5" />} label="Move to New Layer" />
                     <ToolVisibilityRow checked={preferences.toolVisibility.selectionDuplicateToNewLayer} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, selectionDuplicateToNewLayer: checked } })} icon={<SelectionDuplicateToNewLayerIcon className="w-5 h-5" />} label="Duplicate to New Layer" />

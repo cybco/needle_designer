@@ -241,6 +241,7 @@ interface PatternState {
   setMaxHistorySize: (size: number) => void;
 
   // Pattern actions
+  closePattern: () => void;
   createNewPattern: (name: string, width: number, height: number, meshCount: number) => void;
   importPattern: (name: string, width: number, height: number, meshCount: number, colors: Color[], stitches: Stitch[]) => void;
   loadPattern: (pattern: Pattern, filePath: string) => void;
@@ -546,7 +547,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
   future: [],
   maxHistorySize: 50,
   selectedColorId: null,
-  activeTool: 'select',
+  activeTool: 'pan',
   activeStitchType: 'square' as StitchType,
   activeCirclePosition: 'center' as CirclePosition,
   zoom: 1,
@@ -610,6 +611,25 @@ export const usePatternStore = create<PatternState>((set, get) => {
   },
 
   // Actions
+  closePattern: () => {
+    set({
+      pattern: null,
+      currentFilePath: null,
+      hasUnsavedChanges: false,
+      history: [],
+      future: [],
+      selectedColorId: null,
+      activeLayerId: null,
+      activeTool: 'pan',
+      selection: null,
+      overlayImages: [],
+      selectedOverlayId: null,
+      zoom: 1,
+      panOffset: { x: 0, y: 0 },
+      isProgressMode: false,
+    });
+  },
+
   createNewPattern: (name, width, height, meshCount) => {
     const layerId = 'layer-1';
     set({
@@ -660,6 +680,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
       },
       selectedColorId: colorsWithSymbols.find(c => c.name === 'Black')?.id ?? (colorsWithSymbols.length > 0 ? colorsWithSymbols[0].id : null),
       activeLayerId: layerId,
+      activeTool: 'pan',
       selection: null,
       zoom: 1,
       panOffset: { x: 0, y: 0 },
@@ -667,6 +688,8 @@ export const usePatternStore = create<PatternState>((set, get) => {
       hasUnsavedChanges: true,
       history: [], // Clear history for imported pattern
       future: [],
+      overlayImages: [], // Clear overlays for imported pattern
+      selectedOverlayId: null,
     });
   },
 
@@ -684,6 +707,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
       pattern: patternWithSymbols,
       selectedColorId: colorsWithSymbols.find(c => c.name === 'Black')?.id ?? (colorsWithSymbols.length > 0 ? colorsWithSymbols[0].id : null),
       activeLayerId: firstLayerId,
+      activeTool: 'pan',
       selection: null,
       zoom: 1,
       panOffset: { x: 0, y: 0 },
@@ -691,6 +715,8 @@ export const usePatternStore = create<PatternState>((set, get) => {
       hasUnsavedChanges: false,
       history: [], // Clear history for loaded pattern
       future: [],
+      overlayImages: [], // Clear overlays for loaded pattern
+      selectedOverlayId: null,
     });
   },
 
@@ -2379,14 +2405,26 @@ export const usePatternStore = create<PatternState>((set, get) => {
 
   duplicateSelection: () => {
     const { selection } = get();
-    if (selection?.selectionType !== 'area' || !selection.selectedStitches?.length) return;
+    if (selection?.selectionType !== 'area') return;
 
-    // Create floating selection with the same stitches
+    // Work with either selectedStitches or floatingStitches
+    const stitchesToDuplicate = selection.selectedStitches || selection.floatingStitches;
+    if (!stitchesToDuplicate?.length) return;
+
+    // Create a copy of the stitches
+    const duplicatedStitches = stitchesToDuplicate.map(s => ({ ...s }));
+
+    // Recalculate bounds from the actual stitch positions
+    const newBounds = calculateLayerBounds(duplicatedStitches);
+    if (!newBounds) return;
+
+    // Create floating selection with a copy of the stitches
     // User can then drag to reposition before committing
     set({
       selection: {
         ...selection,
-        floatingStitches: selection.selectedStitches.map(s => ({ ...s })),
+        bounds: newBounds,
+        floatingStitches: duplicatedStitches,
         selectedStitches: undefined,
         isSelectingArea: false,
       },
@@ -2425,7 +2463,15 @@ export const usePatternStore = create<PatternState>((set, get) => {
 
   deleteSelection: () => {
     const { pattern, selection } = get();
-    if (!pattern || selection?.selectionType !== 'area' || !selection.selectedStitches?.length) return;
+    if (!pattern || selection?.selectionType !== 'area') return;
+
+    // For floating selections, just clear the selection (stitches already removed from layers)
+    if (selection.floatingStitches?.length) {
+      set({ selection: null });
+      return;
+    }
+
+    if (!selection.selectedStitches?.length) return;
 
     pushToHistory();
 
@@ -2449,7 +2495,25 @@ export const usePatternStore = create<PatternState>((set, get) => {
 
   selectionToNewLayer: () => {
     const { pattern, selection } = get();
-    if (!pattern || selection?.selectionType !== 'area' || !selection.selectedStitches?.length) return;
+    if (!pattern || selection?.selectionType !== 'area') return;
+
+    // For floating selections, just mark for new layer commit (stitches already removed from layers)
+    if (selection.floatingStitches?.length) {
+      // Recalculate bounds from the actual stitch positions
+      const newBounds = calculateLayerBounds(selection.floatingStitches);
+      if (!newBounds) return;
+
+      set({
+        selection: {
+          ...selection,
+          bounds: newBounds,
+          commitToNewLayer: true,
+        },
+      });
+      return;
+    }
+
+    if (!selection.selectedStitches?.length) return;
 
     pushToHistory();
 
@@ -2480,14 +2544,26 @@ export const usePatternStore = create<PatternState>((set, get) => {
 
   duplicateSelectionToNewLayer: () => {
     const { selection } = get();
-    if (selection?.selectionType !== 'area' || !selection.selectedStitches?.length) return;
+    if (selection?.selectionType !== 'area') return;
+
+    // Work with either selectedStitches or floatingStitches
+    const stitchesToDuplicate = selection.selectedStitches || selection.floatingStitches;
+    if (!stitchesToDuplicate?.length) return;
+
+    // Create a copy of the stitches
+    const duplicatedStitches = stitchesToDuplicate.map(s => ({ ...s }));
+
+    // Recalculate bounds from the actual stitch positions
+    const newBounds = calculateLayerBounds(duplicatedStitches);
+    if (!newBounds) return;
 
     // Create floating selection with a copy of the stitches, marked for new layer commit
     // Unlike selectionToNewLayer, this does NOT remove the original stitches
     set({
       selection: {
         ...selection,
-        floatingStitches: selection.selectedStitches.map(s => ({ ...s })),
+        bounds: newBounds,
+        floatingStitches: duplicatedStitches,
         selectedStitches: undefined,
         isSelectingArea: false,
         commitToNewLayer: true,
