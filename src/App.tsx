@@ -132,6 +132,7 @@ interface Preferences {
   confirmLayerDelete: boolean; // Show confirmation when deleting layers
   showSymbols: boolean; // Show symbols on color swatches
   showCenterMarker: boolean; // Show green X at canvas center
+  showToolbarLabels: boolean; // Show text labels below toolbar icons
   toolVisibility: ToolVisibility;
 }
 
@@ -171,6 +172,7 @@ const DEFAULT_PREFERENCES: Preferences = {
   confirmLayerDelete: true,
   showSymbols: true,
   showCenterMarker: true,
+  showToolbarLabels: false,
   toolVisibility: DEFAULT_TOOL_VISIBILITY,
 };
 
@@ -1471,6 +1473,13 @@ function App() {
                         label="Show Center Marker"
                       />
                     </div>
+                    <div className="px-4 py-3 border-t border-gray-600">
+                      <ToggleSwitch
+                        checked={preferences.showToolbarLabels}
+                        onChange={(checked) => updatePreferences({ showToolbarLabels: checked })}
+                        label="Show Toolbar Labels"
+                      />
+                    </div>
                     {/* Toolbar Visibility - opens modal */}
                     <button
                       className="w-full px-4 py-2 text-left hover:bg-gray-600 border-t border-gray-600 flex items-center justify-between"
@@ -1560,6 +1569,7 @@ function App() {
                 onMoveToCenter={handleMoveToCenter}
                 onPreviewClick={() => setShowPreviewDialog(true)}
                 toolVisibility={preferences.toolVisibility}
+                showLabels={preferences.showToolbarLabels}
                 collapsed={isLeftPanelCollapsed}
                 onToggleCollapse={() => setIsLeftPanelCollapsed(!isLeftPanelCollapsed)}
               />

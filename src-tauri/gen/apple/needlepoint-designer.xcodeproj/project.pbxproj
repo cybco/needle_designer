@@ -424,7 +424,7 @@
 					"$(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.needlepoint.designer;
-				PRODUCT_NAME = "NeedlePoint Designer";
+				PRODUCT_NAME = "Stitch A Lot Studio";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;
@@ -464,7 +464,7 @@
 					"$(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.needlepoint.designer;
-				PRODUCT_NAME = "NeedlePoint Designer";
+				PRODUCT_NAME = "Stitch A Lot Studio";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;

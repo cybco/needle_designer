@@ -27,13 +27,20 @@ pub fn get_device_id() -> Result<String, Box<dyn Error + Send + Sync>> {
 /// Windows device ID using machine GUID from registry
 #[cfg(target_os = "windows")]
 fn get_windows_device_id() -> Result<String, Box<dyn Error + Send + Sync>> {
-    use machineid_rs::{Encryption, HWIDComponent, IdBuilder};
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        use machineid_rs::{Encryption, HWIDComponent, IdBuilder};
 
-    let id = IdBuilder::new(Encryption::SHA256)
-        .add_component(HWIDComponent::SystemID)
-        .build("needlepoint")?;
+        let id = IdBuilder::new(Encryption::SHA256)
+            .add_component(HWIDComponent::SystemID)
+            .build("needlepoint")?;
 
-    Ok(id)
+        Ok(id)
+    }
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        Ok(uuid::Uuid::new_v4().to_string())
+    }
 }
 
 /// macOS device ID - IOPlatformUUID for direct download, Keychain UUID for App Store
@@ -46,13 +53,20 @@ fn get_macos_device_id() -> Result<String, Box<dyn Error + Send + Sync>> {
         get_or_create_sandboxed_device_id()
     } else {
         // Direct download: Use IOPlatformUUID via machineid
-        use machineid_rs::{Encryption, HWIDComponent, IdBuilder};
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
+        {
+            use machineid_rs::{Encryption, HWIDComponent, IdBuilder};
 
-        let id = IdBuilder::new(Encryption::SHA256)
-            .add_component(HWIDComponent::SystemID)
-            .build("needlepoint")?;
+            let id = IdBuilder::new(Encryption::SHA256)
+                .add_component(HWIDComponent::SystemID)
+                .build("needlepoint")?;
 
-        Ok(id)
+            Ok(id)
+        }
+        #[cfg(any(target_os = "ios", target_os = "android"))]
+        {
+            get_or_create_sandboxed_device_id()
+        }
     }
 }
 

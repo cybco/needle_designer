@@ -27,16 +27,17 @@ base64 = "0.22"
 resvg = "0.44"
 
 # Licensing system dependencies
-machineid-rs = "1"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 chrono = { version = "0.4", features = ["serde"] }
 ed25519-dalek = "2"
 uuid = { version = "1", features = ["v4"] }
 thiserror = "1"
 tokio = { version = "1", features = ["sync"] }
+dirs = "6"
 
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 screenshots = "0.8"
+machineid-rs = "1"
 
 [profile.release]
 panic = "abort"

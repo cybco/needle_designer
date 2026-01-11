@@ -1,4 +1,4 @@
-import React, { ReactNode, useState, useRef, useEffect } from 'react';
+import React, { ReactNode, useState, useRef, useEffect, useCallback } from 'react';
 import { usePatternStore, Tool, StitchType } from '../stores/patternStore';
 import handMoveIcon from '../assets/hand-move.svg';
 
@@ -138,9 +138,10 @@ export function RotateLeftIcon({ className }: { className?: string }) {
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      {/* Curved arrow going counter-clockwise */}
-      <path d="M3 12a9 9 0 1 0 9-9" />
-      <path d="M3 3v6h6" />
+      {/* Arrow pointing left */}
+      <polyline points="1 4 1 10 7 10" />
+      {/* Curved arc */}
+      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
     </svg>
   );
 }
@@ -156,9 +157,10 @@ export function RotateRightIcon({ className }: { className?: string }) {
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      {/* Curved arrow going clockwise */}
-      <path d="M21 12a9 9 0 1 1-9-9" />
-      <path d="M21 3v6h-6" />
+      {/* Arrow pointing right */}
+      <polyline points="23 4 23 10 17 10" />
+      {/* Curved arc */}
+      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
     </svg>
   );
 }
@@ -199,16 +201,21 @@ interface ToolButtonProps {
   label: string;
   activeTool: Tool;
   onClick: (tool: Tool) => void;
+  showLabel?: boolean;
 }
 
-function ToolButton({ tool, icon, label, activeTool, onClick }: ToolButtonProps) {
+function ToolButton({ tool, icon, label, activeTool, onClick, showLabel = false }: ToolButtonProps) {
   const isActive = activeTool === tool;
+  // Extract short label (first word or before parenthesis)
+  const shortLabel = label.split(' (')[0].split(' ')[0];
+
   return (
     <button
       onClick={() => onClick(tool)}
       className={`
-        w-10 h-10 flex items-center justify-center rounded
-        transition-colors text-lg
+        flex items-center justify-center rounded
+        transition-colors
+        ${showLabel ? 'w-14 h-14 flex-col gap-0.5' : 'w-10 h-10 text-lg'}
         ${isActive
           ? 'bg-blue-500 text-white'
           : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
@@ -216,7 +223,43 @@ function ToolButton({ tool, icon, label, activeTool, onClick }: ToolButtonProps)
       `}
       title={label}
     >
-      {icon}
+      <span className={showLabel ? 'text-base' : 'text-lg'}>{icon}</span>
+      {showLabel && <span className="text-[9px] leading-none truncate w-full text-center">{shortLabel}</span>}
+    </button>
+  );
+}
+
+// ActionButton for non-tool buttons (undo, redo, zoom, etc.)
+interface ActionButtonProps {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  active?: boolean;
+  buttonRef?: React.RefObject<HTMLButtonElement | null>;
+  showLabel?: boolean;
+}
+
+function ActionButton({ icon, label, onClick, disabled = false, active = false, buttonRef, showLabel = false }: ActionButtonProps) {
+  const baseClasses = disabled
+    ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
+    : active
+      ? 'bg-blue-500 text-white'
+      : 'bg-gray-100 text-gray-700 hover:bg-gray-200';
+
+  // Extract short label (first word or before parenthesis)
+  const shortLabel = label.split(' (')[0].split(' ')[0];
+
+  return (
+    <button
+      ref={buttonRef}
+      onClick={onClick}
+      disabled={disabled}
+      className={`flex items-center justify-center rounded transition-colors ${showLabel ? 'w-14 h-14 flex-col gap-0.5' : 'w-10 h-10 text-lg'} ${baseClasses}`}
+      title={label}
+    >
+      <span className={showLabel ? 'text-base' : 'text-lg'}>{icon}</span>
+      {showLabel && <span className="text-[9px] leading-none truncate w-full text-center">{shortLabel}</span>}
     </button>
   );
 }
@@ -379,6 +422,27 @@ export function AreaSelectIcon({ className }: { className?: string }) {
       <rect x="19" y="1" width="4" height="4" fill="currentColor" stroke="none" />
       <rect x="1" y="19" width="4" height="4" fill="currentColor" stroke="none" />
       <rect x="19" y="19" width="4" height="4" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+// Fullscreen/Fit icon SVG (Lucide fullscreen)
+export function FullscreenIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+      <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+      <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+      <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+      <rect width="10" height="8" x="7" y="8" rx="1" />
     </svg>
   );
 }
@@ -836,11 +900,12 @@ interface ToolbarProps {
   onMoveToCenter?: () => void;
   onPreviewClick?: () => void;
   toolVisibility?: ToolVisibility;
+  showLabels?: boolean;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
 }
 
-export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPreviewClick, toolVisibility = DEFAULT_VISIBILITY, collapsed = false, onToggleCollapse }: ToolbarProps) {
+export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPreviewClick, toolVisibility = DEFAULT_VISIBILITY, showLabels = false, collapsed = false, onToggleCollapse }: ToolbarProps) {
   const {
     pattern,
     activeTool,
@@ -877,6 +942,39 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPrev
   const [hoveredStitchSection, setHoveredStitchSection] = useState<string | null>(null);
   const stitchTypeButtonRef = useRef<HTMLButtonElement>(null);
   const stitchTypePopupRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+
+  // Grid column calculation - must be before any early returns
+  // Button sizes change based on whether labels are shown
+  const buttonHeight = showLabels ? 56 : 48;
+  const buttonWidth = showLabels ? 56 : 48;
+
+  const calculateGridLayout = useCallback((buttonCount: number) => {
+    const availableHeight = window.innerHeight - 96;
+    const gapSize = 8;
+    // Each button slot takes buttonHeight + gap (except the last one)
+    const slotHeight = buttonHeight + gapSize;
+    const buttonsPerColumn = Math.max(1, Math.floor((availableHeight + gapSize) / slotHeight));
+    const columns = Math.max(1, Math.ceil(buttonCount / buttonsPerColumn));
+    return { columns, buttonsPerColumn };
+  }, [buttonHeight]);
+
+  const [columns, setColumns] = useState(1);
+
+  useEffect(() => {
+    let resizeTimeout: ReturnType<typeof setTimeout>;
+    const handleResize = () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        // This will be updated when toolButtons are calculated
+      }, 100);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => {
+      clearTimeout(resizeTimeout);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
 
   // Close popup when clicking outside
   useEffect(() => {
@@ -905,188 +1003,242 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPrev
   // Combined check: either area selection or layer selection
   const hasTransformableSelection = hasAreaSelection || hasLayerSelection;
 
-  // Check if any tools in a section are visible
-  const hasDrawingTools = toolVisibility.pencil || toolVisibility.eraser || toolVisibility.fill || toolVisibility.colorswap || toolVisibility.pan || toolVisibility.select || toolVisibility.text;
-  const hasShapeTools = toolVisibility.line || toolVisibility.rectangle || toolVisibility.ellipse;
-  const hasHistoryTools = toolVisibility.undo || toolVisibility.redo;
-  const hasZoomControls = toolVisibility.zoomIn || toolVisibility.zoomOut || toolVisibility.zoomFit;
+  // Collect all tool buttons to render in a grid
+  const toolButtons: React.ReactNode[] = [];
 
-  // Collapse toggle button - full width row, arrow aligned left
-  // When expanded: < to collapse (pointing left)
-  // When collapsed: > to expand (pointing right)
-  const CollapseToggle = () => (
-    <button
-      onClick={onToggleCollapse}
-      className="h-8 flex items-center justify-start pl-2 bg-gray-100 hover:bg-gray-200 border-b border-gray-300 shrink-0"
-      title={collapsed ? 'Expand Toolbar' : 'Collapse Toolbar'}
-    >
-      <svg
-        className="w-4 h-4 text-gray-600"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={collapsed ? "M9 5l7 7-7 7" : "M15 19l-7-7 7-7"} />
-      </svg>
-    </button>
+  // Drawing tools
+  if (toolVisibility.select) {
+    toolButtons.push(
+      <ToolButton key="select" tool="select" icon={<CursorIcon />} label="Move (V)" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+  toolButtons.push(
+    <ActionButton key="center" icon={<CenterViewIcon />} label="Center (Move to Center)" onClick={onMoveToCenter || (() => {})} showLabel={showLabels} />
+  );
+  if (toolVisibility.pencil) {
+    toolButtons.push(
+      <ToolButton key="pencil" tool="pencil" icon="✏️" label="Pencil (P)" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.eraser) {
+    toolButtons.push(
+      <ToolButton key="eraser" tool="eraser" icon={<EraserIcon />} label="Eraser (E)" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.fill) {
+    toolButtons.push(
+      <ToolButton key="fill" tool="fill" icon={<FillIcon />} label="Fill (G)" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.colorswap) {
+    toolButtons.push(
+      <ToolButton key="colorswap" tool="colorswap" icon={<ColorSwapIcon />} label="Color Swap (C)" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.pan) {
+    toolButtons.push(
+      <ToolButton key="pan" tool="pan" icon={<PanIcon />} label="Pan (Space)" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.text) {
+    toolButtons.push(
+      <ToolButton key="text" tool="text" icon={<TextIcon />} label="Text (T)" activeTool={activeTool} onClick={() => { if (onTextToolClick) onTextToolClick(); }} showLabel={showLabels} />
+    );
+  }
+
+  // Shape tools
+  if (toolVisibility.line) {
+    toolButtons.push(
+      <ToolButton key="line" tool="line" icon="╱" label="Line (L)" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.rectangle) {
+    toolButtons.push(
+      <ToolButton key="rectangle" tool="rectangle" icon="▢" label="Rectangle (R)" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.ellipse) {
+    toolButtons.push(
+      <ToolButton key="ellipse" tool="ellipse" icon="◯" label="Ellipse (O)" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+
+  // Stitch type button
+  toolButtons.push(
+    <ActionButton key="stitchtype" icon={getStitchTypeIcon(activeStitchType)} label={`Stitch Type: ${getStitchTypeName(activeStitchType)}`} onClick={() => setShowStitchTypePopup(!showStitchTypePopup)} buttonRef={stitchTypeButtonRef} showLabel={showLabels} />
   );
 
-  if (!pattern) {
+  // History tools
+  if (toolVisibility.undo) {
+    toolButtons.push(
+      <ActionButton key="undo" icon="↩️" label="Undo (Ctrl+Z)" onClick={undo} disabled={history.length === 0} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.redo) {
+    toolButtons.push(
+      <ActionButton key="redo" icon="↪️" label="Redo (Ctrl+Shift+Z)" onClick={redo} disabled={future.length === 0} showLabel={showLabels} />
+    );
+  }
+
+  // Zoom controls
+  if (toolVisibility.zoomIn) {
+    toolButtons.push(
+      <ActionButton key="zoomin" icon="🔍+" label="Zoom In (+)" onClick={() => setZoom(Math.min(10, zoom + 0.1))} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.zoomOut) {
+    toolButtons.push(
+      <ActionButton key="zoomout" icon="🔍−" label="Zoom Out (-)" onClick={() => setZoom(Math.max(0.1, zoom - 0.1))} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.zoomFit) {
+    toolButtons.push(
+      <ActionButton key="zoomfit" icon={<FullscreenIcon />} label="Fit to Window (0)" onClick={onFitToCanvas || (() => {})} showLabel={showLabels} />
+    );
+  }
+
+  // Grid toggle
+  if (toolVisibility.grid) {
+    toolButtons.push(
+      <ActionButton key="grid" icon="#" label="Toggle Grid (G)" onClick={toggleGrid} active={showGrid} showLabel={showLabels} />
+    );
+  }
+
+  // Preview
+  if (toolVisibility.preview) {
+    toolButtons.push(
+      <ActionButton key="preview" icon={<PreviewCanvasIcon />} label="Preview Canvas" onClick={onPreviewClick || (() => {})} showLabel={showLabels} />
+    );
+  }
+
+  // Area select
+  if (toolVisibility.areaselect) {
+    toolButtons.push(
+      <ToolButton key="areaselect" tool="areaselect" icon={<AreaSelectIcon />} label="Area Select (S)" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+    );
+  }
+
+  // Selection actions
+  const hasSelectionEnabled = selection && selection.selectionType === 'area' && selection.selectedStitches?.length;
+  if (toolVisibility.selectionMove) {
+    toolButtons.push(
+      <ActionButton key="selmove" icon={<SelectionMoveIcon />} label="Move Selection" onClick={moveSelection} disabled={!hasSelectionEnabled} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.selectionDuplicate) {
+    toolButtons.push(
+      <ActionButton key="seldup" icon={<SelectionDuplicateIcon />} label="Duplicate Selection" onClick={duplicateSelection} disabled={!hasSelectionEnabled} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.selectionNewLayer) {
+    toolButtons.push(
+      <ActionButton key="selnewlayer" icon={<SelectionNewLayerIcon />} label="-Layer (Move to New Layer)" onClick={selectionToNewLayer} disabled={!hasSelectionEnabled} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.selectionDuplicateToNewLayer) {
+    toolButtons.push(
+      <ActionButton key="seldupnewlayer" icon={<SelectionDuplicateToNewLayerIcon />} label="+Layer (Duplicate to New Layer)" onClick={() => hasLayerSelection ? duplicateLayerToNewLayer() : duplicateSelectionToNewLayer()} disabled={!hasTransformableSelection} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.selectionFlipHorizontal) {
+    toolButtons.push(
+      <ActionButton key="selfliph" icon={<FlipHorizontalIcon />} label="Flip Horizontal" onClick={() => hasLayerSelection ? flipLayerHorizontal() : flipSelectionHorizontal()} disabled={!hasTransformableSelection} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.selectionFlipVertical) {
+    toolButtons.push(
+      <ActionButton key="selflipv" icon={<FlipVerticalIcon />} label="Flip Vertical" onClick={() => hasLayerSelection ? flipLayerVertical() : flipSelectionVertical()} disabled={!hasTransformableSelection} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.selectionRotateLeft) {
+    toolButtons.push(
+      <ActionButton key="selrotl" icon={<RotateLeftIcon />} label="Rotate Left (90° CCW)" onClick={() => hasLayerSelection ? rotateLayerLeft() : rotateSelectionLeft()} disabled={!hasTransformableSelection} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.selectionRotateRight) {
+    toolButtons.push(
+      <ActionButton key="selrotr" icon={<RotateRightIcon />} label="Rotate Right (90° CW)" onClick={() => hasLayerSelection ? rotateLayerRight() : rotateSelectionRight()} disabled={!hasTransformableSelection} showLabel={showLabels} />
+    );
+  }
+
+  // Calculate columns based on button count - do this synchronously during render
+  const toolButtonCount = toolButtons.length;
+  const { columns: calculatedColumns, buttonsPerColumn } = calculateGridLayout(toolButtonCount);
+
+  // Update columns state when calculated value changes
+  useEffect(() => {
+    if (calculatedColumns !== columns) {
+      setColumns(calculatedColumns);
+    }
+  }, [calculatedColumns, columns]);
+
+  // Use the calculated value directly (not the state) for immediate rendering
+  // Width = (columns * buttonWidth) + ((columns - 1) * gap) + padding
+  const gapSize = 8;
+  const toolbarWidth = (calculatedColumns * buttonWidth) + ((calculatedColumns - 1) * gapSize);
+
+  // Collapsed state
+  if (collapsed) {
     return (
-      <div className={`shrink-0 bg-white border-r border-gray-300 flex flex-col transition-all duration-200 ${collapsed ? 'w-8' : 'w-14 min-w-14'}`}>
-        <CollapseToggle />
-        {!collapsed && (
-          <div className="p-2 space-y-2">
-            <div className="w-10 h-10 bg-gray-100 rounded" />
-            <div className="w-10 h-10 bg-gray-100 rounded" />
-            <div className="w-10 h-10 bg-gray-100 rounded" />
-          </div>
-        )}
+      <div className="w-8 shrink-0 bg-white border-r border-gray-300 flex flex-col transition-all duration-200">
+        <button
+          onClick={onToggleCollapse}
+          className="h-8 flex items-center justify-start pl-2 bg-gray-100 hover:bg-gray-200 border-b border-gray-300 shrink-0"
+          title="Expand Toolbar"
+        >
+          <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
       </div>
     );
   }
 
-  // Collapsed state - just show the toggle
-  if (collapsed) {
+  // No pattern state
+  if (!pattern) {
     return (
-      <div className="w-8 shrink-0 bg-white border-r border-gray-300 flex flex-col transition-all duration-200">
-        <CollapseToggle />
+      <div className="w-14 min-w-14 shrink-0 bg-white border-r border-gray-300 p-2">
+        <div className="space-y-2">
+          <div className="w-10 h-10 bg-gray-100 rounded" />
+          <div className="w-10 h-10 bg-gray-100 rounded" />
+          <div className="w-10 h-10 bg-gray-100 rounded" />
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="shrink-0 bg-white border-r border-gray-300 flex flex-col h-full transition-all duration-200 overflow-hidden">
-      {/* Collapse/Expand Toggle - full width row */}
-      <CollapseToggle />
+    <div className="shrink-0 bg-white border-r border-gray-300 flex flex-col transition-all duration-200 overflow-hidden">
+      {/* Collapse/Expand Toggle */}
+      <button
+        onClick={onToggleCollapse}
+        className="h-8 flex items-center justify-start pl-2 bg-gray-100 hover:bg-gray-200 border-b border-gray-300 shrink-0"
+        title="Collapse Toolbar"
+      >
+        <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+        </svg>
+      </button>
 
-      {/* Toolbar content with flex-wrap for multi-column */}
-      <div className="flex flex-col flex-wrap flex-1 content-start" style={{ maxHeight: 'calc(100% - 32px)' }}>
-        {/* Drawing tools */}
-        {hasDrawingTools && (
-          <div className="p-2 space-y-2 border-b border-gray-200 w-14">
-            {toolVisibility.select && (
-            <ToolButton
-              tool="select"
-              icon={<CursorIcon />}
-              label="Move (V)"
-              activeTool={activeTool}
-              onClick={setTool}
-            />
-          )}
-          <button
-            onClick={onMoveToCenter}
-            className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200"
-            title="Move to Center"
-          >
-            <CenterViewIcon />
-          </button>
-          {toolVisibility.pencil && (
-            <ToolButton
-              tool="pencil"
-              icon="✏️"
-              label="Pencil (P)"
-              activeTool={activeTool}
-              onClick={setTool}
-            />
-          )}
-          {toolVisibility.eraser && (
-            <ToolButton
-              tool="eraser"
-              icon={<EraserIcon />}
-              label="Eraser (E)"
-              activeTool={activeTool}
-              onClick={setTool}
-            />
-          )}
-          {toolVisibility.fill && (
-            <ToolButton
-              tool="fill"
-              icon={<FillIcon />}
-              label="Fill (G)"
-              activeTool={activeTool}
-              onClick={setTool}
-            />
-          )}
-          {toolVisibility.colorswap && (
-            <ToolButton
-              tool="colorswap"
-              icon={<ColorSwapIcon />}
-              label="Color Swap (C)"
-              activeTool={activeTool}
-              onClick={setTool}
-            />
-          )}
-          {toolVisibility.pan && (
-            <ToolButton
-              tool="pan"
-              icon={<PanIcon />}
-              label="Pan (Space)"
-              activeTool={activeTool}
-              onClick={setTool}
-            />
-          )}
-          {toolVisibility.text && (
-            <ToolButton
-              tool="text"
-              icon={<TextIcon />}
-              label="Text (T)"
-              activeTool={activeTool}
-              onClick={() => {
-                if (onTextToolClick) {
-                  onTextToolClick();
-                }
-              }}
-            />
-          )}
-        </div>
-      )}
+      {/* Toolbar grid */}
+      <div
+        ref={toolbarRef}
+        className="p-2 flex-1"
+        style={{
+          display: 'grid',
+          gridTemplateRows: `repeat(${buttonsPerColumn}, ${buttonHeight}px)`,
+          gridAutoFlow: 'column',
+          gridAutoColumns: `${buttonWidth}px`,
+          gap: '8px',
+          alignContent: 'start',
+          width: toolbarWidth + 16, // Add padding for p-2 (8px each side)
+          minWidth: toolbarWidth + 16,
+        }}
+      >
+        {toolButtons}
+      </div>
 
-      {/* Shape tools */}
-      {hasShapeTools && (
-        <div className="p-2 space-y-2 border-b border-gray-200 w-14">
-          {toolVisibility.line && (
-            <ToolButton
-              tool="line"
-              icon="╱"
-              label="Line (L)"
-              activeTool={activeTool}
-              onClick={setTool}
-            />
-          )}
-          {toolVisibility.rectangle && (
-            <ToolButton
-              tool="rectangle"
-              icon="▢"
-              label="Rectangle (R)"
-              activeTool={activeTool}
-              onClick={setTool}
-            />
-          )}
-          {toolVisibility.ellipse && (
-            <ToolButton
-              tool="ellipse"
-              icon="◯"
-              label="Ellipse (O)"
-              activeTool={activeTool}
-              onClick={setTool}
-            />
-          )}
-        </div>
-      )}
-
-      {/* Stitch Type Selector */}
-      <div className="p-2 space-y-2 border-b border-gray-200 w-14 relative">
-        <button
-          ref={stitchTypeButtonRef}
-          onClick={() => setShowStitchTypePopup(!showStitchTypePopup)}
-          className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200"
-          title={`Stitch Type: ${getStitchTypeName(activeStitchType)}`}
-        >
-          {getStitchTypeIcon(activeStitchType)}
-        </button>
-
-        {/* Stitch Type Popup */}
+      {/* Stitch Type Popup - positioned outside the grid */}
         {showStitchTypePopup && (
           <div
             ref={stitchTypePopupRef}
@@ -1453,240 +1605,6 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPrev
             </div>
           </div>
         )}
-      </div>
-
-      {/* Undo/Redo */}
-      {hasHistoryTools && (
-        <div className="p-2 space-y-2 border-b border-gray-200 w-14">
-          {toolVisibility.undo && (
-            <button
-              onClick={undo}
-              disabled={history.length === 0}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-                history.length === 0
-                  ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-              title="Undo (Ctrl+Z)"
-            >
-              ↩️
-            </button>
-          )}
-          {toolVisibility.redo && (
-            <button
-              onClick={redo}
-              disabled={future.length === 0}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-                future.length === 0
-                  ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-              title="Redo (Ctrl+Shift+Z)"
-            >
-              ↪️
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Zoom controls */}
-      {hasZoomControls && (
-        <div className="p-2 space-y-2 border-b border-gray-200 w-14">
-          {toolVisibility.zoomIn && (
-            <button
-              onClick={() => setZoom(Math.min(10, zoom + 0.1))}
-              className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-lg"
-              title="Zoom In (+)"
-            >
-              🔍+
-            </button>
-          )}
-          {toolVisibility.zoomOut && (
-            <button
-              onClick={() => setZoom(Math.max(0.1, zoom - 0.1))}
-              className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-lg"
-              title="Zoom Out (-)"
-            >
-              🔍−
-            </button>
-          )}
-          {toolVisibility.zoomFit && (
-            <button
-              onClick={onFitToCanvas}
-              className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200 text-xs font-medium"
-              title="Fit to Window (0)"
-            >
-              Fit
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Grid toggle */}
-      {toolVisibility.grid && (
-        <div className="p-2 space-y-2 border-b border-gray-200 w-14">
-          <button
-            onClick={toggleGrid}
-            className={`
-              w-10 h-10 flex items-center justify-center rounded
-              transition-colors text-lg
-              ${showGrid
-                ? 'bg-blue-500 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }
-            `}
-            title="Toggle Grid (G)"
-          >
-            #
-          </button>
-        </div>
-      )}
-
-      {/* Preview Canvas */}
-      {toolVisibility.preview && (
-        <div className="p-2 space-y-2 border-b border-gray-200 w-14">
-          <button
-            onClick={onPreviewClick}
-            className="w-10 h-10 flex items-center justify-center rounded bg-gray-100 text-gray-700 hover:bg-gray-200"
-            title="Preview Canvas"
-          >
-            <PreviewCanvasIcon />
-          </button>
-        </div>
-      )}
-
-      {/* Area Select tool */}
-      {toolVisibility.areaselect && (
-        <div className="p-2 space-y-2 border-b border-gray-200 w-14">
-          <ToolButton
-            tool="areaselect"
-            icon={<AreaSelectIcon />}
-            label="Select (S)"
-            activeTool={activeTool}
-            onClick={setTool}
-          />
-        </div>
-      )}
-
-      {/* Selection Actions */}
-      {(toolVisibility.selectionMove || toolVisibility.selectionDuplicate || toolVisibility.selectionNewLayer || toolVisibility.selectionDuplicateToNewLayer || toolVisibility.selectionFlipHorizontal || toolVisibility.selectionFlipVertical || toolVisibility.selectionRotateLeft || toolVisibility.selectionRotateRight) && (
-        <div className="p-2 space-y-2 w-14">
-          <div className="text-[9px] text-gray-400 text-center font-medium -mb-1">Selection</div>
-          {toolVisibility.selectionMove && (
-            <button
-              onClick={moveSelection}
-              disabled={!selection || selection.selectionType !== 'area' || !selection.selectedStitches?.length}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-                selection && selection.selectionType === 'area' && selection.selectedStitches?.length
-                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
-              }`}
-              title="Move Selection"
-            >
-              <SelectionMoveIcon />
-            </button>
-          )}
-          {toolVisibility.selectionDuplicate && (
-            <button
-              onClick={duplicateSelection}
-              disabled={!selection || selection.selectionType !== 'area' || !selection.selectedStitches?.length}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-                selection && selection.selectionType === 'area' && selection.selectedStitches?.length
-                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
-              }`}
-              title="Duplicate Selection"
-            >
-              <SelectionDuplicateIcon />
-            </button>
-          )}
-          {toolVisibility.selectionNewLayer && (
-            <button
-              onClick={selectionToNewLayer}
-              disabled={!selection || selection.selectionType !== 'area' || !selection.selectedStitches?.length}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-                selection && selection.selectionType === 'area' && selection.selectedStitches?.length
-                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
-              }`}
-              title="Move to New Layer"
-            >
-              <SelectionNewLayerIcon />
-            </button>
-          )}
-          {toolVisibility.selectionDuplicateToNewLayer && (
-            <button
-              onClick={() => hasLayerSelection ? duplicateLayerToNewLayer() : duplicateSelectionToNewLayer()}
-              disabled={!hasTransformableSelection}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-                hasTransformableSelection
-                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
-              }`}
-              title="Duplicate to New Layer"
-            >
-              <SelectionDuplicateToNewLayerIcon />
-            </button>
-          )}
-          {toolVisibility.selectionFlipHorizontal && (
-            <button
-              onClick={() => hasLayerSelection ? flipLayerHorizontal() : flipSelectionHorizontal()}
-              disabled={!hasTransformableSelection}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-                hasTransformableSelection
-                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
-              }`}
-              title="Flip Horizontal"
-            >
-              <FlipHorizontalIcon />
-            </button>
-          )}
-          {toolVisibility.selectionFlipVertical && (
-            <button
-              onClick={() => hasLayerSelection ? flipLayerVertical() : flipSelectionVertical()}
-              disabled={!hasTransformableSelection}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-                hasTransformableSelection
-                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
-              }`}
-              title="Flip Vertical"
-            >
-              <FlipVerticalIcon />
-            </button>
-          )}
-          {toolVisibility.selectionRotateLeft && (
-            <button
-              onClick={() => hasLayerSelection ? rotateLayerLeft() : rotateSelectionLeft()}
-              disabled={!hasTransformableSelection}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-                hasTransformableSelection
-                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
-              }`}
-              title="Rotate Left (90° CCW)"
-            >
-              <RotateLeftIcon />
-            </button>
-          )}
-          {toolVisibility.selectionRotateRight && (
-            <button
-              onClick={() => hasLayerSelection ? rotateLayerRight() : rotateSelectionRight()}
-              disabled={!hasTransformableSelection}
-              className={`w-10 h-10 flex items-center justify-center rounded text-lg ${
-                hasTransformableSelection
-                  ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  : 'bg-gray-100 text-gray-300 cursor-not-allowed'
-              }`}
-              title="Rotate Right (90° CW)"
-            >
-              <RotateRightIcon />
-            </button>
-          )}
-        </div>
-      )}
-      </div>
     </div>
   );
 }
