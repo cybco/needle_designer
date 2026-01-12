@@ -754,6 +754,215 @@ fn save_project(app: tauri::AppHandle, path: String, project: NdpFile) -> Result
     let json = serde_json::to_string_pretty(&project)
         .map_err(|e| format!("Failed to serialize project: {}", e))?;
 
+    // Handle file:// URLs (iOS may pass these from the save dialog)
+    let path_without_scheme = if path.starts_with("file://") {
+        path.strip_prefix("file://").unwrap_or(&path).to_string()
+    } else {
+        path.clone()
+    };
+
+    // URL-decode the path (iOS may pass URL-encoded paths with %20 for spaces, etc.)
+    let decoded_path = urlencoding::decode(&path_without_scheme)
+        .map(|s| s.into_owned())
+        .unwrap_or(path_without_scheme.clone());
+
+    // On iOS, always save to Documents directory
+    // The frontend now passes just a filename on iOS (no dialog)
+    #[cfg(target_os = "ios")]
+    {
+        let doc_dir = app.path()
+            .document_dir()
+            .map_err(|e| format!("Failed to get documents directory: {}", e))?;
+        fs::create_dir_all(&doc_dir)
+            .map_err(|e| format!("Failed to create documents directory: {}", e))?;
+
+        // Extract just the filename from the path (in case a full path was passed)
+        let filename = std::path::Path::new(&decoded_path)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| format!("{}.stitchalot", project.metadata.name));
+        let save_path = doc_dir.join(&filename);
+
+        // Write to Documents directory
+        fs::write(&save_path, &json)
+            .map_err(|e| format!("Failed to write file: {} (path: {:?})", e, save_path))?;
+
+        // Verify the write succeeded
+        let written_size = fs::metadata(&save_path).map(|m| m.len()).unwrap_or(0);
+        if written_size == 0 {
+            return Err(format!(
+                "File was written but is empty! Expected {} bytes, got 0 (path: {:?})",
+                json.len(),
+                save_path
+            ));
+        }
+
+        return Ok(save_path.to_string_lossy().to_string());
+    }
+
+    #[cfg(not(target_os = "ios"))]
+    {
+        let _ = &app; // Suppress unused warning on non-iOS
+        let path_buf = std::path::PathBuf::from(&decoded_path);
+
+        // Create parent directory if it doesn't exist
+        if let Some(parent) = path_buf.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create directory: {} (path: {:?})", e, parent))?;
+        }
+
+        fs::write(&path_buf, &json)
+            .map_err(|e| format!("Failed to write file: {} (path: {:?}, content length: {} bytes)", e, path_buf, json.len()))?;
+
+        // Verify the write succeeded by checking file size
+        let written_size = fs::metadata(&path_buf)
+            .map(|m| m.len())
+            .unwrap_or(0);
+
+        if written_size == 0 {
+            return Err(format!(
+                "File was written but is empty! Expected {} bytes, got 0 (path: {:?})",
+                json.len(),
+                path_buf
+            ));
+        }
+
+        // Return the actual path where the file was saved
+        Ok(path_buf.to_string_lossy().to_string())
+    }
+}
+
+#[tauri::command]
+fn open_project(app: tauri::AppHandle, path: String) -> Result<NdpFile, String> {
+    // Handle file:// URLs (iOS often passes these from the document picker)
+    let path_without_scheme = if path.starts_with("file://") {
+        path.strip_prefix("file://").unwrap_or(&path).to_string()
+    } else {
+        path.clone()
+    };
+
+    // URL-decode the path (iOS may pass URL-encoded paths with %20 for spaces, etc.)
+    let decoded_path = urlencoding::decode(&path_without_scheme)
+        .map(|s| s.into_owned())
+        .unwrap_or(path_without_scheme.clone());
+
+    // On iOS, files are saved to Documents directory, so try there first
+    #[cfg(target_os = "ios")]
+    let read_path = {
+        // Extract filename from the provided path
+        let filename = std::path::Path::new(&decoded_path)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string());
+
+        // First try the Documents directory (where we save files)
+        if let Some(ref fname) = filename {
+            if let Ok(doc_dir) = app.path().document_dir() {
+                let doc_path = doc_dir.join(fname);
+                if doc_path.exists() {
+                    doc_path
+                } else {
+                    // Fall back to the original path
+                    std::path::PathBuf::from(&decoded_path)
+                }
+            } else {
+                std::path::PathBuf::from(&decoded_path)
+            }
+        } else {
+            std::path::PathBuf::from(&decoded_path)
+        }
+    };
+
+    #[cfg(not(target_os = "ios"))]
+    let read_path = {
+        let _ = &app; // Suppress unused warning
+        std::path::PathBuf::from(&decoded_path)
+    };
+
+    let contents = fs::read_to_string(&read_path)
+        .map_err(|e| format!("Failed to read file: {} (path: {:?})", e, read_path))?;
+
+    // Check if the file is empty
+    if contents.is_empty() {
+        return Err(format!("File is empty (path: {:?}, original: {})", read_path, path));
+    }
+
+    let project: NdpFile = serde_json::from_str(&contents)
+        .map_err(|e| format!("Failed to parse project file: {} (content length: {} bytes)", e, contents.len()))?;
+
+    Ok(project)
+}
+
+#[tauri::command]
+fn delete_file(path: String) -> Result<(), String> {
+    fs::remove_file(&path)
+        .map_err(|e| format!("Failed to delete file: {}", e))?;
+    Ok(())
+}
+
+/// Get just the thumbnail from a file (fast preview loading)
+#[tauri::command]
+fn get_file_thumbnail(app: tauri::AppHandle, path: String) -> Result<Option<String>, String> {
+    // Handle file:// URLs
+    let path_without_scheme = if path.starts_with("file://") {
+        path.strip_prefix("file://").unwrap_or(&path).to_string()
+    } else {
+        path.clone()
+    };
+
+    // URL-decode the path
+    let decoded_path = urlencoding::decode(&path_without_scheme)
+        .map(|s| s.into_owned())
+        .unwrap_or(path_without_scheme.clone());
+
+    // On iOS, files are saved to Documents directory, so try there first
+    #[cfg(target_os = "ios")]
+    let read_path = {
+        let filename = std::path::Path::new(&decoded_path)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string());
+
+        if let Some(ref fname) = filename {
+            if let Ok(doc_dir) = app.path().document_dir() {
+                let doc_path = doc_dir.join(fname);
+                if doc_path.exists() {
+                    doc_path
+                } else {
+                    std::path::PathBuf::from(&decoded_path)
+                }
+            } else {
+                std::path::PathBuf::from(&decoded_path)
+            }
+        } else {
+            std::path::PathBuf::from(&decoded_path)
+        }
+    };
+
+    #[cfg(not(target_os = "ios"))]
+    let read_path = {
+        let _ = &app; // Suppress unused warning
+        std::path::PathBuf::from(&decoded_path)
+    };
+
+    let contents = fs::read_to_string(&read_path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    let project: NdpFile = serde_json::from_str(&contents)
+        .map_err(|e| format!("Failed to parse file: {}", e))?;
+
+    Ok(project.thumbnail)
+}
+
+#[tauri::command]
+fn save_pdf(app: tauri::AppHandle, path: String, data: String) -> Result<String, String> {
+    // Decode base64 data
+    let bytes = STANDARD.decode(&data)
+        .map_err(|e| format!("Failed to decode PDF data: {}", e))?;
+
+    let bytes_len = bytes.len();
+    if bytes_len == 0 {
+        return Err("PDF data is empty after base64 decode".to_string());
+    }
+
     // On iOS/mobile, save to the app's documents directory
     #[cfg(any(target_os = "ios", target_os = "android"))]
     let save_path = {
@@ -770,11 +979,7 @@ fn save_project(app: tauri::AppHandle, path: String, project: NdpFile) -> Result
         let filename = std::path::Path::new(&path)
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| {
-                // Generate a filename from project name
-                let name = project.metadata.name.replace(' ', "_");
-                format!("{}.stitchalot", name)
-            });
+            .unwrap_or_else(|| "pattern.pdf".to_string());
 
         doc_dir.join(filename)
     };
@@ -785,82 +990,22 @@ fn save_project(app: tauri::AppHandle, path: String, project: NdpFile) -> Result
         std::path::PathBuf::from(&path)
     };
 
-    fs::write(&save_path, json)
-        .map_err(|e| format!("Failed to write file: {} (path: {:?})", e, save_path))?;
+    // Write to file
+    fs::write(&save_path, &bytes)
+        .map_err(|e| format!("Failed to write PDF file: {} (path: {:?})", e, save_path))?;
+
+    // Verify the write succeeded
+    let written_size = fs::metadata(&save_path).map(|m| m.len()).unwrap_or(0);
+    if written_size == 0 {
+        return Err(format!(
+            "PDF file was written but is empty! Expected {} bytes, got 0 (path: {:?})",
+            bytes_len,
+            save_path
+        ));
+    }
 
     // Return the actual path where the file was saved
     Ok(save_path.to_string_lossy().to_string())
-}
-
-#[tauri::command]
-fn open_project(app: tauri::AppHandle, path: String) -> Result<NdpFile, String> {
-    // On iOS/mobile, check the app's documents directory first
-    #[cfg(any(target_os = "ios", target_os = "android"))]
-    let read_path = {
-        let path_obj = std::path::Path::new(&path);
-
-        // If the path exists as-is, use it
-        if path_obj.exists() {
-            std::path::PathBuf::from(&path)
-        } else {
-            // Try in documents directory
-            let doc_dir = app.path()
-                .document_dir()
-                .map_err(|e| format!("Failed to get documents directory: {}", e))?;
-
-            let filename = path_obj.file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or(path.clone());
-
-            doc_dir.join(filename)
-        }
-    };
-
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    let read_path = {
-        let _ = &app; // Suppress unused warning on desktop
-        std::path::PathBuf::from(&path)
-    };
-
-    let contents = fs::read_to_string(&read_path)
-        .map_err(|e| format!("Failed to read file: {} (path: {:?})", e, read_path))?;
-
-    let project: NdpFile = serde_json::from_str(&contents)
-        .map_err(|e| format!("Failed to parse project file: {}", e))?;
-
-    Ok(project)
-}
-
-#[tauri::command]
-fn delete_file(path: String) -> Result<(), String> {
-    fs::remove_file(&path)
-        .map_err(|e| format!("Failed to delete file: {}", e))?;
-    Ok(())
-}
-
-/// Get just the thumbnail from a file (fast preview loading)
-#[tauri::command]
-fn get_file_thumbnail(path: String) -> Result<Option<String>, String> {
-    let contents = fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
-
-    let project: NdpFile = serde_json::from_str(&contents)
-        .map_err(|e| format!("Failed to parse file: {}", e))?;
-
-    Ok(project.thumbnail)
-}
-
-#[tauri::command]
-fn save_pdf(path: String, data: String) -> Result<(), String> {
-    // Decode base64 data
-    let bytes = STANDARD.decode(&data)
-        .map_err(|e| format!("Failed to decode PDF data: {}", e))?;
-
-    // Write to file
-    fs::write(&path, bytes)
-        .map_err(|e| format!("Failed to write PDF file: {}", e))?;
-
-    Ok(())
 }
 
 #[tauri::command]

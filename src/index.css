@@ -23,6 +23,9 @@ html, body {
   min-width: 320px;
   height: 100%;
   overflow: hidden;
+  /* Prevent pinch-to-zoom on iOS */
+  touch-action: pan-x pan-y;
+  -webkit-touch-callout: none;
 }
 
 #root {

@@ -81,7 +81,7 @@ export function ColorPalette({ showSymbols = true }: ColorPaletteProps) {
   };
 
   return (
-    <div className="w-64 bg-white border-l border-gray-300 flex flex-col flex-1 overflow-hidden">
+    <div className="w-64 bg-white border-l border-gray-300 flex flex-col flex-1 min-h-0">
       <div className="p-3 border-b border-gray-200 shrink-0">
         <h3 className="font-semibold text-gray-700">Colors</h3>
         <p className="text-xs text-gray-500 mt-1">
@@ -201,7 +201,7 @@ export function ColorPalette({ showSymbols = true }: ColorPaletteProps) {
 
       {/* Selected color info */}
       {selectedColorId && (
-        <div className="p-3 border-t border-gray-200 bg-gray-50 shrink-0">
+        <div className="p-3 pb-8 border-t border-gray-200 bg-gray-50 shrink-0 min-h-[140px]">
           {(() => {
             const color = pattern.colorPalette.find(c => c.id === selectedColorId);
             if (!color) return null;
@@ -223,7 +223,7 @@ export function ColorPalette({ showSymbols = true }: ColorPaletteProps) {
                   </p>
                 )}
                 {color.symbol && (
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-gray-500 pb-1">
                     Symbol: {color.symbol}
                   </p>
                 )}

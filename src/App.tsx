@@ -241,16 +241,23 @@ const DEFAULT_PREFERENCES: Preferences = {
   toolVisibility: DEFAULT_TOOL_VISIBILITY,
 };
 
+// Detect iOS/iPadOS - used to hide keyboard shortcuts that don't apply
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.userAgent.includes('Mac') && 'ontouchend' in document && navigator.maxTouchPoints > 1);
+
 function App() {
   const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [renameDialog, setRenameDialog] = useState<{ filePath: string; currentName: string } | null>(null);
   const [renameInputValue, setRenameInputValue] = useState('');
   const [deleteDialog, setDeleteDialog] = useState<{ filePath: string; fileName: string } | null>(null);
+  const [showSaveAsDialog, setShowSaveAsDialog] = useState(false);
+  const [saveAsInputValue, setSaveAsInputValue] = useState('');
   const [showFileMenu, setShowFileMenu] = useState(false);
   const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [showPreferencesMenu, setShowPreferencesMenu] = useState(false);
   const [showRecentMenu, setShowRecentMenu] = useState(false);
+  const [showAdvancedMenu, setShowAdvancedMenu] = useState(false);
   const [showToolbarVisibilityDialog, setShowToolbarVisibilityDialog] = useState(false);
   const [recentFiles, setRecentFiles] = useState<string[]>(() => {
     try {
@@ -259,11 +266,23 @@ function App() {
         // Filter out any old .ndp files - only .stitchalot is supported
         const files = JSON.parse(stored) as string[];
         const filtered = files.filter((f: string) => f.toLowerCase().endsWith('.stitchalot'));
-        // Update localStorage if we filtered anything out
-        if (filtered.length !== files.length) {
-          localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(filtered));
+
+        // Deduplicate by filename (case-insensitive) - keep the first occurrence
+        const seen = new Set<string>();
+        const deduped = filtered.filter((f: string) => {
+          const fileName = decodeURIComponent(f.split(/[/\\]/).pop() || '').toLowerCase();
+          if (seen.has(fileName)) {
+            return false;
+          }
+          seen.add(fileName);
+          return true;
+        });
+
+        // Update localStorage if we filtered or deduped anything
+        if (deduped.length !== files.length) {
+          localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(deduped));
         }
-        return filtered;
+        return deduped;
       }
       return [];
     } catch {
@@ -302,6 +321,7 @@ function App() {
     setShowToolsMenu(false);
     setShowPreferencesMenu(false);
     setShowRecentMenu(false);
+    setShowAdvancedMenu(false);
   }, []);
 
   // Helper to toggle a menu (closes others first, then opens clicked one)
@@ -685,8 +705,15 @@ function App() {
   // Add file to recent files list
   const addToRecentFiles = useCallback((filePath: string) => {
     setRecentFiles((prev) => {
-      // Remove if already exists, then add to front
-      const filtered = prev.filter((f) => f !== filePath);
+      // Normalize path for comparison - extract filename and compare case-insensitively
+      const getFileName = (path: string) => {
+        const decoded = decodeURIComponent(path);
+        return decoded.split(/[/\\]/).pop()?.toLowerCase() || decoded.toLowerCase();
+      };
+      const newFileName = getFileName(filePath);
+
+      // Remove if already exists (by filename, case-insensitive), then add to front
+      const filtered = prev.filter((f) => getFileName(f) !== newFileName);
       const updated = [filePath, ...filtered].slice(0, MAX_RECENT_FILES);
       localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(updated));
       return updated;
@@ -901,18 +928,29 @@ function App() {
   const handleSave = useCallback(async () => {
     if (!pattern) return;
 
+    // Detect iOS/iPadOS - maxTouchPoints > 1 distinguishes real iOS from macOS
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.userAgent.includes('Mac') && 'ontouchend' in document && navigator.maxTouchPoints > 1);
+
     try {
       let filePath = currentFilePath;
 
-      // If no current file path, show save dialog
+      // If no current file path, show save dialog (or use pattern name on iOS)
       if (!filePath) {
-        const result = await save({
-          filters: [{ name: 'StitchALot Design', extensions: ['stitchalot'] }],
-          defaultPath: `${pattern.name}.stitchalot`,
-        });
+        if (isIOS) {
+          // On iOS, skip the buggy save dialog and just use the pattern name
+          // The Rust backend will save to the Documents directory
+          const filename = `${pattern.name}.stitchalot`;
+          filePath = filename; // Just pass the filename, Rust will handle the path
+        } else {
+          const result = await save({
+            filters: [{ name: 'StitchALot Design', extensions: ['stitchalot'] }],
+            defaultPath: `${pattern.name}.stitchalot`,
+          });
 
-        if (!result) return; // User cancelled
-        filePath = result;
+          if (!result) return; // User cancelled
+          filePath = result;
+        }
       }
 
       const ndpFile = patternToNdp(pattern);
@@ -931,6 +969,17 @@ function App() {
   // Save As
   const handleSaveAs = useCallback(async () => {
     if (!pattern) return;
+
+    // Detect iOS/iPadOS - maxTouchPoints > 1 distinguishes real iOS from macOS
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.userAgent.includes('Mac') && 'ontouchend' in document && navigator.maxTouchPoints > 1);
+
+    if (isIOS) {
+      // On iOS, show custom dialog for filename
+      setSaveAsInputValue(pattern.name);
+      setShowSaveAsDialog(true);
+      return;
+    }
 
     try {
       const result = await save({
@@ -962,6 +1011,41 @@ function App() {
       alert(`Failed to save project: ${error}`);
     }
   }, [pattern, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles, regenerateFileId, currentSessionId, endSession]);
+
+  // Handle Save As dialog confirm (iOS)
+  const handleSaveAsConfirm = useCallback(async () => {
+    if (!pattern) return;
+
+    const newName = saveAsInputValue.trim();
+    if (!newName) {
+      setShowSaveAsDialog(false);
+      return;
+    }
+
+    try {
+      const filePath = `${newName}.stitchalot`;
+
+      // End current session if active (it belongs to the old file)
+      if (currentSessionId) {
+        endSession(currentSessionId, 0, 0, 0);
+      }
+
+      // Generate new fileId for the new file
+      const newFileId = regenerateFileId();
+
+      // Create NDP with the new fileId
+      const ndpFile = patternToNdp({ ...pattern, fileId: newFileId });
+      const savedPath = await invoke<string>('save_project', { path: filePath, project: ndpFile });
+
+      setCurrentFilePath(savedPath);
+      markSaved();
+      addToRecentFiles(savedPath);
+      setShowSaveAsDialog(false);
+    } catch (error) {
+      console.error('Failed to save:', error);
+      alert(`Failed to save project: ${error}`);
+    }
+  }, [pattern, saveAsInputValue, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles, regenerateFileId, currentSessionId, endSession]);
 
   // Close project (go home)
   const handleClose = useCallback(async () => {
@@ -1005,12 +1089,24 @@ function App() {
   // Actually open a file via dialog (called directly or after save/continue)
   const doHandleOpen = useCallback(async () => {
     try {
+      // On iOS, don't filter by extension due to platform limitations with custom UTIs
+      // The file will be validated when we try to parse it
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+        (navigator.userAgent.includes('Mac') && 'ontouchend' in document && navigator.maxTouchPoints > 1);
+
       const result = await open({
-        filters: [{ name: 'StitchALot Design', extensions: ['stitchalot'] }],
+        filters: isIOS ? [] : [{ name: 'StitchALot Design', extensions: ['stitchalot', 'json'] }],
         multiple: false,
       });
 
       if (!result) return; // User cancelled
+
+      // Validate file extension
+      const filePath = result as string;
+      if (!filePath.toLowerCase().endsWith('.stitchalot')) {
+        alert('Please select a .stitchalot file');
+        return;
+      }
 
       const ndpFile = await invoke<NdpFile>('open_project', { path: result });
       const loadedPattern = ndpToPattern(ndpFile);
@@ -1445,20 +1541,20 @@ function App() {
                     disabled={!pattern}
                     className={`w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors ${!pattern ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
-                    Home <span className="text-gray-400 text-xs float-right">Ctrl+W</span>
+                    Home {!isIOS && <span className="text-gray-400 text-xs float-right">Ctrl+W</span>}
                   </button>
                   <div className="border-t border-gray-600 my-1" />
                   <button
                     onClick={() => { showNewProject(); setShowFileMenu(false); }}
                     className="w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors"
                   >
-                    New <span className="text-gray-400 text-xs float-right">Ctrl+N</span>
+                    New {!isIOS && <span className="text-gray-400 text-xs float-right">Ctrl+N</span>}
                   </button>
                   <button
                     onClick={() => { handleOpen(); setShowFileMenu(false); }}
                     className="w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors"
                   >
-                    Open <span className="text-gray-400 text-xs float-right">Ctrl+O</span>
+                    Open {!isIOS && <span className="text-gray-400 text-xs float-right">Ctrl+O</span>}
                   </button>
                   {/* Open Recent Submenu */}
                   <div
@@ -1506,14 +1602,14 @@ function App() {
                     disabled={!pattern}
                     className={`w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors ${!pattern ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
-                    Save{hasUnsavedChanges ? ' *' : ''} <span className="text-gray-400 text-xs float-right">Ctrl+S</span>
+                    Save{hasUnsavedChanges ? ' *' : ''} {!isIOS && <span className="text-gray-400 text-xs float-right">Ctrl+S</span>}
                   </button>
                   <button
                     onClick={() => { handleSaveAs(); setShowFileMenu(false); }}
                     disabled={!pattern}
                     className={`w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors ${!pattern ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
-                    Save As <span className="text-gray-400 text-xs float-right">Ctrl+Shift+S</span>
+                    Save As {!isIOS && <span className="text-gray-400 text-xs float-right">Ctrl+Shift+S</span>}
                   </button>
                   <div className="border-t border-gray-600 my-1" />
                   <button
@@ -1531,7 +1627,7 @@ function App() {
                     onClick={() => { handleExit(); setShowFileMenu(false); }}
                     className="w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors"
                   >
-                    Exit <span className="text-gray-400 text-xs float-right">Alt+F4</span>
+                    Exit {!isIOS && <span className="text-gray-400 text-xs float-right">Alt+F4</span>}
                   </button>
                 </div>
               )}
@@ -1587,24 +1683,25 @@ function App() {
                     </button>
                     <div className="border-t border-gray-600 my-1" />
                     {/* Advanced Submenu */}
-                    <div className="relative group">
+                    <div className="relative">
                       <button
+                        onClick={() => setShowAdvancedMenu(!showAdvancedMenu)}
                         className="w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors flex items-center justify-between"
                       >
                         Advanced
-                        <span className="text-gray-400">▶</span>
+                        <span className="text-gray-400">{showAdvancedMenu ? '▼' : '▶'}</span>
                       </button>
-                      {/* Invisible bridge to prevent gap between menu and submenu */}
-                      <div className="absolute left-full top-0 w-2 h-full hidden group-hover:block" />
-                      <div className="absolute left-full top-0 ml-1 bg-gray-700 rounded shadow-lg py-1 min-w-[180px] z-50 hidden group-hover:block">
-                        <button
-                          onClick={() => { setShowBitmapFontEditor(true); setShowToolsMenu(false); }}
-                          className="w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors"
-                        >
-                          Font Creator
-                          <span className="block text-xs text-gray-400">Ctrl+Shift+F</span>
-                        </button>
-                      </div>
+                      {showAdvancedMenu && (
+                        <div className="absolute left-full top-0 ml-1 bg-gray-700 rounded shadow-lg py-1 min-w-[180px] z-50">
+                          <button
+                            onClick={() => { setShowBitmapFontEditor(true); setShowToolsMenu(false); setShowAdvancedMenu(false); }}
+                            className="w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors"
+                          >
+                            Font Creator
+                            {!isIOS && <span className="block text-xs text-gray-400">Ctrl+Shift+F</span>}
+                          </button>
+                        </div>
+                      )}
                     </div>
                 </div>
               )}
@@ -1731,54 +1828,56 @@ function App() {
             </span>
           )}
           {appVersion && <span className="text-sm text-gray-400">v{appVersion}</span>}
-          {/* Window Controls */}
-          <div className="flex items-center gap-1 ml-4" data-window-controls style={{ WebkitAppRegion: 'no-drag', appRegion: 'no-drag' } as React.CSSProperties}>
-            <button
-              onMouseDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('Minimize clicked');
-                getCurrentWindow().minimize();
-              }}
-              className="w-8 h-8 flex items-center justify-center hover:bg-gray-700 rounded transition-colors"
-              style={{ WebkitAppRegion: 'no-drag', appRegion: 'no-drag' } as React.CSSProperties}
-              title="Minimize"
-            >
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" style={{ pointerEvents: 'none' }}>
-                <rect y="5" width="12" height="2" />
-              </svg>
-            </button>
-            <button
-              onMouseDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('Maximize clicked');
-                getCurrentWindow().toggleMaximize();
-              }}
-              className="w-8 h-8 flex items-center justify-center hover:bg-gray-700 rounded transition-colors"
-              style={{ WebkitAppRegion: 'no-drag', appRegion: 'no-drag' } as React.CSSProperties}
-              title="Maximize"
-            >
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ pointerEvents: 'none' }}>
-                <rect x="1" y="1" width="10" height="10" />
-              </svg>
-            </button>
-            <button
-              onMouseDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('Close clicked');
-                getCurrentWindow().close();
-              }}
-              className="w-8 h-8 flex items-center justify-center hover:bg-red-600 rounded transition-colors"
-              style={{ WebkitAppRegion: 'no-drag', appRegion: 'no-drag' } as React.CSSProperties}
-              title="Close"
-            >
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" style={{ pointerEvents: 'none' }}>
-                <path d="M1 1l10 10M11 1L1 11" />
-              </svg>
-            </button>
-          </div>
+          {/* Window Controls - hidden on iOS/iPad */}
+          {!isIOS && (
+            <div className="flex items-center gap-1 ml-4" data-window-controls style={{ WebkitAppRegion: 'no-drag', appRegion: 'no-drag' } as React.CSSProperties}>
+              <button
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  console.log('Minimize clicked');
+                  getCurrentWindow().minimize();
+                }}
+                className="w-8 h-8 flex items-center justify-center hover:bg-gray-700 rounded transition-colors"
+                style={{ WebkitAppRegion: 'no-drag', appRegion: 'no-drag' } as React.CSSProperties}
+                title="Minimize"
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" style={{ pointerEvents: 'none' }}>
+                  <rect y="5" width="12" height="2" />
+                </svg>
+              </button>
+              <button
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  console.log('Maximize clicked');
+                  getCurrentWindow().toggleMaximize();
+                }}
+                className="w-8 h-8 flex items-center justify-center hover:bg-gray-700 rounded transition-colors"
+                style={{ WebkitAppRegion: 'no-drag', appRegion: 'no-drag' } as React.CSSProperties}
+                title="Maximize"
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ pointerEvents: 'none' }}>
+                  <rect x="1" y="1" width="10" height="10" />
+                </svg>
+              </button>
+              <button
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  console.log('Close clicked');
+                  getCurrentWindow().close();
+                }}
+                className="w-8 h-8 flex items-center justify-center hover:bg-red-600 rounded transition-colors"
+                style={{ WebkitAppRegion: 'no-drag', appRegion: 'no-drag' } as React.CSSProperties}
+                title="Close"
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" style={{ pointerEvents: 'none' }}>
+                  <path d="M1 1l10 10M11 1L1 11" />
+                </svg>
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -1804,7 +1903,7 @@ function App() {
             <PatternCanvas showSymbols={preferences.showSymbols} showCenterMarker={preferences.showCenterMarker} />
 
             {/* Right Panel - either Progress Tracking or Layers/Colors */}
-            <div className={`flex flex-col border-l border-gray-300 overflow-hidden transition-all duration-200 ${isRightPanelCollapsed ? 'w-8' : 'w-64'}`}>
+            <div className={`flex flex-col border-l border-gray-300 min-h-0 transition-all duration-200 ${isRightPanelCollapsed ? 'w-8' : 'w-64'}`}>
               {/* Collapse/Expand Toggle - arrow aligned right */}
               {/* When expanded: > to collapse (pointing right) */}
               {/* When collapsed: < to expand (pointing left) */}
@@ -1859,7 +1958,7 @@ function App() {
                 >
                   Create New Pattern
                 </button>
-                <p className="text-xs text-gray-400 mt-2">Press Ctrl+N to create a new pattern</p>
+                {!isIOS && <p className="text-xs text-gray-400 mt-2">Press Ctrl+N to create a new pattern</p>}
               </div>
             </div>
 
@@ -2216,6 +2315,46 @@ function App() {
                 className="px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
               >
                 OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save As Dialog (iOS) */}
+      {showSaveAsDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-96">
+            <h2 className="text-lg font-semibold text-gray-800 mb-4">Save As</h2>
+            <input
+              type="text"
+              value={saveAsInputValue}
+              onChange={(e) => setSaveAsInputValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleSaveAsConfirm();
+                } else if (e.key === 'Escape') {
+                  setShowSaveAsDialog(false);
+                }
+              }}
+              placeholder="Enter filename"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              autoFocus
+            />
+            <p className="text-xs text-gray-500 mt-2">.stitchalot extension will be added automatically</p>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setShowSaveAsDialog(false)}
+                className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveAsConfirm}
+                className="px-4 py-2 text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Save
               </button>
             </div>
           </div>

@@ -115,8 +115,8 @@ export function PreviewCanvasDialog({ onClose }: PreviewCanvasDialogProps) {
     canvas.width = width;
     canvas.height = height;
 
-    // Fill with canvas/fabric background color (off-white/cream like aida cloth)
-    ctx.fillStyle = '#F5F5F0';
+    // Fill with canvas/fabric background color (white like blank canvas)
+    ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, width, height);
 
     // Add subtle fabric texture grid

@@ -1236,7 +1236,7 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPrev
   }
 
   return (
-    <div ref={containerRef} className="shrink-0 bg-white border-r border-gray-300 flex flex-col transition-all duration-200 overflow-hidden">
+    <div ref={containerRef} className="shrink-0 bg-white border-r border-gray-300 flex flex-col transition-all duration-200 overflow-visible relative">
       {/* Collapse/Expand Toggle */}
       <button
         onClick={onToggleCollapse}

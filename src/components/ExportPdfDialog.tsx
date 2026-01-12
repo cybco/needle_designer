@@ -35,19 +35,34 @@ export function ExportPdfDialog({ isOpen, onClose, pattern, currentFilePath }: E
   if (!isOpen) return null;
 
   const handleExport = async () => {
-    // Show save dialog first
-    const defaultName = `${displayName.replace(/[^a-zA-Z0-9]/g, '_')}_pattern.pdf`;
-    const filePath = await save({
-      filters: [{ name: 'PDF Document', extensions: ['pdf'] }],
-      defaultPath: defaultName,
-    });
+    // Detect iOS/iPadOS
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.userAgent.includes('Mac') && 'ontouchend' in document && navigator.maxTouchPoints > 1);
 
-    if (!filePath) {
-      return; // User cancelled
+    const defaultName = `${displayName.replace(/[^a-zA-Z0-9]/g, '_')}_pattern.pdf`;
+    let filePath: string;
+
+    if (isIOS) {
+      // On iOS, skip the buggy save dialog and use the default filename
+      // The Rust backend will save to the Documents directory
+      filePath = defaultName;
+    } else {
+      // Show save dialog on desktop
+      const result = await save({
+        filters: [{ name: 'PDF Document', extensions: ['pdf'] }],
+        defaultPath: defaultName,
+      });
+
+      if (!result) {
+        return; // User cancelled
+      }
+      filePath = result;
     }
 
     setIsExporting(true);
     try {
+      console.log('Starting PDF export...');
+
       // Generate PDF (with watermark if in trial mode)
       const pdfData = await exportPatternToPdf(pattern, {
         includePreviewPage,
@@ -58,6 +73,12 @@ export function ExportPdfDialog({ isOpen, onClose, pattern, currentFilePath }: E
         shouldWatermark,
         title: displayName,
       });
+
+      console.log('PDF generated, size:', pdfData.byteLength, 'bytes');
+
+      if (!pdfData || pdfData.byteLength === 0) {
+        throw new Error('PDF generation returned empty data');
+      }
 
       // Convert ArrayBuffer to base64 for sending to Rust
       // Using chunked approach to avoid stack overflow with large files
@@ -70,13 +91,16 @@ export function ExportPdfDialog({ isOpen, onClose, pattern, currentFilePath }: E
       }
       const base64 = btoa(binary);
 
-      // Save via Tauri
-      await invoke('save_pdf', { path: filePath, data: base64 });
+      console.log('Base64 encoded, length:', base64.length);
+
+      // Save via Tauri - returns the actual saved path
+      const savedPath = await invoke<string>('save_pdf', { path: filePath, data: base64 });
+      console.log('PDF saved to:', savedPath);
 
       onClose();
     } catch (error) {
       console.error('Failed to export PDF:', error);
-      alert('Failed to export PDF. Please try again.');
+      alert(`Failed to export PDF: ${error}`);
     } finally {
       setIsExporting(false);
     }

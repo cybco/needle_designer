@@ -127,7 +127,7 @@ function getContrastColor(rgb: [number, number, number]): string {
 
 // Helper to draw a realistic cross-stitch on a canvas cell
 function drawCrossStitch(
-  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   size: number,
@@ -205,8 +205,10 @@ function renderPatternPreviewSmooth(pattern: Pattern): string {
   const width = pattern.canvas.width;
   const height = pattern.canvas.height;
 
-  // Create offscreen canvas at exact pattern dimensions (1px per stitch)
-  const canvas = new OffscreenCanvas(width, height);
+  // Use regular canvas for iOS compatibility (OffscreenCanvas may not be fully supported)
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
   const ctx = canvas.getContext('2d');
   if (!ctx) {
     throw new Error('Failed to get canvas context');
@@ -235,18 +237,7 @@ function renderPatternPreviewSmooth(pattern: Pattern): string {
     }
   }
 
-  // Convert to data URL
-  const imageData = ctx.getImageData(0, 0, width, height);
-  const tempCanvas = document.createElement('canvas');
-  tempCanvas.width = width;
-  tempCanvas.height = height;
-  const tempCtx = tempCanvas.getContext('2d');
-  if (!tempCtx) {
-    throw new Error('Failed to get temp canvas context');
-  }
-  tempCtx.putImageData(imageData, 0, 0);
-
-  return tempCanvas.toDataURL('image/png');
+  return canvas.toDataURL('image/png');
 }
 
 // Render pattern preview to a data URL for embedding in PDF or thumbnails
@@ -267,8 +258,10 @@ export function renderPatternPreview(pattern: Pattern, maxWidth: number, maxHeig
   const width = Math.round(pattern.canvas.width * cellSize);
   const height = Math.round(pattern.canvas.height * cellSize);
 
-  // Create offscreen canvas
-  const canvas = new OffscreenCanvas(width, height);
+  // Use regular canvas for iOS compatibility (OffscreenCanvas may not be fully supported)
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
   const ctx = canvas.getContext('2d');
   if (!ctx) {
     throw new Error('Failed to get canvas context');
@@ -324,20 +317,7 @@ export function renderPatternPreview(pattern: Pattern, maxWidth: number, maxHeig
     }
   }
 
-  // Use synchronous approach via ImageData for compatibility
-  const imageData = ctx.getImageData(0, 0, width, height);
-
-  // Create a regular canvas to convert to data URL
-  const tempCanvas = document.createElement('canvas');
-  tempCanvas.width = width;
-  tempCanvas.height = height;
-  const tempCtx = tempCanvas.getContext('2d');
-  if (!tempCtx) {
-    throw new Error('Failed to get temp canvas context');
-  }
-  tempCtx.putImageData(imageData, 0, 0);
-
-  return tempCanvas.toDataURL('image/png');
+  return canvas.toDataURL('image/png');
 }
 
 export async function exportPatternToPdf(

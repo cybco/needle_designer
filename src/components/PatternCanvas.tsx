@@ -1276,7 +1276,7 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
           ctx.lineTo(x, RULER_SIZE - 10);
           ctx.stroke();
           if (mm > 0) {
-            ctx.fillText(String(mm / 10) + 'cm', x, 12);
+            ctx.fillText(String(mm / 10), x, 12);
           }
         } else if (mm % 5 === 0 && step <= 5) {
           // Half-cm tick
@@ -1292,6 +1292,12 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
           ctx.stroke();
         }
       }
+      // Draw "cm" unit label at the start of the ruler
+      ctx.fillStyle = '#999';
+      ctx.font = '9px sans-serif';
+      ctx.fillText('cm', 3, 12);
+      ctx.fillStyle = '#333';
+      ctx.font = '10px sans-serif';
     } else {
       // Draw inch markers (default)
       const startInch = Math.floor(-panOffset.x / pixelsPerInch);
@@ -1422,7 +1428,7 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
             ctx.save();
             ctx.translate(11, y);
             ctx.rotate(-Math.PI / 2);
-            ctx.fillText(String(mm / 10) + 'cm', 0, 0);
+            ctx.fillText(String(mm / 10), 0, 0);
             ctx.restore();
           }
         } else if (mm % 5 === 0 && step <= 5) {
@@ -1437,6 +1443,16 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
           ctx.stroke();
         }
       }
+      // Draw "cm" unit label at the start of the ruler
+      ctx.fillStyle = '#999';
+      ctx.font = '9px sans-serif';
+      ctx.save();
+      ctx.translate(11, 3);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText('cm', 0, 0);
+      ctx.restore();
+      ctx.fillStyle = '#333';
+      ctx.font = '10px sans-serif';
     } else {
       // Draw inch markers (default)
       const startInch = Math.floor(-panOffset.y / pixelsPerInch);
@@ -1568,7 +1584,7 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
             ctx.save();
             ctx.translate(13, y);
             ctx.rotate(Math.PI / 2);
-            ctx.fillText(String(mm / 10) + 'cm', 0, 0);
+            ctx.fillText(String(mm / 10), 0, 0);
             ctx.restore();
           }
         } else if (mm % 5 === 0 && step <= 5) {
@@ -1583,6 +1599,16 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
           ctx.stroke();
         }
       }
+      // Draw "cm" unit label at the start of the ruler
+      ctx.fillStyle = '#999';
+      ctx.font = '9px sans-serif';
+      ctx.save();
+      ctx.translate(13, 3);
+      ctx.rotate(Math.PI / 2);
+      ctx.fillText('cm', 0, 0);
+      ctx.restore();
+      ctx.fillStyle = '#333';
+      ctx.font = '10px sans-serif';
     } else {
       // Draw inch markers (default)
       const startInch = Math.floor(-panOffset.y / pixelsPerInch);

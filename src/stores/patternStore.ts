@@ -1665,10 +1665,15 @@ export const usePatternStore = create<PatternState>((set, get) => {
 
     // Build a map from threadCode to existing color ID for deduplication
     const existingCodeToId = new Map<string, string>();
+    // Also build a map from RGB values to existing color ID for colors without threadCode
+    const existingRgbToId = new Map<string, string>();
     for (const c of pattern.colorPalette) {
       if (c.threadCode) {
         existingCodeToId.set(c.threadCode, c.id);
       }
+      // Always track RGB for fallback matching
+      const rgbKey = `${c.rgb[0]},${c.rgb[1]},${c.rgb[2]}`;
+      existingRgbToId.set(rgbKey, c.id);
     }
 
     // Build color ID remapping: new color ID -> existing color ID (if duplicate)
@@ -1677,14 +1682,22 @@ export const usePatternStore = create<PatternState>((set, get) => {
 
     for (const c of colors) {
       if (c.threadCode && existingCodeToId.has(c.threadCode)) {
-        // This color already exists in palette - remap to existing ID
+        // This color already exists in palette by threadCode - remap to existing ID
         colorIdRemap.set(c.id, existingCodeToId.get(c.threadCode)!);
       } else {
-        // New color - add to palette
-        newColors.push(c);
-        // Also track this new color's threadCode if it has one
-        if (c.threadCode) {
-          existingCodeToId.set(c.threadCode, c.id);
+        // Check for RGB match as fallback (for colors without threadCode)
+        const rgbKey = `${c.rgb[0]},${c.rgb[1]},${c.rgb[2]}`;
+        if (existingRgbToId.has(rgbKey)) {
+          // This color already exists in palette by RGB - remap to existing ID
+          colorIdRemap.set(c.id, existingRgbToId.get(rgbKey)!);
+        } else {
+          // New color - add to palette
+          newColors.push(c);
+          // Track this new color's threadCode and RGB
+          if (c.threadCode) {
+            existingCodeToId.set(c.threadCode, c.id);
+          }
+          existingRgbToId.set(rgbKey, c.id);
         }
       }
     }
