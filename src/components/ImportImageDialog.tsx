@@ -55,7 +55,7 @@ type DitherMode = 'none' | 'floyd-steinberg' | 'ordered' | 'atkinson';
 type DimensionUnit = 'stitches' | 'inches' | 'mm';
 
 export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
-  const { pattern, importPattern, importAsLayer } = usePatternStore();
+  const { pattern, importPattern, importAsLayer, mergeIntoActiveLayer } = usePatternStore();
   const { autoGeneratePreview, setAutoGeneratePreview } = useConfigStore();
 
   // Detect mobile/touch devices for layout - check multiple signals
@@ -657,8 +657,11 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
     if (importMode === 'add-layer' && pattern) {
       // Import as a new layer in the existing pattern
       importAsLayer(patternName, colors, stitches);
+    } else if (importMode === 'new-pattern' && pattern) {
+      // Merge into active layer (keeps existing colors, overwrites stitches)
+      mergeIntoActiveLayer(colors, stitches);
     } else {
-      // Create new pattern (or replace existing)
+      // Create new pattern (no existing pattern)
       importPattern(patternName, processedImage.width, processedImage.height, meshCount, colors, stitches);
     }
 
@@ -1026,13 +1029,13 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
                         : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
                     }`}
                   >
-                    New Pattern
+                    Merge to Layer
                   </button>
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
                   {importMode === 'add-layer'
                     ? 'Add imported image as a new layer in the current pattern'
-                    : 'Replace current pattern with the imported image'}
+                    : 'Merge into active layer, overwriting conflicting stitches'}
                 </p>
               </div>
             )}

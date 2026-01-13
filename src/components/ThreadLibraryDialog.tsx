@@ -65,10 +65,18 @@ function getColorSortKey(r: number, g: number, b: number): number {
 }
 
 export function ThreadLibraryDialog({ isOpen, onClose, initialBrand = 'DMC', showSymbols = true }: ThreadLibraryDialogProps) {
-  const { addColor, selectColor } = usePatternStore();
+  const { pattern, addColor, selectColor } = usePatternStore();
+
+  // Check if a thread is already in the palette
+  const isInPalette = (thread: UnifiedThreadColor) => {
+    if (!pattern) return false;
+    return pattern.colorPalette.some(
+      c => c.threadCode === thread.code && c.threadBrand === thread.brand
+    );
+  };
   const [searchQuery, setSearchQuery] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('code');
-  const [selectedThread, setSelectedThread] = useState<UnifiedThreadColor | null>(null);
+  const [selectedThreads, setSelectedThreads] = useState<UnifiedThreadColor[]>([]);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [selectedBrand, setSelectedBrand] = useState<ThreadBrand>(initialBrand);
 
@@ -79,9 +87,8 @@ export function ThreadLibraryDialog({ isOpen, onClose, initialBrand = 'DMC', sho
     setSelectedBrand(initialBrand);
   }, [initialBrand]);
 
-  // Reset selections when brand changes
+  // Reset filters when brand changes (but keep selected threads)
   useEffect(() => {
-    setSelectedThread(null);
     setCategoryFilter('all');
     setSearchQuery('');
   }, [selectedBrand]);
@@ -147,24 +154,73 @@ export function ThreadLibraryDialog({ isOpen, onClose, initialBrand = 'DMC', sho
     return threads;
   }, [searchQuery, sortMode, categoryFilter, selectedBrand, allBrandThreads]);
 
-  const handleAddThread = (thread: UnifiedThreadColor) => {
+  // Toggle thread selection (skip if already in palette)
+  const handleToggleThread = (thread: UnifiedThreadColor) => {
+    if (isInPalette(thread)) return; // Don't allow selecting colors already in palette
+
+    setSelectedThreads(prev => {
+      const isSelected = prev.some(t => t.code === thread.code && t.brand === thread.brand);
+      if (isSelected) {
+        return prev.filter(t => !(t.code === thread.code && t.brand === thread.brand));
+      } else {
+        return [...prev, thread];
+      }
+    });
+  };
+
+  // Remove thread from selection
+  const handleRemoveFromSelection = (thread: UnifiedThreadColor) => {
+    setSelectedThreads(prev => prev.filter(t => !(t.code === thread.code && t.brand === thread.brand)));
+  };
+
+  // Add a single thread directly (for double-click)
+  const handleAddThreadDirect = (thread: UnifiedThreadColor) => {
+    if (isInPalette(thread)) return; // Don't add if already in palette
+
     const newColor: Color = {
       id: `${thread.brand.toLowerCase()}-${thread.code}-${Date.now()}`,
       name: thread.name,
       rgb: thread.rgb,
       threadBrand: thread.brand,
       threadCode: thread.code,
-      symbol: thread.symbol, // Use the thread's predefined symbol
+      symbol: thread.symbol,
     };
     addColor(newColor);
     selectColor(newColor.id);
     onClose();
   };
 
+  // Add all selected threads to palette
   const handleAddSelected = () => {
-    if (selectedThread) {
-      handleAddThread(selectedThread);
+    if (selectedThreads.length === 0) return;
+
+    let lastColorId = '';
+    selectedThreads.forEach((thread) => {
+      const newColor: Color = {
+        id: `${thread.brand.toLowerCase()}-${thread.code}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        name: thread.name,
+        rgb: thread.rgb,
+        threadBrand: thread.brand,
+        threadCode: thread.code,
+        symbol: thread.symbol,
+      };
+      addColor(newColor);
+      lastColorId = newColor.id;
+    });
+
+    // Select the last added color
+    if (lastColorId) {
+      selectColor(lastColorId);
     }
+
+    // Clear selection after adding
+    setSelectedThreads([]);
+    onClose();
+  };
+
+  // Check if a thread is selected
+  const isThreadSelected = (thread: UnifiedThreadColor) => {
+    return selectedThreads.some(t => t.code === thread.code && t.brand === thread.brand);
   };
 
   if (!isOpen) return null;
@@ -255,17 +311,22 @@ export function ThreadLibraryDialog({ isOpen, onClose, initialBrand = 'DMC', sho
               // Calculate contrast color for symbol display
               const luminance = (0.299 * thread.rgb[0] + 0.587 * thread.rgb[1] + 0.114 * thread.rgb[2]) / 255;
               const symbolColor = luminance > 0.5 ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.9)';
+              const selected = isThreadSelected(thread);
+              const alreadyInPalette = isInPalette(thread);
 
               return (
                 <button
                   key={thread.code}
-                  onClick={() => setSelectedThread(thread)}
-                  onDoubleClick={() => handleAddThread(thread)}
+                  onClick={() => handleToggleThread(thread)}
+                  onDoubleClick={() => handleAddThreadDirect(thread)}
+                  disabled={alreadyInPalette}
                   className={`
                     p-2 rounded-lg border-2 transition-all text-left flex items-center gap-2
-                    ${selectedThread?.code === thread.code
-                      ? 'border-blue-500 ring-2 ring-blue-200 bg-blue-50'
-                      : 'border-gray-200 hover:border-gray-400 bg-white'
+                    ${alreadyInPalette
+                      ? 'border-green-300 bg-green-50 opacity-60 cursor-not-allowed'
+                      : selected
+                        ? 'border-blue-500 ring-2 ring-blue-200 bg-blue-50'
+                        : 'border-gray-200 hover:border-gray-400 bg-white'
                     }
                   `}
                 >
@@ -275,18 +336,26 @@ export function ThreadLibraryDialog({ isOpen, onClose, initialBrand = 'DMC', sho
                       backgroundColor: `rgb(${thread.rgb[0]}, ${thread.rgb[1]}, ${thread.rgb[2]})`,
                     }}
                   >
-                    {showSymbols && (
+                    {alreadyInPalette ? (
+                      <svg className="w-5 h-5" style={{ color: symbolColor }} fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                    ) : selected ? (
+                      <svg className="w-5 h-5" style={{ color: symbolColor }} fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                    ) : showSymbols ? (
                       <span
                         className="text-base font-bold"
                         style={{ color: symbolColor }}
                       >
                         {thread.symbol}
                       </span>
-                    )}
+                    ) : null}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-bold text-gray-800">{thread.code}</p>
-                    <p className="text-xs text-gray-500 truncate">{thread.name}</p>
+                    <p className={`text-xs font-bold ${alreadyInPalette ? 'text-gray-500' : 'text-gray-800'}`}>{thread.code}</p>
+                    <p className="text-xs text-gray-500 truncate">{alreadyInPalette ? 'In palette' : thread.name}</p>
                   </div>
                 </button>
               );
@@ -302,44 +371,54 @@ export function ThreadLibraryDialog({ isOpen, onClose, initialBrand = 'DMC', sho
           )}
         </div>
 
-        {/* Selected Thread Info */}
-        {selectedThread && (
+        {/* Selected Colors Preview Area */}
+        {selectedThreads.length > 0 && (
           <div className="p-4 border-t border-gray-200 bg-gray-50">
-            <div className="flex items-center gap-4">
-              {(() => {
-                const luminance = (0.299 * selectedThread.rgb[0] + 0.587 * selectedThread.rgb[1] + 0.114 * selectedThread.rgb[2]) / 255;
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-semibold text-gray-700">
+                Selected Colors ({selectedThreads.length})
+              </p>
+              <button
+                onClick={() => setSelectedThreads([])}
+                className="text-xs text-gray-500 hover:text-red-600 transition-colors"
+              >
+                Clear All
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto">
+              {selectedThreads.map((thread) => {
+                const luminance = (0.299 * thread.rgb[0] + 0.587 * thread.rgb[1] + 0.114 * thread.rgb[2]) / 255;
                 const symbolColor = luminance > 0.5 ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.9)';
                 return (
                   <div
-                    className="w-16 h-16 rounded-lg border border-gray-300 shrink-0 flex items-center justify-center"
-                    style={{
-                      backgroundColor: `rgb(${selectedThread.rgb[0]}, ${selectedThread.rgb[1]}, ${selectedThread.rgb[2]})`,
-                    }}
+                    key={`${thread.brand}-${thread.code}`}
+                    className="group flex items-center gap-1.5 bg-white border border-gray-200 rounded-lg pl-1 pr-1.5 py-1 hover:border-gray-400 transition-colors"
                   >
-                    {showSymbols && (
-                      <span
-                        className="text-3xl font-bold"
-                        style={{ color: symbolColor }}
-                      >
-                        {selectedThread.symbol}
-                      </span>
-                    )}
+                    <div
+                      className="w-6 h-6 rounded border border-gray-300 shrink-0 flex items-center justify-center"
+                      style={{
+                        backgroundColor: `rgb(${thread.rgb[0]}, ${thread.rgb[1]}, ${thread.rgb[2]})`,
+                      }}
+                    >
+                      {showSymbols && (
+                        <span className="text-xs font-bold" style={{ color: symbolColor }}>
+                          {thread.symbol}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-xs font-medium text-gray-700">{thread.code}</span>
+                    <button
+                      onClick={() => handleRemoveFromSelection(thread)}
+                      className="w-4 h-4 flex items-center justify-center text-gray-400 hover:text-red-600 transition-colors rounded-full hover:bg-red-50"
+                      title="Remove from selection"
+                    >
+                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                    </button>
                   </div>
                 );
-              })()}
-              <div className="flex-1">
-                <p className="font-bold text-gray-800">{selectedThread.brand} {selectedThread.code}</p>
-                <p className="text-sm text-gray-600">{selectedThread.name}</p>
-                <p className="text-xs text-gray-500 mt-1">
-                  {showSymbols && (
-                    <>Symbol: <span className="font-bold text-lg">{selectedThread.symbol}</span> | </>
-                  )}
-                  {selectedThread.category && categoryNames[selectedThread.category as ThreadCategory]
-                    ? `${categoryNames[selectedThread.category as ThreadCategory]} | `
-                    : ''}
-                  RGB: {selectedThread.rgb[0]}, {selectedThread.rgb[1]}, {selectedThread.rgb[2]}
-                </p>
-              </div>
+              })}
             </div>
           </div>
         )}
@@ -358,10 +437,12 @@ export function ThreadLibraryDialog({ isOpen, onClose, initialBrand = 'DMC', sho
             </button>
             <button
               onClick={handleAddSelected}
-              disabled={!selectedThread}
+              disabled={selectedThreads.length === 0}
               className="px-4 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Add to Palette
+              {selectedThreads.length === 0
+                ? 'Add to Palette'
+                : `Add ${selectedThreads.length} Color${selectedThreads.length > 1 ? 's' : ''} to Palette`}
             </button>
           </div>
         </div>

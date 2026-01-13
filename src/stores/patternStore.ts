@@ -208,6 +208,7 @@ interface PatternState {
   history: Pattern[];
   future: Pattern[];
   maxHistorySize: number;
+  isInStroke: boolean; // Track if we're in the middle of a drawing stroke
 
   // Editor state
   selectedColorId: string | null;
@@ -239,6 +240,10 @@ interface PatternState {
   canUndo: () => boolean;
   canRedo: () => boolean;
   setMaxHistorySize: (size: number) => void;
+
+  // Stroke batching (for undo to undo entire strokes, not individual stitches)
+  beginStroke: () => void;
+  endStroke: () => void;
 
   // Pattern actions
   closePattern: () => void;
@@ -281,6 +286,9 @@ interface PatternState {
 
   // Import as layer
   importAsLayer: (name: string, colors: Color[], stitches: Stitch[], metadata?: LayerMetadata) => void;
+
+  // Merge into active layer (adds colors to palette, overwrites stitches at same positions)
+  mergeIntoActiveLayer: (colors: Color[], stitches: Stitch[]) => void;
 
   // Update existing text layer with new content
   updateLayerWithText: (layerId: string, stitches: Stitch[], metadata: TextLayerMetadata) => void;
@@ -546,6 +554,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
   history: [],
   future: [],
   maxHistorySize: 50,
+  isInStroke: false,
   selectedColorId: null,
   activeTool: 'pan',
   activeStitchType: 'square' as StitchType,
@@ -553,7 +562,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
   zoom: 1,
   panOffset: { x: 0, y: 0 },
   showGrid: true,
-  gridDivisions: 10,
+  gridDivisions: 5,
   rulerUnit: 'inches' as RulerUnit,
   activeLayerId: null,
   selection: null,
@@ -608,6 +617,28 @@ export const usePatternStore = create<PatternState>((set, get) => {
       maxHistorySize: size,
       history: history.slice(-size),
     });
+  },
+
+  // Stroke batching - call beginStroke before a series of setStitch calls,
+  // and endStroke after, so undo reverts the entire stroke
+  beginStroke: () => {
+    const { pattern, isInStroke } = get();
+    if (!pattern || isInStroke) return;
+
+    // Push current state to history before starting the stroke
+    const { history, maxHistorySize } = get();
+    const cloned = clonePattern(pattern);
+    const newHistory = [...history, cloned].slice(-maxHistorySize);
+
+    set({
+      isInStroke: true,
+      history: newHistory,
+      future: [], // Clear future on new action
+    });
+  },
+
+  endStroke: () => {
+    set({ isInStroke: false });
   },
 
   // Actions
@@ -751,7 +782,11 @@ export const usePatternStore = create<PatternState>((set, get) => {
     // Check if stitch already exists with same color - no need to change anything
     if (existingIndex >= 0 && activeLayer.stitches[existingIndex].colorId === colorId) return;
 
-    pushToHistory();
+    // Only push to history if not in a stroke (stroke batching handles history)
+    const { isInStroke } = get();
+    if (!isInStroke) {
+      pushToHistory();
+    }
 
     let updatedStitches = [...activeLayer.stitches];
 
@@ -817,7 +852,11 @@ export const usePatternStore = create<PatternState>((set, get) => {
     const existingIndex = activeLayer.stitches.findIndex(s => s.x === x && s.y === y);
     if (existingIndex === -1) return; // No stitch to remove
 
-    pushToHistory();
+    // Only push to history if not in a stroke (stroke batching handles history)
+    const { isInStroke } = get();
+    if (!isInStroke) {
+      pushToHistory();
+    }
 
     const updatedLayers = [...pattern.layers];
     updatedLayers[layerIndex] = {
@@ -895,7 +934,11 @@ export const usePatternStore = create<PatternState>((set, get) => {
     const stitchesToRemove = activeLayer.stitches.filter(isPointOverStitch);
     if (stitchesToRemove.length === 0) return;
 
-    pushToHistory();
+    // Only push to history if not in a stroke (stroke batching handles history)
+    const { isInStroke } = get();
+    if (!isInStroke) {
+      pushToHistory();
+    }
 
     // Remove the stitches
     const updatedStitches = activeLayer.stitches.filter(s => !isPointOverStitch(s));
@@ -1740,6 +1783,108 @@ export const usePatternStore = create<PatternState>((set, get) => {
         layers: [...pattern.layers, newLayer],
       },
       activeLayerId: newLayerId,
+      hasUnsavedChanges: true,
+    });
+  },
+
+  // Merge into active layer - adds colors to palette, overwrites stitches at same positions
+  mergeIntoActiveLayer: (colors, stitches) => {
+    const { pattern, activeLayerId } = get();
+    if (!pattern || !activeLayerId) return;
+
+    const layerIndex = pattern.layers.findIndex(l => l.id === activeLayerId);
+    if (layerIndex === -1) return;
+
+    const activeLayer = pattern.layers[layerIndex];
+    if (activeLayer.locked) return;
+
+    pushToHistory();
+
+    // Build a map from threadCode to existing color ID for deduplication
+    const existingCodeToId = new Map<string, string>();
+    // Also build a map from RGB values to existing color ID for colors without threadCode
+    const existingRgbToId = new Map<string, string>();
+    for (const c of pattern.colorPalette) {
+      if (c.threadCode) {
+        existingCodeToId.set(c.threadCode, c.id);
+      }
+      const rgbKey = `${c.rgb[0]},${c.rgb[1]},${c.rgb[2]}`;
+      existingRgbToId.set(rgbKey, c.id);
+    }
+
+    // Build color ID remapping: new color ID -> existing color ID (if duplicate)
+    const colorIdRemap = new Map<string, string>();
+    const newColors: Color[] = [];
+
+    for (const c of colors) {
+      if (c.threadCode && existingCodeToId.has(c.threadCode)) {
+        colorIdRemap.set(c.id, existingCodeToId.get(c.threadCode)!);
+      } else {
+        const rgbKey = `${c.rgb[0]},${c.rgb[1]},${c.rgb[2]}`;
+        if (existingRgbToId.has(rgbKey)) {
+          colorIdRemap.set(c.id, existingRgbToId.get(rgbKey)!);
+        } else {
+          newColors.push(c);
+          if (c.threadCode) {
+            existingCodeToId.set(c.threadCode, c.id);
+          }
+          existingRgbToId.set(rgbKey, c.id);
+        }
+      }
+    }
+
+    // Remap stitch color IDs to use existing palette colors where applicable
+    const remappedStitches = stitches.map(s => {
+      const remappedId = colorIdRemap.get(s.colorId);
+      return remappedId ? { ...s, colorId: remappedId } : s;
+    });
+
+    // Create a map of existing stitches by position for quick lookup
+    const existingStitchMap = new Map<string, number>();
+    activeLayer.stitches.forEach((s, index) => {
+      existingStitchMap.set(`${s.x},${s.y}`, index);
+    });
+
+    // Merge stitches: new stitches overwrite existing ones at same position
+    const mergedStitches = [...activeLayer.stitches];
+    for (const newStitch of remappedStitches) {
+      const key = `${newStitch.x},${newStitch.y}`;
+      const existingIndex = existingStitchMap.get(key);
+      if (existingIndex !== undefined) {
+        // Overwrite existing stitch
+        mergedStitches[existingIndex] = newStitch;
+      } else {
+        // Add new stitch
+        mergedStitches.push(newStitch);
+        existingStitchMap.set(key, mergedStitches.length - 1);
+      }
+    }
+
+    // Update palette with new colors
+    const colorsWithSymbols = assignMissingSymbols([...pattern.colorPalette, ...newColors]);
+
+    // Update the layer
+    const updatedLayers = [...pattern.layers];
+    updatedLayers[layerIndex] = {
+      ...activeLayer,
+      stitches: mergedStitches,
+    };
+
+    console.log('mergeIntoActiveLayer:', {
+      inputColors: colors.length,
+      newColors: newColors.length,
+      remappedColors: colorIdRemap.size,
+      inputStitches: stitches.length,
+      existingStitches: activeLayer.stitches.length,
+      mergedStitches: mergedStitches.length,
+    });
+
+    set({
+      pattern: {
+        ...pattern,
+        colorPalette: colorsWithSymbols,
+        layers: updatedLayers,
+      },
       hasUnsavedChanges: true,
     });
   },

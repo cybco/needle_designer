@@ -323,6 +323,8 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     endAreaSelection,
     activeStitchType,
     removeStitchAtPoint,
+    beginStroke,
+    endStroke,
   } = usePatternStore();
 
   // Ensure shading values have defaults
@@ -2069,6 +2071,8 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     if (!cell) return;
 
     if (activeTool === 'pencil') {
+      // Begin stroke batching so undo reverts the entire stroke
+      beginStroke();
       // For circles, determine position from click location within cell
       const cellSize = CELL_SIZE * zoom;
       const circlePosition = activeStitchType === 'circle'
@@ -2078,6 +2082,8 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       setIsDrawing(true);
       setLastCell(cell);
     } else if (activeTool === 'eraser') {
+      // Begin stroke batching so undo reverts the entire stroke
+      beginStroke();
       // Use precise eraser that removes specific stitches at the click point
       const cellSize = CELL_SIZE * zoom;
       removeStitchAtPoint(x - panOffset.x, y - panOffset.y, cellSize);
@@ -2322,6 +2328,11 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       setOverlayDragState(null);
     }
 
+    // End stroke batching for pencil/eraser tools
+    if (activeTool === 'pencil' || activeTool === 'eraser') {
+      endStroke();
+    }
+
     // Handle select tool drag/resize end
     if (activeTool === 'select' && selection) {
       if (selection.isResizing) {
@@ -2362,6 +2373,11 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     // Clear overlay drag state
     if (overlayDragState) {
       setOverlayDragState(null);
+    }
+
+    // End stroke batching for pencil/eraser tools
+    if (activeTool === 'pencil' || activeTool === 'eraser') {
+      endStroke();
     }
 
     // Cancel any ongoing drag/resize
@@ -2707,6 +2723,8 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
         const cell = canvasToCell(x, y);
         if (cell) {
           if (activeTool === 'pencil' && selectedColorId) {
+            // Begin stroke batching so undo reverts the entire stroke
+            beginStroke();
             // For circles, determine position from click location within cell
             const cellSize = CELL_SIZE * zoom;
             const circlePosition = activeStitchType === 'circle'
@@ -2717,6 +2735,8 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
             setLastCell(cell);
             return;
           } else if (activeTool === 'eraser') {
+            // Begin stroke batching so undo reverts the entire stroke
+            beginStroke();
             // Use precise eraser
             const cellSize = CELL_SIZE * zoom;
             removeStitchAtPoint(x - panOffset.x, y - panOffset.y, cellSize);
@@ -3022,6 +3042,11 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     // End overlay drag state
     if (overlayDragState) {
       setOverlayDragState(null);
+    }
+
+    // End stroke batching for pencil/eraser tools
+    if (activeTool === 'pencil' || activeTool === 'eraser') {
+      endStroke();
     }
 
     // End layer selection drag/resize

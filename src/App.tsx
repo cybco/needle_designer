@@ -24,6 +24,7 @@ import { LicenseGate } from './components/LicenseGate';
 import { TrialBanner } from './components/TrialBanner';
 import { usePatternStore, Pattern, RulerUnit, Stitch, TextLayerMetadata } from './stores/patternStore';
 import { useSessionHistoryStore } from './stores/sessionHistoryStore';
+import { useConfigStore } from './stores/configStore';
 import { loadBundledFonts } from './data/bundledFonts';
 import { generatePatternThumbnail } from './utils/pdfExport';
 import { invoke } from '@tauri-apps/api/core';
@@ -191,6 +192,18 @@ function ToolVisibilityRow({ checked, onChange, icon, label }: { checked: boolea
   );
 }
 
+// Separate component for Confirm Color Removal toggle (uses configStore)
+function ConfirmColorRemovalToggle() {
+  const { confirmColorRemoval, setConfirmColorRemoval } = useConfigStore();
+  return (
+    <ToggleSwitch
+      checked={confirmColorRemoval}
+      onChange={setConfirmColorRemoval}
+      label="Confirm Color Removal"
+    />
+  );
+}
+
 interface Preferences {
   autoSaveMinutes: number | null; // null means disabled
   historySize: number;
@@ -292,7 +305,16 @@ function App() {
   const [preferences, setPreferences] = useState<Preferences>(() => {
     try {
       const stored = localStorage.getItem(PREFERENCES_KEY);
-      return stored ? { ...DEFAULT_PREFERENCES, ...JSON.parse(stored) } : DEFAULT_PREFERENCES;
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        return {
+          ...DEFAULT_PREFERENCES,
+          ...parsed,
+          // Deep merge toolVisibility to pick up new tools added after user saved preferences
+          toolVisibility: { ...DEFAULT_TOOL_VISIBILITY, ...parsed.toolVisibility }
+        };
+      }
+      return DEFAULT_PREFERENCES;
     } catch {
       return DEFAULT_PREFERENCES;
     }
@@ -1782,6 +1804,9 @@ function App() {
                       />
                     </div>
                     <div className="px-4 py-3 border-t border-gray-600">
+                      <ConfirmColorRemovalToggle />
+                    </div>
+                    <div className="px-4 py-3 border-t border-gray-600">
                       <ToggleSwitch
                         checked={preferences.showSymbols}
                         onChange={(checked) => updatePreferences({ showSymbols: checked })}
@@ -2477,7 +2502,7 @@ function App() {
                   <div className="space-y-2">
                     <ToolVisibilityRow checked={preferences.toolVisibility.line} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, line: checked } })} icon={<span className="text-lg">╱</span>} label="Line (L)" />
                     <ToolVisibilityRow checked={preferences.toolVisibility.rectangle} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, rectangle: checked } })} icon={<span className="text-lg">▢</span>} label="Rectangle (R)" />
-                    <ToolVisibilityRow checked={preferences.toolVisibility.ellipse} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, ellipse: checked } })} icon={<span className="text-lg">◯</span>} label="Ellipse (O)" />
+                    <ToolVisibilityRow checked={preferences.toolVisibility.ellipse} onChange={(checked) => updatePreferences({ toolVisibility: { ...preferences.toolVisibility, ellipse: checked } })} icon={<span className="text-lg">◯</span>} label="Circle (O)" />
                   </div>
                 </div>
               </div>
