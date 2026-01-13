@@ -14,6 +14,8 @@ interface LicenseStore {
   initialize: () => Promise<void>;
   refreshStatus: () => Promise<void>;
   startTrial: () => Promise<void>;
+  activateLicense: (licenseKey: string) => Promise<void>;
+  deactivateDevice: () => Promise<void>;
   shouldWatermark: () => boolean;
   canUseApp: () => boolean;
   clearError: () => void;
@@ -84,6 +86,40 @@ export const useLicenseStore = create<LicenseStore>((set, get) => ({
       set({ licenseInfo, isLoading: false });
     } catch (error) {
       console.error('Failed to start trial:', error);
+      set({
+        error: error instanceof Error ? error.message : String(error),
+        isLoading: false,
+      });
+      throw error; // Re-throw so UI can handle
+    }
+  },
+
+  // Activate a license key
+  activateLicense: async (licenseKey: string) => {
+    set({ isLoading: true, error: null });
+
+    try {
+      const licenseInfo = await invoke<LicenseInfo>('activate_license', { licenseKey });
+      set({ licenseInfo, isLoading: false });
+    } catch (error) {
+      console.error('Failed to activate license:', error);
+      set({
+        error: error instanceof Error ? error.message : String(error),
+        isLoading: false,
+      });
+      throw error; // Re-throw so UI can handle
+    }
+  },
+
+  // Deactivate this device from the license
+  deactivateDevice: async () => {
+    set({ isLoading: true, error: null });
+
+    try {
+      const licenseInfo = await invoke<LicenseInfo>('deactivate_device');
+      set({ licenseInfo, isLoading: false });
+    } catch (error) {
+      console.error('Failed to deactivate device:', error);
       set({
         error: error instanceof Error ? error.message : String(error),
         isLoading: false,

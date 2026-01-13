@@ -1,12 +1,12 @@
 [package]
-name = "needlepoint-designer"
-version = "1.2.0"
+name = "stitch-a-lot-studio"
+version = "1.2.3"
 description = "Cross-platform needlepoint pattern design application"
 authors = ["you"]
 edition = "2021"
 
 [lib]
-name = "needlepoint_designer_lib"
+name = "stitch_a_lot_studio_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

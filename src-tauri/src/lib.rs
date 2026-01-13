@@ -1512,6 +1512,8 @@ pub fn run() {
             licensing::commands::start_trial,
             licensing::commands::get_platform_info,
             licensing::commands::should_watermark_export,
+            licensing::commands::activate_license,
+            licensing::commands::deactivate_device,
             #[cfg(debug_assertions)]
             licensing::commands::reset_license_state
         ])

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Stitch A Lot Studio",
-  "version": "1.2.1",
+  "productName": "StitchALotStudio",
+  "version": "1.2.3",
   "identifier": "com.needlepoint.designer",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -27,7 +27,16 @@
     "iOS": {
       "developmentTeam": "2R9XF345CU",
       "minimumSystemVersion": "13.0"
-    }
+    },
+    "fileAssociations": [
+      {
+        "ext": ["stitchalot"],
+        "name": "StitchALot Pattern",
+        "description": "StitchALot Studio Pattern File",
+        "role": "Editor",
+        "mimeType": "application/x-stitchalot"
+      }
+    ]
   },
   "app": {
     "withGlobalTauri": true,

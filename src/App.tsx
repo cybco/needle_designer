@@ -21,6 +21,7 @@ import { PreviewCanvasDialog } from './components/PreviewCanvasDialog';
 import { CanvasLayoutDialog } from './components/CanvasLayoutDialog';
 import { ToggleSwitch } from './components/ToggleSwitch';
 import { LicenseGate } from './components/LicenseGate';
+import { LicenseDialog } from './components/LicenseDialog';
 import { TrialBanner } from './components/TrialBanner';
 import { usePatternStore, Pattern, RulerUnit, Stitch, TextLayerMetadata } from './stores/patternStore';
 import { useSessionHistoryStore } from './stores/sessionHistoryStore';
@@ -272,6 +273,7 @@ function App() {
   const [showRecentMenu, setShowRecentMenu] = useState(false);
   const [showAdvancedMenu, setShowAdvancedMenu] = useState(false);
   const [showToolbarVisibilityDialog, setShowToolbarVisibilityDialog] = useState(false);
+  const [showLicenseDialog, setShowLicenseDialog] = useState(false);
   const [recentFiles, setRecentFiles] = useState<string[]>(() => {
     try {
       const stored = localStorage.getItem(RECENT_FILES_KEY);
@@ -1725,6 +1727,13 @@ function App() {
                         </div>
                       )}
                     </div>
+                    <div className="border-t border-gray-600 my-1" />
+                    <button
+                      onClick={() => { setShowLicenseDialog(true); setShowToolsMenu(false); }}
+                      className="w-full text-left px-4 py-2 hover:bg-gray-600 transition-colors"
+                    >
+                      License...
+                    </button>
                 </div>
               )}
             </div>
@@ -2231,6 +2240,12 @@ function App() {
       <BitmapFontEditor
         isOpen={showBitmapFontEditor}
         onClose={() => setShowBitmapFontEditor(false)}
+      />
+
+      {/* License Dialog */}
+      <LicenseDialog
+        isOpen={showLicenseDialog}
+        onClose={() => setShowLicenseDialog(false)}
       />
 
       {/* Delete Layer Confirmation Dialog */}

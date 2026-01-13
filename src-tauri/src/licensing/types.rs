@@ -68,8 +68,11 @@ impl LicenseState {
     }
 
     /// Check if exports should be watermarked
+    /// TODO: Re-enable watermark for trial licenses
     pub fn should_watermark(&self) -> bool {
-        matches!(self.status, LicenseStatus::Trial)
+        // Temporarily disabled - will add back later
+        // matches!(self.status, LicenseStatus::Trial)
+        false
     }
 }
 
