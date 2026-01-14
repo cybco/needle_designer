@@ -1,8 +1,4 @@
-/// License server URL - uses localhost in dev, production URL in release
-#[cfg(debug_assertions)]
-pub const LICENSE_SERVER_URL: &str = "http://localhost:3000";
-
-#[cfg(not(debug_assertions))]
+/// License server URL
 pub const LICENSE_SERVER_URL: &str = "https://stitchalot.studio";
 
 /// Trial configuration

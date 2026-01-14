@@ -5,7 +5,7 @@ export type LicenseStatus =
   | 'trial'
   | 'trial_expired'
   | 'licensed'
-  | 'licensed_updates_expired'
+  | 'licensed_upgrade_required'
   | 'invalid'
   | 'grace_period';
 
@@ -16,7 +16,7 @@ export interface LicenseInfo {
   status: LicenseStatus;
   source: LicenseSource | null;
   trial_days_remaining: number | null;
-  updates_expire: string | null; // ISO date string
+  licensed_version: number | null; // Major version the license covers (e.g., 1 for v1.x.x)
   devices_used: number;
   devices_max: number;
   needs_online_validation: boolean;
@@ -74,8 +74,8 @@ export function getLicenseStatusMessage(status: LicenseStatus): string {
       return 'Trial expired';
     case 'licensed':
       return 'Licensed';
-    case 'licensed_updates_expired':
-      return 'Licensed (updates expired)';
+    case 'licensed_upgrade_required':
+      return 'Upgrade required';
     case 'invalid':
       return 'Invalid license';
     case 'grace_period':
@@ -89,8 +89,9 @@ export function getLicenseStatusMessage(status: LicenseStatus): string {
 export function getLicenseStatusColor(status: LicenseStatus): string {
   switch (status) {
     case 'licensed':
-    case 'licensed_updates_expired':
       return 'text-green-600';
+    case 'licensed_upgrade_required':
+      return 'text-yellow-600';
     case 'trial':
       return 'text-blue-600';
     case 'trial_expired':

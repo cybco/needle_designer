@@ -1083,7 +1083,7 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPrev
   }
   if (toolVisibility.ellipse) {
     toolButtons.push(
-      <ToolButton key="ellipse" tool="ellipse" icon="◯" label="Ellipse (O)" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
+      <ToolButton key="ellipse" tool="ellipse" icon="◯" label="Circle (O)" activeTool={activeTool} onClick={setTool} showLabel={showLabels} />
     );
   }
 

@@ -179,11 +179,11 @@ pub mod commands {
             state.source = Some(LicenseSource::LicenseKey);
             state.license_key = Some(license_key);
             state.license_activated = Some(Utc::now());
-            state.updates_expire = Some(data.updates_expire);
+            state.licensed_version = Some(data.licensed_version);
             state.cached_validation = Some(CachedValidation {
                 valid: true,
                 status: "licensed".to_string(),
-                updates_expire: Some(data.updates_expire),
+                licensed_version: data.licensed_version,
                 devices_used: data.devices_used,
                 devices_max: data.devices_max,
                 signature: response.signature.unwrap_or_default(),
@@ -232,7 +232,7 @@ pub mod commands {
         state.source = None;
         state.license_key = None;
         state.license_activated = None;
-        state.updates_expire = None;
+        state.licensed_version = None;
         state.cached_validation = None;
 
         // Save the state

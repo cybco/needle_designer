@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Stitch, Color, TextOrientation } from '../stores/patternStore';
+import { Stitch, Color, TextOrientation, TextAlignment } from '../stores/patternStore';
 import { waitForFont } from '../data/bundledFonts';
 import {
   generateTextPreview,
@@ -43,6 +43,7 @@ export function TextEditorDialog({
   const DEFAULT_BOLDNESS = 0.5;
   const DEFAULT_ITALIC = false;
   const DEFAULT_ORIENTATION: TextOrientation = 'horizontal';
+  const DEFAULT_ALIGNMENT: TextAlignment = 'left';
 
   const [text, setText] = useState('');
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
@@ -50,6 +51,7 @@ export function TextEditorDialog({
   const [italic, setItalic] = useState(DEFAULT_ITALIC);
   const [boldness, setBoldness] = useState(DEFAULT_BOLDNESS);
   const [orientation, setOrientation] = useState<TextOrientation>(DEFAULT_ORIENTATION);
+  const [alignment, setAlignment] = useState<TextAlignment>(DEFAULT_ALIGNMENT);
   const [selectedColorId, setSelectedColorId] = useState(initialColorId);
   const [previewData, setPreviewData] = useState<{
     stitches: Stitch[];
@@ -72,6 +74,7 @@ export function TextEditorDialog({
     setItalic(DEFAULT_ITALIC);
     setBoldness(DEFAULT_BOLDNESS);
     setOrientation(DEFAULT_ORIENTATION);
+    setAlignment(DEFAULT_ALIGNMENT);
     onWeightChange(400); // Reset to regular weight
   };
 
@@ -84,6 +87,7 @@ export function TextEditorDialog({
         setItalic(initialMetadata.italic);
         setBoldness(initialMetadata.boldness);
         setOrientation(initialMetadata.orientation ?? DEFAULT_ORIENTATION);
+        setAlignment(initialMetadata.alignment ?? DEFAULT_ALIGNMENT);
 
         // Use layer height if available, otherwise use default
         const height = initialHeight ?? DEFAULT_FONT_SIZE;
@@ -103,6 +107,7 @@ export function TextEditorDialog({
         setItalic(DEFAULT_ITALIC);
         setBoldness(DEFAULT_BOLDNESS);
         setOrientation(DEFAULT_ORIENTATION);
+        setAlignment(DEFAULT_ALIGNMENT);
         setFontSize(DEFAULT_FONT_SIZE);
         setFontSizeInput(String(DEFAULT_FONT_SIZE));
 
@@ -159,6 +164,7 @@ export function TextEditorDialog({
       colorId: effectiveColorId,
       boldness,
       orientation: 'horizontal', // Always horizontal for font sample
+      alignment,
     });
     setFontSampleCanvas(fontSample.highResCanvas || null);
 
@@ -172,6 +178,7 @@ export function TextEditorDialog({
       colorId: effectiveColorId,
       boldness,
       orientation,
+      alignment,
     });
 
     setPreviewData({
@@ -182,7 +189,7 @@ export function TextEditorDialog({
       gridWidth: preview.gridWidth,
       gridHeight: preview.gridHeight,
     });
-  }, [text, selectedFont, fontSize, selectedWeight, italic, boldness, effectiveColorId, fontLoaded, orientation]);
+  }, [text, selectedFont, fontSize, selectedWeight, italic, boldness, effectiveColorId, fontLoaded, orientation, alignment]);
 
   useEffect(() => {
     const debounce = setTimeout(generatePreview, 150);
@@ -296,6 +303,7 @@ export function TextEditorDialog({
         colorId: effectiveColorId,
         boldness,
         orientation,
+        alignment,
       });
 
       onConfirm(previewData.stitches, previewData.width, previewData.height, colorToAdd, metadata);
@@ -529,6 +537,63 @@ export function TextEditorDialog({
                   <span>C</span>
                 </span>
                 <span className="text-xs">Stacked</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Text Alignment (for multiline) */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Alignment
+            </label>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setAlignment('left')}
+                className={`px-3 py-2 rounded border flex items-center gap-2 ${
+                  alignment === 'left'
+                    ? 'bg-blue-500 text-white border-blue-500'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Left align"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
+                  <rect x="1" y="2" width="14" height="2" />
+                  <rect x="1" y="7" width="10" height="2" />
+                  <rect x="1" y="12" width="12" height="2" />
+                </svg>
+                <span className="text-xs">Left</span>
+              </button>
+              <button
+                onClick={() => setAlignment('center')}
+                className={`px-3 py-2 rounded border flex items-center gap-2 ${
+                  alignment === 'center'
+                    ? 'bg-blue-500 text-white border-blue-500'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Center align"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
+                  <rect x="1" y="2" width="14" height="2" />
+                  <rect x="3" y="7" width="10" height="2" />
+                  <rect x="2" y="12" width="12" height="2" />
+                </svg>
+                <span className="text-xs">Center</span>
+              </button>
+              <button
+                onClick={() => setAlignment('right')}
+                className={`px-3 py-2 rounded border flex items-center gap-2 ${
+                  alignment === 'right'
+                    ? 'bg-blue-500 text-white border-blue-500'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                }`}
+                title="Right align"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
+                  <rect x="1" y="2" width="14" height="2" />
+                  <rect x="5" y="7" width="10" height="2" />
+                  <rect x="3" y="12" width="12" height="2" />
+                </svg>
+                <span className="text-xs">Right</span>
               </button>
             </div>
           </div>

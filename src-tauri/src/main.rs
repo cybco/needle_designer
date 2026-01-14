@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    needlepoint_designer_lib::run()
+    stitch_a_lot_studio_lib::run()
 }

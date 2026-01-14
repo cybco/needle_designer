@@ -36,7 +36,8 @@ pub struct TrialInitData {
 }
 
 /// Response from trial initialization
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Default)]
+#[serde(default)]
 pub struct TrialInitResponse {
     pub success: bool,
     pub data: Option<TrialInitData>,
@@ -90,13 +91,14 @@ pub struct ValidateRequest {
 pub struct ValidateData {
     pub valid: bool,
     pub status: String,
-    pub updates_expire: Option<DateTime<Utc>>,
+    pub licensed_version: u32,
     pub devices_used: u32,
     pub devices_max: u32,
 }
 
 /// Response from license validation
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Default)]
+#[serde(default)]
 pub struct ValidateResponse {
     pub success: bool,
     pub data: Option<ValidateData>,
@@ -124,7 +126,7 @@ impl ValidateResponse {
 // ============================================================================
 
 /// Request to activate a license
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct ActivateRequest {
     pub license_key: String,
     pub device_id: String,
@@ -138,13 +140,14 @@ pub struct ActivateRequest {
 #[derive(Deserialize, Debug)]
 pub struct ActivateData {
     pub license_key: String,
-    pub updates_expire: DateTime<Utc>,
+    pub licensed_version: u32,
     pub devices_used: u32,
     pub devices_max: u32,
 }
 
 /// Response from license activation
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Default)]
+#[serde(default)]
 pub struct ActivateResponse {
     pub success: bool,
     pub data: Option<ActivateData>,
@@ -182,7 +185,8 @@ pub struct DeactivateData {
 }
 
 /// Response from device deactivation
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Default)]
+#[serde(default)]
 pub struct DeactivateResponse {
     pub success: bool,
     pub data: Option<DeactivateData>,
@@ -233,11 +237,19 @@ impl LicenseApiClient {
             return Err(LicenseError::RateLimited);
         }
 
-        // Parse response body regardless of status code (server returns JSON errors)
-        let result: TrialInitResponse = response
-            .json()
+        // Get the response body as text first for better error messages
+        let status = response.status();
+        let body = response
+            .text()
             .await
-            .map_err(|e| LicenseError::Network(format!("Failed to parse response: {}", e)))?;
+            .map_err(|e| LicenseError::Network(format!("Failed to read response body: {}", e)))?;
+
+        // Parse the JSON
+        let result: TrialInitResponse = serde_json::from_str(&body)
+            .map_err(|e| LicenseError::Network(format!(
+                "Failed to parse response (status {}): {}. Body: {}",
+                status, e, &body[..body.len().min(500)]
+            )))?;
 
         // Check for error in response
         if !result.success {
@@ -267,10 +279,19 @@ impl LicenseApiClient {
             return Err(LicenseError::RateLimited);
         }
 
-        let result: ValidateResponse = response
-            .json()
+        // Get the response body as text first for better error messages
+        let status = response.status();
+        let body = response
+            .text()
             .await
-            .map_err(|e| LicenseError::Network(format!("Failed to parse response: {}", e)))?;
+            .map_err(|e| LicenseError::Network(format!("Failed to read response body: {}", e)))?;
+
+        // Parse the JSON
+        let result: ValidateResponse = serde_json::from_str(&body)
+            .map_err(|e| LicenseError::Network(format!(
+                "Failed to parse response (status {}): {}. Body: {}",
+                status, e, &body[..body.len().min(500)]
+            )))?;
 
         if !result.success {
             if let Some(ref error) = result.error {
@@ -288,6 +309,9 @@ impl LicenseApiClient {
 
     /// Activate a license
     pub async fn activate(&self, request: ActivateRequest) -> Result<ActivateResponse, LicenseError> {
+        eprintln!("[LICENSE] Activating license - endpoint: {}", endpoints::activate());
+        eprintln!("[LICENSE] Request: {:?}", request);
+
         let response = self
             .client
             .post(endpoints::activate())
@@ -300,13 +324,25 @@ impl LicenseApiClient {
             return Err(LicenseError::RateLimited);
         }
 
-        let result: ActivateResponse = response
-            .json()
+        // Get the response body as text first for better error messages
+        let status = response.status();
+        let body = response
+            .text()
             .await
-            .map_err(|e| LicenseError::Network(format!("Failed to parse response: {}", e)))?;
+            .map_err(|e| LicenseError::Network(format!("Failed to read response body: {}", e)))?;
+
+        eprintln!("[LICENSE] Response (status {}): {}", status, &body[..body.len().min(1000)]);
+
+        // Parse the JSON
+        let result: ActivateResponse = serde_json::from_str(&body)
+            .map_err(|e| LicenseError::Network(format!(
+                "Failed to parse response (status {}): {}. Body: {}",
+                status, e, &body[..body.len().min(500)]
+            )))?;
 
         if !result.success {
             if let Some(ref error) = result.error {
+                eprintln!("[LICENSE] Activation failed - code: {}, message: {}", error.code, error.message);
                 return match error.code.as_str() {
                     "INVALID_LICENSE_KEY" => Err(LicenseError::InvalidKey),
                     "LICENSE_REVOKED" => Err(LicenseError::LicenseRevoked),
@@ -337,10 +373,19 @@ impl LicenseApiClient {
             return Err(LicenseError::RateLimited);
         }
 
-        let result: DeactivateResponse = response
-            .json()
+        // Get the response body as text first for better error messages
+        let status = response.status();
+        let body = response
+            .text()
             .await
-            .map_err(|e| LicenseError::Network(format!("Failed to parse response: {}", e)))?;
+            .map_err(|e| LicenseError::Network(format!("Failed to read response body: {}", e)))?;
+
+        // Parse the JSON
+        let result: DeactivateResponse = serde_json::from_str(&body)
+            .map_err(|e| LicenseError::Network(format!(
+                "Failed to parse response (status {}): {}. Body: {}",
+                status, e, &body[..body.len().min(500)]
+            )))?;
 
         if !result.success {
             if let Some(ref error) = result.error {

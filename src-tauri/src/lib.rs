@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::io::Cursor;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tauri::Manager;
 
 mod threads;
@@ -797,12 +797,17 @@ fn save_project(app: tauri::AppHandle, path: String, project: NdpFile) -> Result
             ));
         }
 
-        return Ok(save_path.to_string_lossy().to_string());
+        // Cache the thumbnail for fast home page loading
+        let final_path = save_path.to_string_lossy().to_string();
+        if let Some(ref thumb) = project.thumbnail {
+            let _ = cache_thumbnail(&app, &final_path, thumb);
+        }
+
+        return Ok(final_path);
     }
 
     #[cfg(not(target_os = "ios"))]
     {
-        let _ = &app; // Suppress unused warning on non-iOS
         let path_buf = std::path::PathBuf::from(&decoded_path);
 
         // Create parent directory if it doesn't exist
@@ -827,8 +832,14 @@ fn save_project(app: tauri::AppHandle, path: String, project: NdpFile) -> Result
             ));
         }
 
+        // Cache the thumbnail for fast home page loading
+        let final_path = path_buf.to_string_lossy().to_string();
+        if let Some(ref thumb) = project.thumbnail {
+            let _ = cache_thumbnail(&app, &final_path, thumb);
+        }
+
         // Return the actual path where the file was saved
-        Ok(path_buf.to_string_lossy().to_string())
+        Ok(final_path)
     }
 }
 
@@ -897,6 +908,119 @@ fn delete_file(path: String) -> Result<(), String> {
     fs::remove_file(&path)
         .map_err(|e| format!("Failed to delete file: {}", e))?;
     Ok(())
+}
+
+// ============================================================================
+// Thumbnail Cache Functions
+// ============================================================================
+
+/// Get the thumbnail cache directory path
+fn get_thumbnail_cache_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let cache_dir = app.path()
+        .app_cache_dir()
+        .map_err(|e| format!("Failed to get cache directory: {}", e))?;
+    let thumb_cache = cache_dir.join("thumbnails");
+    Ok(thumb_cache)
+}
+
+/// Generate a cache key from a file path (simple hash)
+fn get_cache_key(file_path: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    file_path.hash(&mut hasher);
+    format!("{:x}", hasher.finish())
+}
+
+/// Save a thumbnail to the cache
+fn cache_thumbnail(app: &tauri::AppHandle, file_path: &str, thumbnail_data: &str) -> Result<(), String> {
+    let cache_dir = get_thumbnail_cache_dir(app)?;
+    fs::create_dir_all(&cache_dir)
+        .map_err(|e| format!("Failed to create cache directory: {}", e))?;
+
+    let cache_key = get_cache_key(file_path);
+    let cache_file = cache_dir.join(format!("{}.txt", cache_key));
+
+    fs::write(&cache_file, thumbnail_data)
+        .map_err(|e| format!("Failed to write cache file: {}", e))?;
+
+    Ok(())
+}
+
+/// Load a thumbnail from the cache
+fn get_cached_thumbnail(app: &tauri::AppHandle, file_path: &str) -> Option<String> {
+    let cache_dir = get_thumbnail_cache_dir(app).ok()?;
+    let cache_key = get_cache_key(file_path);
+    let cache_file = cache_dir.join(format!("{}.txt", cache_key));
+
+    fs::read_to_string(&cache_file).ok()
+}
+
+/// Load thumbnail from file and cache it
+fn load_and_cache_thumbnail(app: &tauri::AppHandle, path: &str) -> Option<String> {
+    // Handle file:// URLs
+    let path_without_scheme = if path.starts_with("file://") {
+        path.strip_prefix("file://").unwrap_or(path).to_string()
+    } else {
+        path.to_string()
+    };
+
+    // URL-decode the path
+    let decoded_path = urlencoding::decode(&path_without_scheme)
+        .map(|s| s.into_owned())
+        .unwrap_or(path_without_scheme.clone());
+
+    // Resolve path (platform-specific)
+    #[cfg(target_os = "ios")]
+    let read_path = {
+        let filename = std::path::Path::new(&decoded_path)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string());
+
+        if let Some(ref fname) = filename {
+            if let Ok(doc_dir) = app.path().document_dir() {
+                let doc_path = doc_dir.join(fname);
+                if doc_path.exists() {
+                    doc_path
+                } else {
+                    std::path::PathBuf::from(&decoded_path)
+                }
+            } else {
+                std::path::PathBuf::from(&decoded_path)
+            }
+        } else {
+            std::path::PathBuf::from(&decoded_path)
+        }
+    };
+
+    #[cfg(not(target_os = "ios"))]
+    let read_path = std::path::PathBuf::from(&decoded_path);
+
+    // Read and parse file
+    let contents = fs::read_to_string(&read_path).ok()?;
+    let project: NdpFile = serde_json::from_str(&contents).ok()?;
+
+    // Cache the thumbnail if present
+    if let Some(ref thumb) = project.thumbnail {
+        let _ = cache_thumbnail(app, path, thumb);
+    }
+
+    project.thumbnail
+}
+
+/// Batch load thumbnails - tries cache first, falls back to file
+#[tauri::command]
+fn get_thumbnails_batch(
+    app: tauri::AppHandle,
+    paths: Vec<String>
+) -> HashMap<String, Option<String>> {
+    paths.iter().map(|path| {
+        // Try cache first
+        let thumb = get_cached_thumbnail(&app, path)
+            .or_else(|| load_and_cache_thumbnail(&app, path));
+        (path.clone(), thumb)
+    }).collect()
 }
 
 /// Get just the thumbnail from a file (fast preview loading)
@@ -1499,6 +1623,7 @@ pub fn run() {
             open_project,
             delete_file,
             get_file_thumbnail,
+            get_thumbnails_batch,
             save_pdf,
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             pick_screen_color,

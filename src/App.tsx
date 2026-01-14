@@ -108,42 +108,13 @@ const RECENT_FILES_KEY = 'needlepoint-recent-files';
 const MAX_RECENT_FILES = 50;
 const PREFERENCES_KEY = 'needlepoint-preferences';
 
-// Recent file preview component
-function RecentFilePreview({ filePath }: { filePath: string }) {
-  const [thumbnail, setThumbnail] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    let mounted = true;
-
-    const loadPreview = async () => {
-      try {
-        // Try to get pre-generated thumbnail first (fast)
-        const thumb = await invoke<string | null>('get_file_thumbnail', { path: filePath });
-        if (!mounted) return;
-
-        if (thumb) {
-          setThumbnail(thumb);
-          setLoading(false);
-        } else {
-          // No thumbnail - show placeholder (file was saved before thumbnails were implemented)
-          setError(true);
-          setLoading(false);
-        }
-      } catch (err) {
-        if (mounted) {
-          setError(true);
-          setLoading(false);
-        }
-      }
-    };
-
-    loadPreview();
-    return () => { mounted = false; };
-  }, [filePath]);
-
-  if (error || (!loading && !thumbnail)) {
+// Recent file preview component - uses pre-loaded thumbnail from cache
+function RecentFilePreview({ thumbnail, isLoading }: {
+  thumbnail: string | null;
+  isLoading: boolean;
+}) {
+  if (!isLoading && !thumbnail) {
+    // No thumbnail available - show placeholder
     return (
       <div className="w-full h-full flex items-center justify-center text-gray-400">
         <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -155,7 +126,7 @@ function RecentFilePreview({ filePath }: { filePath: string }) {
 
   return (
     <div className="w-full h-full flex items-center justify-center">
-      {loading && (
+      {isLoading && (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="w-6 h-6 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
         </div>
@@ -164,7 +135,7 @@ function RecentFilePreview({ filePath }: { filePath: string }) {
         <img
           src={thumbnail}
           alt="Preview"
-          className={`max-w-full max-h-full object-contain ${loading ? 'opacity-0' : 'opacity-100'} transition-opacity`}
+          className={`max-w-full max-h-full object-contain ${isLoading ? 'opacity-0' : 'opacity-100'} transition-opacity`}
         />
       )}
     </div>
@@ -304,6 +275,11 @@ function App() {
       return [];
     }
   });
+
+  // Thumbnail cache for instant home page loading
+  const [thumbnailCache, setThumbnailCache] = useState<Map<string, string | null>>(new Map());
+  const [thumbnailsLoading, setThumbnailsLoading] = useState(false);
+
   const [preferences, setPreferences] = useState<Preferences>(() => {
     try {
       const stored = localStorage.getItem(PREFERENCES_KEY);
@@ -446,6 +422,32 @@ function App() {
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => setAppVersion(''));
   }, []);
+
+  // Batch load thumbnails for recent files (instant home page)
+  useEffect(() => {
+    // Only load when on home page (no pattern) and have recent files
+    if (pattern || recentFiles.length === 0) {
+      return;
+    }
+
+    // Check if we already have all thumbnails cached
+    const uncachedFiles = recentFiles.filter(f => !thumbnailCache.has(f));
+    if (uncachedFiles.length === 0) {
+      return;
+    }
+
+    setThumbnailsLoading(true);
+
+    invoke<Record<string, string | null>>('get_thumbnails_batch', { paths: recentFiles })
+      .then((results) => {
+        setThumbnailCache(new Map(Object.entries(results)));
+        setThumbnailsLoading(false);
+      })
+      .catch((err) => {
+        console.error('Failed to load thumbnails:', err);
+        setThumbnailsLoading(false);
+      });
+  }, [pattern, recentFiles]); // Re-run when navigating to home or files change
 
   // Show window after React has mounted (prevents white flash on startup)
   // Only on desktop - mobile doesn't have this API
@@ -984,11 +986,20 @@ function App() {
       setCurrentFilePath(savedPath);
       markSaved();
       addToRecentFiles(savedPath);
+
+      // Update thumbnail cache so home page shows the new thumbnail
+      if (ndpFile.thumbnail) {
+        setThumbnailCache(prev => {
+          const next = new Map(prev);
+          next.set(savedPath, ndpFile.thumbnail ?? null);
+          return next;
+        });
+      }
     } catch (error) {
       console.error('Failed to save:', error);
       alert(`Failed to save project: ${error}`);
     }
-  }, [pattern, currentFilePath, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles]);
+  }, [pattern, currentFilePath, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles, setThumbnailCache]);
 
   // Save As
   const handleSaveAs = useCallback(async () => {
@@ -1030,11 +1041,20 @@ function App() {
       setCurrentFilePath(savedPath);
       markSaved();
       addToRecentFiles(savedPath);
+
+      // Update thumbnail cache so home page shows the new thumbnail
+      if (ndpFile.thumbnail) {
+        setThumbnailCache(prev => {
+          const next = new Map(prev);
+          next.set(savedPath, ndpFile.thumbnail ?? null);
+          return next;
+        });
+      }
     } catch (error) {
       console.error('Failed to save:', error);
       alert(`Failed to save project: ${error}`);
     }
-  }, [pattern, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles, regenerateFileId, currentSessionId, endSession]);
+  }, [pattern, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles, regenerateFileId, currentSessionId, endSession, setThumbnailCache]);
 
   // Handle Save As dialog confirm (iOS)
   const handleSaveAsConfirm = useCallback(async () => {
@@ -1065,11 +1085,20 @@ function App() {
       markSaved();
       addToRecentFiles(savedPath);
       setShowSaveAsDialog(false);
+
+      // Update thumbnail cache so home page shows the new thumbnail
+      if (ndpFile.thumbnail) {
+        setThumbnailCache(prev => {
+          const next = new Map(prev);
+          next.set(savedPath, ndpFile.thumbnail ?? null);
+          return next;
+        });
+      }
     } catch (error) {
       console.error('Failed to save:', error);
       alert(`Failed to save project: ${error}`);
     }
-  }, [pattern, saveAsInputValue, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles, regenerateFileId, currentSessionId, endSession]);
+  }, [pattern, saveAsInputValue, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles, regenerateFileId, currentSessionId, endSession, setThumbnailCache]);
 
   // Close project (go home)
   const handleClose = useCallback(async () => {
@@ -1326,6 +1355,30 @@ function App() {
     setPanOffset({ x: newPanX, y: newPanY });
   }, [pattern, zoom, setPanOffset]);
 
+  // Center the view on specific cell bounds
+  const centerOnBounds = useCallback((bounds: { x: number; y: number; width: number; height: number }) => {
+    // Constants from PatternCanvas
+    const CELL_SIZE = 20;
+    const RULER_SIZE = 24;
+
+    // Estimate the canvas viewport dimensions
+    const canvasWidth = window.innerWidth - 48 - 256 - RULER_SIZE * 2;
+    const canvasHeight = window.innerHeight - 40 - 28 - RULER_SIZE;
+
+    // Calculate the cell size at current zoom
+    const cellSize = CELL_SIZE * zoom;
+
+    // Calculate the center of the bounds in pattern coordinates
+    const boundsCenterX = (bounds.x + bounds.width / 2) * cellSize;
+    const boundsCenterY = (bounds.y + bounds.height / 2) * cellSize;
+
+    // Calculate the pan offset to center this point in the viewport
+    const newPanX = canvasWidth / 2 - boundsCenterX;
+    const newPanY = canvasHeight / 2 - boundsCenterY;
+
+    setPanOffset({ x: newPanX, y: newPanY });
+  }, [zoom, setPanOffset]);
+
   // Fit the entire canvas to the viewport
   const handleFitToCanvas = useCallback(() => {
     console.log('=== FIT TO CANVAS CLICKED ===');
@@ -1430,6 +1483,9 @@ function App() {
 
       // Re-select the layer to update selection bounds
       selectLayerForTransform(editingTextLayerId);
+
+      // Center the view on the updated text
+      centerOnBounds({ x: offsetX, y: offsetY, width, height });
       return;
     }
 
@@ -1465,7 +1521,10 @@ function App() {
     if (newLayerId) {
       selectLayerForTransform(newLayerId);
     }
-  }, [pattern, editingTextLayerId, getLayerBounds, updateLayerWithText, importAsLayer, setTool, selectLayerForTransform]);
+
+    // Center the view on the new text
+    centerOnBounds({ x: offsetX, y: offsetY, width, height });
+  }, [pattern, editingTextLayerId, getLayerBounds, updateLayerWithText, importAsLayer, setTool, selectLayerForTransform, centerOnBounds]);
 
   // Handle editing an existing text layer
   const handleEditTextLayer = useCallback((layerId: string) => {
@@ -2006,7 +2065,10 @@ function App() {
                         onClick={() => openFilePath(filePath)}
                         className="w-full aspect-square bg-white rounded-lg border border-gray-200 hover:border-blue-400 hover:shadow-md transition-all flex items-center justify-center p-2 mb-2"
                       >
-                        <RecentFilePreview filePath={filePath} />
+                        <RecentFilePreview
+                          thumbnail={thumbnailCache.get(filePath) ?? null}
+                          isLoading={thumbnailsLoading && !thumbnailCache.has(filePath)}
+                        />
                       </button>
                       <p className="text-xs text-gray-600 text-center truncate w-full group-hover:text-blue-600">
                         {decodeURIComponent(filePath.split(/[/\\]/).pop()?.replace('.stitchalot', '') || '')}

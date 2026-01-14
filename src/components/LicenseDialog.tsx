@@ -22,6 +22,8 @@ export function LicenseDialog({ isOpen, onClose }: LicenseDialogProps) {
   const [showKeyInput, setShowKeyInput] = useState(false);
   const [isActivating, setIsActivating] = useState(false);
   const [activationError, setActivationError] = useState<string | null>(null);
+  const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
+  const [isDeactivating, setIsDeactivating] = useState(false);
 
   if (!isOpen) return null;
 
@@ -46,15 +48,15 @@ export function LicenseDialog({ isOpen, onClose }: LicenseDialogProps) {
     }
   };
 
-  const handleDeactivate = async () => {
-    if (!confirm('Are you sure you want to deactivate this device? You can reactivate later.')) {
-      return;
-    }
-
+  const handleDeactivateConfirm = async () => {
+    setIsDeactivating(true);
     try {
       await deactivateDevice();
+      setShowDeactivateConfirm(false);
     } catch (err) {
       setActivationError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsDeactivating(false);
     }
   };
 
@@ -71,7 +73,7 @@ export function LicenseDialog({ isOpen, onClose }: LicenseDialogProps) {
     }
   };
 
-  const isLicensed = licenseInfo?.status === 'licensed' || licenseInfo?.status === 'licensed_updates_expired';
+  const isLicensed = licenseInfo?.status === 'licensed' || licenseInfo?.status === 'licensed_upgrade_required';
   const isTrial = licenseInfo?.status === 'trial';
   const statusColor = licenseInfo ? getLicenseStatusColor(licenseInfo.status) : 'text-gray-600';
 
@@ -120,11 +122,19 @@ export function LicenseDialog({ isOpen, onClose }: LicenseDialogProps) {
                   <Check className="w-4 h-4 text-green-500" />
                   <span className="text-gray-600">Full version activated</span>
                 </div>
-                {licenseInfo?.updates_expire && (
+                {licenseInfo?.licensed_version && (
                   <div className="flex items-center gap-2 text-sm">
                     <Calendar className="w-4 h-4 text-gray-400" />
                     <span className="text-gray-600">
-                      Updates included until {formatDate(licenseInfo.updates_expire)}
+                      Licensed for: v{licenseInfo.licensed_version} (perpetual)
+                    </span>
+                  </div>
+                )}
+                {licenseInfo?.status === 'licensed_upgrade_required' && (
+                  <div className="flex items-center gap-2 text-sm mt-2 text-yellow-600">
+                    <AlertCircle className="w-4 h-4" />
+                    <span>
+                      Upgrade required for v2. Your license covers v{licenseInfo.licensed_version}.
                     </span>
                   </div>
                 )}
@@ -245,7 +255,7 @@ export function LicenseDialog({ isOpen, onClose }: LicenseDialogProps) {
           {isLicensed && (
             <div className="border-t pt-4">
               <button
-                onClick={handleDeactivate}
+                onClick={() => setShowDeactivateConfirm(true)}
                 className="text-sm text-red-600 hover:text-red-800"
               >
                 Deactivate this device
@@ -267,6 +277,46 @@ export function LicenseDialog({ isOpen, onClose }: LicenseDialogProps) {
           </button>
         </div>
       </div>
+
+      {/* Deactivate Confirmation Modal */}
+      {showDeactivateConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+                <AlertCircle className="w-5 h-5 text-red-600" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">Deactivate Device?</h3>
+            </div>
+            <p className="text-sm text-gray-600 mb-6">
+              Are you sure you want to deactivate this device? This will free up a device slot and you can reactivate later with the same license key.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeactivateConfirm(false)}
+                disabled={isDeactivating}
+                className="flex-1 py-2 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeactivateConfirm}
+                disabled={isDeactivating}
+                className="flex-1 py-2 px-4 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
+              >
+                {isDeactivating ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Deactivating...
+                  </>
+                ) : (
+                  'Deactivate'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

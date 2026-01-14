@@ -159,8 +159,9 @@ export function LicenseGate({ children }: LicenseGateProps) {
 function getStatusColorClass(status: string): string {
   switch (status) {
     case 'licensed':
-    case 'licensed_updates_expired':
       return 'text-green-600 font-medium';
+    case 'licensed_upgrade_required':
+      return 'text-yellow-600 font-medium';
     case 'trial':
       return 'text-blue-600 font-medium';
     case 'trial_expired':

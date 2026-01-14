@@ -2,7 +2,7 @@
 // Uses high-resolution rendering + coverage-based sampling for all fonts
 // Also supports custom bitmap fonts from Font Creator
 
-import { Stitch, TextOrientation } from '../stores/patternStore';
+import { Stitch, TextOrientation, TextAlignment } from '../stores/patternStore';
 import { getCustomFont, CustomFont } from '../data/customFonts';
 
 export interface TextRenderOptions {
@@ -14,6 +14,7 @@ export interface TextRenderOptions {
   colorId: string;
   boldness?: number;         // 0.0-1.0, coverage threshold (default 0.5)
   orientation?: TextOrientation; // Text orientation (default: 'horizontal')
+  alignment?: TextAlignment;     // Text alignment for multiline (default: 'left')
 }
 
 export interface TextRenderResult {
@@ -37,6 +38,7 @@ export interface TextLayerMetadata {
   colorId: string;
   boldness: number;
   orientation?: TextOrientation; // Default: 'horizontal'
+  alignment?: TextAlignment;     // Default: 'left'
 }
 
 const RENDER_SCALE = 8; // Always render at 8x target size for quality
@@ -242,13 +244,33 @@ function renderCustomBitmapFont(
   const lineSpacing = Math.max(1, Math.floor(sourceHeight * 0.2));
   const totalSourceHeight = sourceHeight * lines.length + lineSpacing * (lines.length - 1);
   const combinedGrid: boolean[][] = [];
+  const alignment = options.alignment ?? 'left';
 
   for (let lineIdx = 0; lineIdx < lineGrids.length; lineIdx++) {
     const linePixels = lineGrids[lineIdx];
+    const lineWidth = linePixels[0]?.length || 0;
+    const paddingNeeded = maxLineWidth - lineWidth;
+
+    // Calculate left padding based on alignment
+    let leftPad = 0;
+    if (alignment === 'center') {
+      leftPad = Math.floor(paddingNeeded / 2);
+    } else if (alignment === 'right') {
+      leftPad = paddingNeeded;
+    }
+    const rightPad = paddingNeeded - leftPad;
+
     for (let y = 0; y < sourceHeight; y++) {
-      // Pad lines to max width
-      const row = [...linePixels[y]];
-      while (row.length < maxLineWidth) {
+      // Pad lines based on alignment
+      const row: boolean[] = [];
+      // Add left padding
+      for (let p = 0; p < leftPad; p++) {
+        row.push(false);
+      }
+      // Add line content
+      row.push(...linePixels[y]);
+      // Add right padding
+      for (let p = 0; p < rightPad; p++) {
         row.push(false);
       }
       combinedGrid.push(row);
@@ -394,7 +416,7 @@ interface HighResResult {
  * Render text at high resolution for quality sampling
  */
 function renderHighResolution(options: TextRenderOptions): HighResResult {
-  const { text, fontFamily, fontWeight, italic, targetHeight, orientation } = options;
+  const { text, fontFamily, fontWeight, italic, targetHeight, orientation, alignment = 'left' } = options;
 
   // Calculate render size - at least MIN_RENDER_HEIGHT or RENDER_SCALE * target
   const renderHeight = Math.max(MIN_RENDER_HEIGHT, targetHeight * RENDER_SCALE);
@@ -412,13 +434,16 @@ function renderHighResolution(options: TextRenderOptions): HighResResult {
   const lineHeightMultiplier = orientation === 'stacked' ? 1.0 : 1.2;
   const lineHeight = Math.ceil(renderHeight * lineHeightMultiplier);
 
-  // Measure text
+  // Measure text - store individual line widths for alignment
   let maxWidth = 0;
   let maxLeft = 0;
+  const lineWidths: number[] = [];
 
   for (const line of lines) {
     const metrics = ctx.measureText(line);
-    maxWidth = Math.max(maxWidth, Math.ceil(metrics.width));
+    const lineWidth = Math.ceil(metrics.width);
+    lineWidths.push(lineWidth);
+    maxWidth = Math.max(maxWidth, lineWidth);
     if (metrics.actualBoundingBoxLeft !== undefined) {
       maxLeft = Math.max(maxLeft, Math.ceil(metrics.actualBoundingBoxLeft));
     }
@@ -443,9 +468,18 @@ function renderHighResolution(options: TextRenderOptions): HighResResult {
   ctx.fillStyle = 'black';
   ctx.textBaseline = 'top';
 
-  // Render text
+  // Render text with alignment
   for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], leftPadding, padding + i * lineHeight);
+    let xPos = leftPadding;
+
+    // Calculate x position based on alignment
+    if (alignment === 'center') {
+      xPos = leftPadding + (maxWidth - lineWidths[i]) / 2;
+    } else if (alignment === 'right') {
+      xPos = leftPadding + (maxWidth - lineWidths[i]);
+    }
+
+    ctx.fillText(lines[i], xPos, padding + i * lineHeight);
   }
 
   // Find actual text bounds (non-white pixels)
@@ -596,6 +630,7 @@ export function createTextLayerMetadata(options: TextRenderOptions): TextLayerMe
     colorId: options.colorId,
     boldness: options.boldness ?? 0.5,
     orientation: options.orientation ?? 'horizontal',
+    alignment: options.alignment ?? 'left',
   };
 }
 

@@ -6,13 +6,13 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum LicenseStatus {
     #[default]
-    None,                    // No license, no trial started
-    Trial,                   // In active trial period
-    TrialExpired,            // Trial has expired
-    Licensed,                // Valid perpetual license
-    LicensedUpdatesExpired,  // Licensed but updates expired (still functional)
-    Invalid,                 // License revoked or invalid
-    GracePeriod,             // Offline too long, needs validation
+    None,                     // No license, no trial started
+    Trial,                    // In active trial period
+    TrialExpired,             // Trial has expired
+    Licensed,                 // Valid perpetual license
+    LicensedUpgradeRequired,  // App version exceeds licensed version
+    Invalid,                  // License revoked or invalid
+    GracePeriod,              // Offline too long, needs validation
 }
 
 /// Source of the license
@@ -35,7 +35,7 @@ pub struct LicenseState {
     pub trial_start: Option<DateTime<Utc>>,
     pub trial_expires: Option<DateTime<Utc>>,
     pub license_activated: Option<DateTime<Utc>>,
-    pub updates_expire: Option<DateTime<Utc>>,
+    pub licensed_version: Option<u32>,  // Major version the license covers (e.g., 1 for v1.x.x)
     pub last_validated: Option<DateTime<Utc>>,
     pub cached_validation: Option<CachedValidation>,
     // IAP-specific
@@ -60,10 +60,11 @@ impl LicenseState {
     }
 
     /// Check if the user can use the app (trial active or licensed)
+    /// Note: LicensedUpgradeRequired still allows app use, just prompts for upgrade
     pub fn can_use_app(&self) -> bool {
         matches!(
             self.status,
-            LicenseStatus::Trial | LicenseStatus::Licensed | LicenseStatus::LicensedUpdatesExpired
+            LicenseStatus::Trial | LicenseStatus::Licensed | LicenseStatus::LicensedUpgradeRequired
         )
     }
 
@@ -81,11 +82,16 @@ impl LicenseState {
 pub struct CachedValidation {
     pub valid: bool,
     pub status: String,
-    pub updates_expire: Option<DateTime<Utc>>,
+    #[serde(default = "default_licensed_version")]
+    pub licensed_version: u32,
     pub devices_used: u32,
     pub devices_max: u32,
     pub signature: String,
     pub cached_at: DateTime<Utc>,
+}
+
+fn default_licensed_version() -> u32 {
+    1  // Default to v1 for existing licenses
 }
 
 /// Result of activation attempt
@@ -104,7 +110,7 @@ pub struct UpdateInfo {
     pub current_version: String,
     pub latest_version: String,
     pub update_available: bool,
-    pub update_allowed: bool,  // Based on updates_expire
+    pub update_allowed: bool,  // Based on licensed_version vs app version
     pub download_url: Option<String>,
     pub release_notes: Option<String>,
     pub release_date: Option<DateTime<Utc>>,
@@ -116,7 +122,7 @@ pub struct LicenseInfo {
     pub status: LicenseStatus,
     pub source: Option<LicenseSource>,
     pub trial_days_remaining: Option<i64>,
-    pub updates_expire: Option<DateTime<Utc>>,
+    pub licensed_version: Option<u32>,
     pub devices_used: u32,
     pub devices_max: u32,
     pub needs_online_validation: bool,
@@ -136,7 +142,7 @@ impl From<&LicenseState> for LicenseInfo {
             status: state.status.clone(),
             source: state.source.clone(),
             trial_days_remaining: state.trial_days_remaining(),
-            updates_expire: state.updates_expire,
+            licensed_version: state.licensed_version,
             devices_used,
             devices_max,
             needs_online_validation: state.cached_validation.is_none(),

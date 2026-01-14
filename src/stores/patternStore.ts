@@ -113,6 +113,9 @@ export interface Stitch {
 // Text orientation options
 export type TextOrientation = 'horizontal' | 'vertical-up' | 'vertical-down' | 'stacked';
 
+// Text alignment options (for multiline text)
+export type TextAlignment = 'left' | 'center' | 'right';
+
 // Metadata stored with text layers for re-rendering on resize
 export interface TextLayerMetadata {
   type: 'text';
@@ -123,6 +126,7 @@ export interface TextLayerMetadata {
   colorId: string;
   boldness: number;
   orientation?: TextOrientation; // Default: 'horizontal'
+  alignment?: TextAlignment;     // Default: 'left'
 }
 
 export type LayerMetadata = TextLayerMetadata; // Extensible for other layer types
