@@ -185,6 +185,7 @@ interface Preferences {
   showCenterMarker: boolean; // Show green X at canvas center
   showToolbarLabels: boolean; // Show text labels below toolbar icons
   toolVisibility: ToolVisibility;
+  workingDirectory: string | null; // Default directory for open/save dialogs
 }
 
 const DEFAULT_TOOL_VISIBILITY: ToolVisibility = {
@@ -224,6 +225,7 @@ const DEFAULT_PREFERENCES: Preferences = {
   showCenterMarker: true,
   showToolbarLabels: false,
   toolVisibility: DEFAULT_TOOL_VISIBILITY,
+  workingDirectory: null,
 };
 
 // Detect iOS/iPadOS - used to hide keyboard shortcuts that don't apply
@@ -972,9 +974,12 @@ function App() {
           const filename = `${pattern.name}.stitchalot`;
           filePath = filename; // Just pass the filename, Rust will handle the path
         } else {
+          const defaultPath = preferences.workingDirectory
+            ? `${preferences.workingDirectory}/${pattern.name}.stitchalot`
+            : `${pattern.name}.stitchalot`;
           const result = await save({
             filters: [{ name: 'StitchALot Design', extensions: ['stitchalot'] }],
-            defaultPath: `${pattern.name}.stitchalot`,
+            defaultPath,
           });
 
           if (!result) return; // User cancelled
@@ -1002,7 +1007,7 @@ function App() {
       console.error('Failed to save:', error);
       alert(`Failed to save project: ${error}`);
     }
-  }, [pattern, currentFilePath, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles, setThumbnailCache]);
+  }, [pattern, currentFilePath, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles, setThumbnailCache, preferences.workingDirectory]);
 
   // Save As
   const handleSaveAs = useCallback(async () => {
@@ -1020,9 +1025,12 @@ function App() {
     }
 
     try {
+      const defaultPath = preferences.workingDirectory
+        ? `${preferences.workingDirectory}/${pattern.name}.stitchalot`
+        : `${pattern.name}.stitchalot`;
       const result = await save({
         filters: [{ name: 'StitchALot Design', extensions: ['stitchalot'] }],
-        defaultPath: `${pattern.name}.stitchalot`,
+        defaultPath,
       });
 
       if (!result) return; // User cancelled
@@ -1057,7 +1065,7 @@ function App() {
       console.error('Failed to save:', error);
       alert(`Failed to save project: ${error}`);
     }
-  }, [pattern, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles, regenerateFileId, currentSessionId, endSession, setThumbnailCache]);
+  }, [pattern, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles, regenerateFileId, currentSessionId, endSession, setThumbnailCache, preferences.workingDirectory]);
 
   // Handle Save As dialog confirm (iOS)
   const handleSaveAsConfirm = useCallback(async () => {
@@ -1153,6 +1161,7 @@ function App() {
       const result = await open({
         filters: isIOS ? [] : [{ name: 'StitchALot Design', extensions: ['stitchalot', 'json'] }],
         multiple: false,
+        defaultPath: preferences.workingDirectory || undefined,
       });
 
       if (!result) return; // User cancelled
@@ -1213,7 +1222,7 @@ function App() {
       console.error('Failed to open:', error);
       alert(`Failed to open project: ${error}`);
     }
-  }, [ndpToPattern, loadPattern, addToRecentFiles, setOverlayImages, setZoom, setProgressMode, setProgressShadingColor, setProgressShadingOpacity]);
+  }, [ndpToPattern, loadPattern, addToRecentFiles, setOverlayImages, setZoom, setProgressMode, setProgressShadingColor, setProgressShadingOpacity, preferences.workingDirectory]);
 
   // Save preferences to localStorage
   const updatePreferences = useCallback((newPrefs: Partial<Preferences>) => {
@@ -1512,8 +1521,10 @@ function App() {
       y: s.y + offsetY,
     }));
 
-    // Generate a unique layer name
-    const layerName = `Text ${new Date().toLocaleTimeString()}`;
+    // Generate layer name from text content (first 15 characters)
+    const layerName = metadata?.text
+      ? metadata.text.substring(0, 15).trim() || 'Text'
+      : `Text ${new Date().toLocaleTimeString()}`;
     importAsLayer(layerName, colors, positionedStitches, metadata);
 
     // Switch to select tool and select the new layer for transformation
@@ -1909,6 +1920,45 @@ function App() {
                       <span>Toolbar Visibility...</span>
                       <span className="text-gray-400">→</span>
                     </button>
+                    {/* Working Directory */}
+                    <div className="px-4 py-2 border-t border-gray-600">
+                      <label className="block text-xs text-gray-400 mb-1">Working Directory</label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={preferences.workingDirectory || ''}
+                          readOnly
+                          placeholder="Not set (uses system default)"
+                          className="flex-1 px-2 py-1 bg-gray-600 border border-gray-500 rounded text-white text-sm focus:outline-none truncate"
+                          title={preferences.workingDirectory || 'Not set'}
+                        />
+                        <button
+                          onClick={async () => {
+                            const selected = await open({
+                              directory: true,
+                              multiple: false,
+                              title: 'Select Working Directory',
+                              defaultPath: preferences.workingDirectory || undefined,
+                            });
+                            if (selected && typeof selected === 'string') {
+                              updatePreferences({ workingDirectory: selected });
+                            }
+                          }}
+                          className="px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm whitespace-nowrap"
+                        >
+                          Browse...
+                        </button>
+                        {preferences.workingDirectory && (
+                          <button
+                            onClick={() => updatePreferences({ workingDirectory: null })}
+                            className="px-2 py-1 bg-gray-500 hover:bg-gray-400 rounded text-sm"
+                            title="Clear working directory"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    </div>
                 </div>
               )}
             </div>
@@ -2046,6 +2096,25 @@ function App() {
                   title="Fill Contiguous Color as Complete"
                 >
                   <FillIcon className="w-5 h-5" variant="grey" />
+                </button>
+                <button
+                  onClick={() => setTool('blockfill')}
+                  className={`w-10 h-10 flex items-center justify-center rounded transition-colors ${
+                    activeTool === 'blockfill'
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-white text-gray-700 hover:bg-gray-200'
+                  }`}
+                  title="Mark 5x5 Block Complete"
+                >
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="3" width="18" height="18" rx="1" />
+                    <line x1="3" y1="7.8" x2="21" y2="7.8" strokeWidth="1" />
+                    <line x1="3" y1="12.6" x2="21" y2="12.6" strokeWidth="1" />
+                    <line x1="3" y1="17.4" x2="21" y2="17.4" strokeWidth="1" />
+                    <line x1="7.8" y1="3" x2="7.8" y2="21" strokeWidth="1" />
+                    <line x1="12.6" y1="3" x2="12.6" y2="21" strokeWidth="1" />
+                    <line x1="17.4" y1="3" x2="17.4" y2="21" strokeWidth="1" />
+                  </svg>
                 </button>
                 <button
                   onClick={() => setTool('pan')}

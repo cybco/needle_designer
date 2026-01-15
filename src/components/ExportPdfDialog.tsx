@@ -23,6 +23,7 @@ export function ExportPdfDialog({ isOpen, onClose, pattern, currentFilePath }: E
   };
   const displayName = getDisplayName();
   const [includePreviewPage, setIncludePreviewPage] = useState(true);
+  const [includeFullChartPage, setIncludeFullChartPage] = useState(false);
   const [includeColorLegend, setIncludeColorLegend] = useState(true);
   const [includeStitchCounts, setIncludeStitchCounts] = useState(true);
   const [includeGridNumbers, setIncludeGridNumbers] = useState(true);
@@ -66,6 +67,7 @@ export function ExportPdfDialog({ isOpen, onClose, pattern, currentFilePath }: E
       // Generate PDF (with watermark if in trial mode)
       const pdfData = await exportPatternToPdf(pattern, {
         includePreviewPage,
+        includeFullChartPage,
         includeColorLegend,
         includeStitchCounts,
         includeGridNumbers,
@@ -125,7 +127,8 @@ export function ExportPdfDialog({ isOpen, onClose, pattern, currentFilePath }: E
   const gridPages = pagesX * pagesY;
   const legendPages = includeColorLegend ? Math.ceil(usedColorsCount / 20) : 0;
   const previewPages = includePreviewPage ? 1 : 0;
-  const totalPages = previewPages + gridPages + legendPages;
+  const fullChartPages = includeFullChartPage ? 1 : 0;
+  const totalPages = previewPages + fullChartPages + gridPages + legendPages;
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -164,6 +167,21 @@ export function ExportPdfDialog({ isOpen, onClose, pattern, currentFilePath }: E
                 <span className="text-sm text-gray-700">Include preview page</span>
                 <p className="text-xs text-gray-500">
                   Adds a cover page with pattern preview, size, and stitch count
+                </p>
+              </div>
+            </label>
+
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={includeFullChartPage}
+                onChange={(e) => setIncludeFullChartPage(e.target.checked)}
+                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+              />
+              <div>
+                <span className="text-sm text-gray-700">Include full chart page</span>
+                <p className="text-xs text-gray-500">
+                  Adds a page showing the entire pattern with colors and symbols
                 </p>
               </div>
             </label>

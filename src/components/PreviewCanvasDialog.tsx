@@ -212,14 +212,16 @@ export function PreviewCanvasDialog({ onClose }: PreviewCanvasDialogProps) {
           </div>
         </div>
 
-        {/* Canvas container */}
+        {/* Canvas container - grid wrapper enables scrolling to top-left when zoomed while centering when small */}
         <div
           ref={containerRef}
-          className="flex-1 overflow-auto bg-gray-800 p-6 flex items-center justify-center"
+          className="flex-1 overflow-auto bg-gray-800 p-6"
           style={{ minHeight: 0 }}
         >
-          <div className="shadow-2xl">
-            <canvas ref={canvasRef} />
+          <div className="grid place-items-center" style={{ minWidth: '100%', minHeight: '100%', width: 'fit-content', height: 'fit-content' }}>
+            <div className="shadow-2xl">
+              <canvas ref={canvasRef} className="block" />
+            </div>
           </div>
         </div>
 

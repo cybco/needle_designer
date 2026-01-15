@@ -16,6 +16,7 @@ const FALLBACK_SYMBOLS = PATTERN_SYMBOLS.all;
 
 interface ExportOptions {
   includePreviewPage: boolean; // Add a cover page with preview image and stats
+  includeFullChartPage: boolean; // Add a full pattern chart scaled to fit one page
   includeColorLegend: boolean;
   includeStitchCounts: boolean;
   includeGridNumbers: boolean;
@@ -26,6 +27,7 @@ interface ExportOptions {
 
 const DEFAULT_OPTIONS: ExportOptions = {
   includePreviewPage: true,
+  includeFullChartPage: false,
   includeColorLegend: true,
   includeStitchCounts: true,
   includeGridNumbers: true,
@@ -320,6 +322,629 @@ export function renderPatternPreview(pattern: Pattern, maxWidth: number, maxHeig
   return canvas.toDataURL('image/png');
 }
 
+// Draw a symbol as vector shape in PDF (since default fonts don't support Unicode symbols)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function drawSymbolShape(
+  pdf: any,
+  symbol: string,
+  cx: number, // center x
+  cy: number, // center y
+  size: number, // cell size
+  rgb: [number, number, number] // contrast color for the symbol
+): void {
+  // Symbol size - larger for better visibility on small PDF cells
+  const r = size * 0.32;
+  const [sr, sg, sb] = rgb;
+  pdf.setDrawColor(sr, sg, sb);
+  pdf.setFillColor(sr, sg, sb);
+  pdf.setLineWidth(size * 0.1);
+
+  switch (symbol) {
+    // Filled shapes
+    case '●': // Black Circle
+      pdf.circle(cx, cy, r, 'F');
+      break;
+    case '■': // Black Square
+      pdf.rect(cx - r, cy - r, r * 2, r * 2, 'F');
+      break;
+    case '▲': // Black Triangle (pointing up)
+      pdf.triangle(cx, cy - r, cx - r, cy + r * 0.7, cx + r, cy + r * 0.7, 'F');
+      break;
+    case '▼': // Black Triangle (pointing down)
+      pdf.triangle(cx, cy + r, cx - r, cy - r * 0.7, cx + r, cy - r * 0.7, 'F');
+      break;
+    case '★': // Black Star (simplified as filled diamond rotated)
+    case '◆': // Black Diamond
+      pdf.triangle(cx, cy - r, cx - r, cy, cx, cy + r, 'F');
+      pdf.triangle(cx, cy - r, cx + r, cy, cx, cy + r, 'F');
+      break;
+    case '♦': // Diamond Suit
+      pdf.triangle(cx, cy - r * 0.9, cx - r * 0.6, cy, cx, cy + r * 0.9, 'F');
+      pdf.triangle(cx, cy - r * 0.9, cx + r * 0.6, cy, cx, cy + r * 0.9, 'F');
+      break;
+    case '♥': // Heart Suit (simplified)
+      pdf.circle(cx - r * 0.35, cy - r * 0.2, r * 0.45, 'F');
+      pdf.circle(cx + r * 0.35, cy - r * 0.2, r * 0.45, 'F');
+      pdf.triangle(cx, cy + r * 0.8, cx - r * 0.75, cy, cx + r * 0.75, cy, 'F');
+      break;
+    case '♠': // Spade Suit (simplified)
+      pdf.triangle(cx, cy - r * 0.8, cx - r * 0.7, cy + r * 0.3, cx + r * 0.7, cy + r * 0.3, 'F');
+      pdf.circle(cx - r * 0.35, cy + r * 0.15, r * 0.35, 'F');
+      pdf.circle(cx + r * 0.35, cy + r * 0.15, r * 0.35, 'F');
+      break;
+
+    // Outline shapes
+    case '○': // White Circle
+      pdf.circle(cx, cy, r, 'S');
+      break;
+    case '□': // White Square
+      pdf.rect(cx - r, cy - r, r * 2, r * 2, 'S');
+      break;
+    case '△': // White Triangle
+      pdf.triangle(cx, cy - r, cx - r, cy + r * 0.7, cx + r, cy + r * 0.7, 'S');
+      break;
+    case '☆': // White Star (outline diamond)
+    case '◇': // White Diamond
+      pdf.line(cx, cy - r, cx - r, cy);
+      pdf.line(cx - r, cy, cx, cy + r);
+      pdf.line(cx, cy + r, cx + r, cy);
+      pdf.line(cx + r, cy, cx, cy - r);
+      break;
+
+    // Cross shapes
+    case '✕': // Multiplication X
+      pdf.line(cx - r * 0.7, cy - r * 0.7, cx + r * 0.7, cy + r * 0.7);
+      pdf.line(cx - r * 0.7, cy + r * 0.7, cx + r * 0.7, cy - r * 0.7);
+      break;
+    case '✚': // Heavy Greek Cross / Plus
+      pdf.line(cx - r * 0.8, cy, cx + r * 0.8, cy);
+      pdf.line(cx, cy - r * 0.8, cx, cy + r * 0.8);
+      break;
+
+    // Hexagon
+    case '⬡': // White Hexagon
+      {
+        const hr = r * 0.9;
+        const points = [];
+        for (let i = 0; i < 6; i++) {
+          const angle = (Math.PI / 3) * i - Math.PI / 2;
+          points.push([cx + hr * Math.cos(angle), cy + hr * Math.sin(angle)]);
+        }
+        pdf.line(points[0][0], points[0][1], points[1][0], points[1][1]);
+        pdf.line(points[1][0], points[1][1], points[2][0], points[2][1]);
+        pdf.line(points[2][0], points[2][1], points[3][0], points[3][1]);
+        pdf.line(points[3][0], points[3][1], points[4][0], points[4][1]);
+        pdf.line(points[4][0], points[4][1], points[5][0], points[5][1]);
+        pdf.line(points[5][0], points[5][1], points[0][0], points[0][1]);
+      }
+      break;
+
+    // Half circles
+    case '◐': // Circle Left Half Black
+      pdf.circle(cx, cy, r, 'S');
+      // Fill left half with arc approximation
+      pdf.setFillColor(sr, sg, sb);
+      pdf.rect(cx - r, cy - r, r, r * 2, 'F');
+      break;
+    case '◑': // Circle Right Half Black
+      pdf.circle(cx, cy, r, 'S');
+      pdf.setFillColor(sr, sg, sb);
+      pdf.rect(cx, cy - r, r, r * 2, 'F');
+      break;
+    case '◒': // Circle Bottom Half Black
+      pdf.circle(cx, cy, r, 'S');
+      pdf.setFillColor(sr, sg, sb);
+      pdf.rect(cx - r, cy, r * 2, r, 'F');
+      break;
+    case '◓': // Circle Top Half Black
+      pdf.circle(cx, cy, r, 'S');
+      pdf.setFillColor(sr, sg, sb);
+      pdf.rect(cx - r, cy - r, r * 2, r, 'F');
+      break;
+
+    // Circled/Squared symbols
+    case '⊕': // Circled Plus
+      pdf.circle(cx, cy, r, 'S');
+      pdf.line(cx - r * 0.6, cy, cx + r * 0.6, cy);
+      pdf.line(cx, cy - r * 0.6, cx, cy + r * 0.6);
+      break;
+    case '⊗': // Circled Times
+      pdf.circle(cx, cy, r, 'S');
+      pdf.line(cx - r * 0.5, cy - r * 0.5, cx + r * 0.5, cy + r * 0.5);
+      pdf.line(cx - r * 0.5, cy + r * 0.5, cx + r * 0.5, cy - r * 0.5);
+      break;
+    case '⊞': // Squared Plus
+      pdf.rect(cx - r, cy - r, r * 2, r * 2, 'S');
+      pdf.line(cx - r * 0.6, cy, cx + r * 0.6, cy);
+      pdf.line(cx, cy - r * 0.6, cx, cy + r * 0.6);
+      break;
+    case '⊠': // Squared Times
+      pdf.rect(cx - r, cy - r, r * 2, r * 2, 'S');
+      pdf.line(cx - r * 0.6, cy - r * 0.6, cx + r * 0.6, cy + r * 0.6);
+      pdf.line(cx - r * 0.6, cy + r * 0.6, cx + r * 0.6, cy - r * 0.6);
+      break;
+
+    // Letters and numbers - use text (these are ASCII and supported)
+    default:
+      if (/^[A-Z0-9]$/.test(symbol)) {
+        // ASCII characters - use text
+        pdf.setTextColor(sr, sg, sb);
+        pdf.setFontSize(size * 2);
+        pdf.text(symbol, cx, cy + size * 0.12, { align: 'center' });
+      } else {
+        // Unknown symbol - draw a small dot
+        pdf.circle(cx, cy, r * 0.3, 'F');
+      }
+      break;
+  }
+}
+
+// Draw a symbol on canvas context
+function drawSymbolOnCanvas(
+  ctx: CanvasRenderingContext2D,
+  symbol: string,
+  cx: number,
+  cy: number,
+  cellSize: number,
+  color: string
+): void {
+  // Smaller radius for more delicate symbols (matches color palette style)
+  const r = cellSize * 0.22;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = Math.max(1, cellSize * 0.06);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  switch (symbol) {
+    case '●':
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    case '■':
+      ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+      break;
+    case '▲':
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - r);
+      ctx.lineTo(cx - r, cy + r * 0.7);
+      ctx.lineTo(cx + r, cy + r * 0.7);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    case '▼':
+      ctx.beginPath();
+      ctx.moveTo(cx, cy + r);
+      ctx.lineTo(cx - r, cy - r * 0.7);
+      ctx.lineTo(cx + r, cy - r * 0.7);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    case '★':
+    case '◆':
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - r);
+      ctx.lineTo(cx - r, cy);
+      ctx.lineTo(cx, cy + r);
+      ctx.lineTo(cx + r, cy);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    case '♦':
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - r * 0.9);
+      ctx.lineTo(cx - r * 0.6, cy);
+      ctx.lineTo(cx, cy + r * 0.9);
+      ctx.lineTo(cx + r * 0.6, cy);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    case '♥':
+      ctx.beginPath();
+      ctx.arc(cx - r * 0.35, cy - r * 0.2, r * 0.45, 0, Math.PI * 2);
+      ctx.arc(cx + r * 0.35, cy - r * 0.2, r * 0.45, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(cx, cy + r * 0.8);
+      ctx.lineTo(cx - r * 0.75, cy);
+      ctx.lineTo(cx + r * 0.75, cy);
+      ctx.closePath();
+      ctx.fill();
+      break;
+    case '♠':
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - r * 0.8);
+      ctx.lineTo(cx - r * 0.7, cy + r * 0.3);
+      ctx.lineTo(cx + r * 0.7, cy + r * 0.3);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(cx - r * 0.35, cy + r * 0.15, r * 0.35, 0, Math.PI * 2);
+      ctx.arc(cx + r * 0.35, cy + r * 0.15, r * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    case '○':
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+      break;
+    case '□':
+      ctx.strokeRect(cx - r, cy - r, r * 2, r * 2);
+      break;
+    case '△':
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - r);
+      ctx.lineTo(cx - r, cy + r * 0.7);
+      ctx.lineTo(cx + r, cy + r * 0.7);
+      ctx.closePath();
+      ctx.stroke();
+      break;
+    case '☆':
+    case '◇':
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - r);
+      ctx.lineTo(cx - r, cy);
+      ctx.lineTo(cx, cy + r);
+      ctx.lineTo(cx + r, cy);
+      ctx.closePath();
+      ctx.stroke();
+      break;
+    case '✕':
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.7, cy - r * 0.7);
+      ctx.lineTo(cx + r * 0.7, cy + r * 0.7);
+      ctx.moveTo(cx - r * 0.7, cy + r * 0.7);
+      ctx.lineTo(cx + r * 0.7, cy - r * 0.7);
+      ctx.stroke();
+      break;
+    case '✚':
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.8, cy);
+      ctx.lineTo(cx + r * 0.8, cy);
+      ctx.moveTo(cx, cy - r * 0.8);
+      ctx.lineTo(cx, cy + r * 0.8);
+      ctx.stroke();
+      break;
+    case '⬡':
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const angle = (Math.PI / 3) * i - Math.PI / 2;
+        const px = cx + r * 0.9 * Math.cos(angle);
+        const py = cy + r * 0.9 * Math.sin(angle);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      break;
+    case '◐':
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, Math.PI * 0.5, Math.PI * 1.5);
+      ctx.fill();
+      break;
+    case '◑':
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, -Math.PI * 0.5, Math.PI * 0.5);
+      ctx.fill();
+      break;
+    case '◒':
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI);
+      ctx.fill();
+      break;
+    case '◓':
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, Math.PI, Math.PI * 2);
+      ctx.fill();
+      break;
+    case '⊕':
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.6, cy);
+      ctx.lineTo(cx + r * 0.6, cy);
+      ctx.moveTo(cx, cy - r * 0.6);
+      ctx.lineTo(cx, cy + r * 0.6);
+      ctx.stroke();
+      break;
+    case '⊗':
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.5, cy - r * 0.5);
+      ctx.lineTo(cx + r * 0.5, cy + r * 0.5);
+      ctx.moveTo(cx - r * 0.5, cy + r * 0.5);
+      ctx.lineTo(cx + r * 0.5, cy - r * 0.5);
+      ctx.stroke();
+      break;
+    case '⊞':
+      ctx.strokeRect(cx - r, cy - r, r * 2, r * 2);
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.7, cy);
+      ctx.lineTo(cx + r * 0.7, cy);
+      ctx.moveTo(cx, cy - r * 0.7);
+      ctx.lineTo(cx, cy + r * 0.7);
+      ctx.stroke();
+      break;
+    case '⊠':
+      ctx.strokeRect(cx - r, cy - r, r * 2, r * 2);
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.7, cy - r * 0.7);
+      ctx.lineTo(cx + r * 0.7, cy + r * 0.7);
+      ctx.moveTo(cx - r * 0.7, cy + r * 0.7);
+      ctx.lineTo(cx + r * 0.7, cy - r * 0.7);
+      ctx.stroke();
+      break;
+    default:
+      if (/^[A-Z0-9]$/.test(symbol)) {
+        ctx.font = `bold ${cellSize * 0.45}px Arial, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(symbol, cx, cy);
+      } else {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+  }
+}
+
+// Render full chart as high-resolution image
+function renderFullChartImage(
+  pattern: Pattern,
+  grid: (Stitch | null)[][],
+  colorSymbols: Map<string, string>,
+  includeGridNumbers: boolean
+): string {
+  // Use a readable cell size in pixels (30px gives good detail for symbols)
+  const cellSize = 30;
+  console.log('renderFullChartImage called - generating high-res chart at', cellSize, 'px per cell');
+  const numberMargin = includeGridNumbers ? 25 : 0;
+
+  const canvasWidth = pattern.canvas.width * cellSize + numberMargin;
+  const canvasHeight = pattern.canvas.height * cellSize + numberMargin;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = canvasWidth;
+  canvas.height = canvasHeight;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Failed to get canvas context');
+
+  // White background
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+  const offsetX = numberMargin;
+  const offsetY = numberMargin;
+
+  // Draw colored cells with symbols
+  for (let y = 0; y < pattern.canvas.height; y++) {
+    for (let x = 0; x < pattern.canvas.width; x++) {
+      const cellX = offsetX + x * cellSize;
+      const cellY = offsetY + y * cellSize;
+      const stitch = grid[y]?.[x];
+
+      if (stitch) {
+        const color = pattern.colorPalette.find(c => c.id === stitch.colorId);
+        if (color) {
+          // Draw colored cell
+          ctx.fillStyle = `rgb(${color.rgb[0]}, ${color.rgb[1]}, ${color.rgb[2]})`;
+          ctx.fillRect(cellX, cellY, cellSize, cellSize);
+
+          // Draw symbol
+          const symbol = colorSymbols.get(color.id) || '?';
+          const contrastColor = getContrastColor(color.rgb);
+          drawSymbolOnCanvas(ctx, symbol, cellX + cellSize / 2, cellY + cellSize / 2, cellSize, contrastColor);
+        }
+      }
+    }
+  }
+
+  // Draw grid lines (5x5 pattern like canvas)
+  ctx.strokeStyle = '#CCCCCC';
+  ctx.lineWidth = 0.5;
+
+  for (let x = 0; x <= pattern.canvas.width; x++) {
+    const lineX = offsetX + x * cellSize;
+    const isThick = x % 5 === 0;
+    ctx.strokeStyle = isThick ? '#666666' : '#CCCCCC';
+    ctx.lineWidth = isThick ? 1.5 : 0.5;
+    ctx.beginPath();
+    ctx.moveTo(lineX, offsetY);
+    ctx.lineTo(lineX, offsetY + pattern.canvas.height * cellSize);
+    ctx.stroke();
+  }
+
+  for (let y = 0; y <= pattern.canvas.height; y++) {
+    const lineY = offsetY + y * cellSize;
+    const isThick = y % 5 === 0;
+    ctx.strokeStyle = isThick ? '#666666' : '#CCCCCC';
+    ctx.lineWidth = isThick ? 1.5 : 0.5;
+    ctx.beginPath();
+    ctx.moveTo(offsetX, lineY);
+    ctx.lineTo(offsetX + pattern.canvas.width * cellSize, lineY);
+    ctx.stroke();
+  }
+
+  // Draw outer border
+  ctx.strokeStyle = '#333333';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(offsetX, offsetY, pattern.canvas.width * cellSize, pattern.canvas.height * cellSize);
+
+  // Draw row/column numbers (every 5 to match grid)
+  if (includeGridNumbers) {
+    ctx.fillStyle = '#666666';
+    ctx.font = 'bold 10px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Column numbers (top)
+    for (let x = 0; x < pattern.canvas.width; x++) {
+      if (x === 0 || (x + 1) % 5 === 0 || x === pattern.canvas.width - 1) {
+        const labelX = offsetX + x * cellSize + cellSize / 2;
+        ctx.fillText(String(x + 1), labelX, numberMargin / 2);
+      }
+    }
+
+    // Row numbers (left)
+    ctx.textAlign = 'right';
+    for (let y = 0; y < pattern.canvas.height; y++) {
+      if (y === 0 || (y + 1) % 5 === 0 || y === pattern.canvas.height - 1) {
+        const labelY = offsetY + y * cellSize + cellSize / 2;
+        ctx.fillText(String(y + 1), numberMargin - 5, labelY);
+      }
+    }
+  }
+
+  return canvas.toDataURL('image/png');
+}
+
+// Render a grid section as high-resolution image (for detail pages)
+function renderGridSectionImage(
+  pattern: Pattern,
+  grid: (Stitch | null)[][],
+  colorSymbols: Map<string, string>,
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number
+): string {
+  const cellSize = 30; // Same as overview page
+  const width = endX - startX;
+  const height = endY - startY;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width * cellSize;
+  canvas.height = height * cellSize;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Failed to get canvas context');
+
+  // White background
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Draw colored cells with symbols
+  for (let y = startY; y < endY; y++) {
+    for (let x = startX; x < endX; x++) {
+      const cellX = (x - startX) * cellSize;
+      const cellY = (y - startY) * cellSize;
+      const stitch = grid[y]?.[x];
+
+      if (stitch) {
+        const color = pattern.colorPalette.find(c => c.id === stitch.colorId);
+        if (color) {
+          // Draw colored cell
+          ctx.fillStyle = `rgb(${color.rgb[0]}, ${color.rgb[1]}, ${color.rgb[2]})`;
+          ctx.fillRect(cellX, cellY, cellSize, cellSize);
+
+          // Draw symbol
+          const symbol = colorSymbols.get(color.id) || '?';
+          const contrastColor = getContrastColor(color.rgb);
+          drawSymbolOnCanvas(ctx, symbol, cellX + cellSize / 2, cellY + cellSize / 2, cellSize, contrastColor);
+        }
+      }
+    }
+  }
+
+  // Draw grid lines (5x5 pattern)
+  for (let x = 0; x <= width; x++) {
+    const lineX = x * cellSize;
+    const isThick = (startX + x) % 5 === 0;
+    ctx.strokeStyle = isThick ? '#666666' : '#CCCCCC';
+    ctx.lineWidth = isThick ? 1.5 : 0.5;
+    ctx.beginPath();
+    ctx.moveTo(lineX, 0);
+    ctx.lineTo(lineX, height * cellSize);
+    ctx.stroke();
+  }
+
+  for (let y = 0; y <= height; y++) {
+    const lineY = y * cellSize;
+    const isThick = (startY + y) % 5 === 0;
+    ctx.strokeStyle = isThick ? '#666666' : '#CCCCCC';
+    ctx.lineWidth = isThick ? 1.5 : 0.5;
+    ctx.beginPath();
+    ctx.moveTo(0, lineY);
+    ctx.lineTo(width * cellSize, lineY);
+    ctx.stroke();
+  }
+
+  // Draw outer border
+  ctx.strokeStyle = '#333333';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(0, 0, width * cellSize, height * cellSize);
+
+  return canvas.toDataURL('image/png');
+}
+
+// Render a full chart page with high-resolution image
+// Automatically uses landscape or portrait based on pattern dimensions
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function renderFullChartPage(
+  pdf: any,
+  pattern: Pattern,
+  grid: (Stitch | null)[][],
+  colorSymbols: Map<string, string>,
+  opts: ExportOptions
+): void {
+  // Determine orientation based on pattern aspect ratio
+  const isWide = pattern.canvas.width > pattern.canvas.height;
+  const orientation = isWide ? 'landscape' : 'portrait';
+
+  // Add page with appropriate orientation
+  pdf.addPage('a4', orientation);
+
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+
+  // Minimal margins for maximum image size (10mm for printability)
+  const margin = 10;
+
+  // Render chart as high-resolution image
+  const chartImage = renderFullChartImage(pattern, grid, colorSymbols, opts.includeGridNumbers);
+
+  // Calculate image dimensions to fit on page
+  const availableWidth = pageWidth - 2 * margin;
+  const availableHeight = pageHeight - 2 * margin;
+
+  // Calculate aspect ratio
+  const numberMargin = opts.includeGridNumbers ? 25 : 0;
+  const imageAspect = (pattern.canvas.width * 30 + numberMargin) / (pattern.canvas.height * 30 + numberMargin);
+
+  let imgWidth: number;
+  let imgHeight: number;
+
+  if (imageAspect > availableWidth / availableHeight) {
+    imgWidth = availableWidth;
+    imgHeight = availableWidth / imageAspect;
+  } else {
+    imgHeight = availableHeight;
+    imgWidth = availableHeight * imageAspect;
+  }
+
+  // Center on page
+  const imgX = margin + (availableWidth - imgWidth) / 2;
+  const imgY = margin + (availableHeight - imgHeight) / 2;
+
+  pdf.addImage(chartImage, 'PNG', imgX, imgY, imgWidth, imgHeight);
+}
+
 export async function exportPatternToPdf(
   pattern: Pattern,
   options: Partial<ExportOptions> = {}
@@ -489,6 +1114,13 @@ export async function exportPatternToPdf(
     }
   }
 
+  // Generate full chart page if requested (entire pattern on one page)
+  // This function adds its own page with automatic orientation (landscape/portrait)
+  if (opts.includeFullChartPage) {
+    renderFullChartPage(pdf, pattern, grid, colorSymbols, opts);
+    pageNum++;
+  }
+
   // Generate grid pages
   for (let pageY = 0; pageY < pagesY; pageY++) {
     for (let pageX = 0; pageX < pagesX; pageX++) {
@@ -523,96 +1155,57 @@ export async function exportPatternToPdf(
       const gridStartY = PAGE_MARGIN + HEADER_HEIGHT;
       const gridStartX = PAGE_MARGIN + (opts.includeGridNumbers ? 8 : 0);
 
-      // Draw column numbers
+      // Render grid section as canvas image (same as overview page)
+      const sectionImage = renderGridSectionImage(pattern, grid, colorSymbols, startX, startY, endX, endY);
+
+      // Calculate image size to fit available space
+      const sectionWidth = endX - startX;
+      const sectionHeight = endY - startY;
+      const availableWidth = contentWidth - (opts.includeGridNumbers ? 8 : 0);
+      const availableHeight = contentHeight - HEADER_HEIGHT;
+
+      // Scale to fit while maintaining aspect ratio
+      const imageAspect = sectionWidth / sectionHeight;
+      let imgWidth: number;
+      let imgHeight: number;
+
+      if (imageAspect > availableWidth / availableHeight) {
+        imgWidth = availableWidth;
+        imgHeight = availableWidth / imageAspect;
+      } else {
+        imgHeight = availableHeight;
+        imgWidth = availableHeight * imageAspect;
+      }
+
+      // Add the image
+      pdf.addImage(sectionImage, 'PNG', gridStartX, gridStartY, imgWidth, imgHeight);
+
+      // Draw column numbers on top of image
       if (opts.includeGridNumbers) {
+        const cellSizeMm = imgWidth / sectionWidth;
         pdf.setFontSize(FONT_SIZE_GRID);
         pdf.setTextColor(100, 100, 100);
         for (let x = startX; x < endX; x++) {
-          const cellX = gridStartX + (x - startX) * CELL_SIZE_MM;
-          if ((x + 1) % 10 === 0 || x === startX) {
+          const cellX = gridStartX + (x - startX) * cellSizeMm;
+          if ((x + 1) % 5 === 0 || x === startX) {
             pdf.text(
               String(x + 1),
-              cellX + CELL_SIZE_MM / 2,
+              cellX + cellSizeMm / 2,
               gridStartY - 2,
               { align: 'center' }
             );
           }
         }
-      }
 
-      // Draw row numbers and grid
-      for (let y = startY; y < endY; y++) {
-        const cellY = gridStartY + (y - startY) * CELL_SIZE_MM;
-
-        // Row number
-        if (opts.includeGridNumbers && ((y + 1) % 10 === 0 || y === startY)) {
-          pdf.setFontSize(FONT_SIZE_GRID);
-          pdf.setTextColor(100, 100, 100);
-          pdf.text(String(y + 1), PAGE_MARGIN, cellY + CELL_SIZE_MM / 2 + 1);
-        }
-
-        // Draw cells
-        for (let x = startX; x < endX; x++) {
-          const cellX = gridStartX + (x - startX) * CELL_SIZE_MM;
-          const stitch = grid[y]?.[x];
-
-          if (stitch) {
-            const color = pattern.colorPalette.find(c => c.id === stitch.colorId);
-            if (color) {
-              if (opts.useSymbols) {
-                // Draw symbol
-                pdf.setFillColor(255, 255, 255);
-                pdf.rect(cellX, cellY, CELL_SIZE_MM, CELL_SIZE_MM, 'F');
-                pdf.setFontSize(FONT_SIZE_GRID);
-                pdf.setTextColor(0, 0, 0);
-                const symbol = colorSymbols.get(color.id) || '?';
-                pdf.text(symbol, cellX + CELL_SIZE_MM / 2, cellY + CELL_SIZE_MM / 2 + 0.8, {
-                  align: 'center',
-                });
-              } else {
-                // Draw colored cell
-                pdf.setFillColor(color.rgb[0], color.rgb[1], color.rgb[2]);
-                pdf.rect(cellX, cellY, CELL_SIZE_MM, CELL_SIZE_MM, 'F');
-              }
-            }
-          }
-
-          // Draw cell border
-          pdf.setDrawColor(200, 200, 200);
-          pdf.setLineWidth(0.1);
-          pdf.rect(cellX, cellY, CELL_SIZE_MM, CELL_SIZE_MM, 'S');
-
-          // Draw thicker lines every 10 cells
-          if ((x + 1) % 10 === 0 && x < endX - 1) {
-            pdf.setDrawColor(100, 100, 100);
-            pdf.setLineWidth(0.3);
-            pdf.line(cellX + CELL_SIZE_MM, cellY, cellX + CELL_SIZE_MM, cellY + CELL_SIZE_MM);
+        // Draw row numbers
+        const cellSizeMMY = imgHeight / sectionHeight;
+        for (let y = startY; y < endY; y++) {
+          if ((y + 1) % 5 === 0 || y === startY) {
+            const cellY = gridStartY + (y - startY) * cellSizeMMY;
+            pdf.text(String(y + 1), PAGE_MARGIN, cellY + cellSizeMMY / 2 + 1);
           }
         }
-
-        // Draw thicker lines every 10 rows
-        if ((y + 1) % 10 === 0 && y < endY - 1) {
-          pdf.setDrawColor(100, 100, 100);
-          pdf.setLineWidth(0.3);
-          pdf.line(
-            gridStartX,
-            cellY + CELL_SIZE_MM,
-            gridStartX + (endX - startX) * CELL_SIZE_MM,
-            cellY + CELL_SIZE_MM
-          );
-        }
       }
-
-      // Draw outer border
-      pdf.setDrawColor(0, 0, 0);
-      pdf.setLineWidth(0.5);
-      pdf.rect(
-        gridStartX,
-        gridStartY,
-        (endX - startX) * CELL_SIZE_MM,
-        (endY - startY) * CELL_SIZE_MM,
-        'S'
-      );
     }
   }
 
@@ -664,16 +1257,13 @@ export async function exportPatternToPdf(
       // Draw symbol if using symbols
       if (opts.useSymbols) {
         const symbol = colorSymbols.get(color.id) || '?';
-        pdf.setFontSize(FONT_SIZE_LEGEND);
         const contrastColor = getContrastColor(color.rgb);
-        pdf.setTextColor(
+        const contrastRgb: [number, number, number] = [
           parseInt(contrastColor.slice(1, 3), 16),
           parseInt(contrastColor.slice(3, 5), 16),
           parseInt(contrastColor.slice(5, 7), 16)
-        );
-        pdf.text(symbol, x + LEGEND_CELL_SIZE / 2, y + LEGEND_CELL_SIZE / 2 + 1, {
-          align: 'center',
-        });
+        ];
+        drawSymbolShape(pdf, symbol, x + LEGEND_CELL_SIZE / 2, y + LEGEND_CELL_SIZE / 2, LEGEND_CELL_SIZE, contrastRgb);
       }
 
       // Draw color info

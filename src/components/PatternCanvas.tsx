@@ -271,6 +271,8 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
   const isTouchActiveRef = useRef(false);
   // Progress mode drag state: tracks the target completion state and last cell processed
   const progressDragRef = useRef<{ targetState: boolean; lastCellX: number; lastCellY: number } | null>(null);
+  // Block fill drag state: tracks the target completion state and last block processed
+  const blockFillDragRef = useRef<{ targetState: boolean; lastBlockX: number; lastBlockY: number } | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [lastCell, setLastCell] = useState<{ x: number; y: number; type?: StitchType } | null>(null);
@@ -327,6 +329,12 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     removeStitchAtPoint,
     beginStroke,
     endStroke,
+    selectedLayerIds,
+    multiLayerDragState,
+    startMultiLayerDrag,
+    updateMultiLayerDrag,
+    endMultiLayerDrag,
+    getMultiLayerBounds,
   } = usePatternStore();
 
   // Ensure shading values have defaults
@@ -449,6 +457,23 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
 
     return canvasX >= left && canvasX <= right && canvasY >= top && canvasY <= bottom;
   }, [selection, zoom, panOffset]);
+
+  // Check if a point is inside the multi-layer selection bounds
+  const isPointInMultiLayerBounds = useCallback((canvasX: number, canvasY: number): boolean => {
+    if (selectedLayerIds.length === 0) return false;
+
+    const bounds = getMultiLayerBounds();
+    if (!bounds) return false;
+
+    const cellSize = CELL_SIZE * zoom;
+
+    const left = bounds.x * cellSize + panOffset.x;
+    const top = bounds.y * cellSize + panOffset.y;
+    const right = (bounds.x + bounds.width) * cellSize + panOffset.x;
+    const bottom = (bounds.y + bounds.height) * cellSize + panOffset.y;
+
+    return canvasX >= left && canvasX <= right && canvasY >= top && canvasY <= bottom;
+  }, [selectedLayerIds, getMultiLayerBounds, zoom, panOffset]);
 
   // Get the currently selected overlay
   const selectedOverlay = useMemo(() => {
@@ -986,6 +1011,41 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       }
     }
 
+    // Draw multi-layer selection overlay
+    if (selectedLayerIds.length > 0) {
+      const multiLayerBounds = getMultiLayerBounds();
+      if (multiLayerBounds) {
+        const left = multiLayerBounds.x * cellSize;
+        const top = multiLayerBounds.y * cellSize;
+        const selWidth = multiLayerBounds.width * cellSize;
+        const selHeight = multiLayerBounds.height * cellSize;
+
+        // Draw selection rectangle (dashed purple for multi-layer)
+        ctx.strokeStyle = '#9333ea'; // Purple for multi-selection
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.strokeRect(left, top, selWidth, selHeight);
+        ctx.setLineDash([]);
+
+        // Draw count badge
+        const badgeText = `${selectedLayerIds.length} layers`;
+        ctx.font = '11px sans-serif';
+        const textMetrics = ctx.measureText(badgeText);
+        const padding = 4;
+        const badgeX = left + selWidth - textMetrics.width - padding * 2 - 4;
+        const badgeY = top - 20;
+
+        // Background
+        ctx.fillStyle = 'rgba(147, 51, 234, 0.9)';
+        ctx.fillRect(badgeX, badgeY, textMetrics.width + padding * 2, 16);
+
+        // Text
+        ctx.fillStyle = '#ffffff';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(badgeText, badgeX + padding, badgeY + 8);
+      }
+    }
+
     // Draw guide lines for selected overlay or layer
     const selectedOverlay = selectedOverlayId ? overlayImages.find(o => o.id === selectedOverlayId) : null;
     const hasSelection = selection?.selectionType === 'layer' || selectedOverlay;
@@ -1195,7 +1255,7 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     }
 
     ctx.restore();
-  }, [pattern, zoom, panOffset, showGrid, gridDivisions, getColor, getColorObject, getContrastColor, showSymbols, showCenterMarker, selection, shapeStart, shapeEnd, selectedColorId, activeTool, overlayImages, overlayImageElements, selectedOverlayId, isProgressMode, progressShadingColor, progressShadingOpacity, rulerUnit]);
+  }, [pattern, zoom, panOffset, showGrid, gridDivisions, getColor, getColorObject, getContrastColor, showSymbols, showCenterMarker, selection, shapeStart, shapeEnd, selectedColorId, activeTool, overlayImages, overlayImageElements, selectedOverlayId, isProgressMode, progressShadingColor, progressShadingOpacity, rulerUnit, selectedLayerIds, getMultiLayerBounds]);
 
   // Draw horizontal ruler (top)
   const drawTopRuler = useCallback(() => {
@@ -1948,6 +2008,30 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       return;
     }
 
+    // Progress mode with blockfill tool: mark entire 5x5 block as complete
+    if (isProgressMode && activeTool === 'blockfill') {
+      const cellSize = CELL_SIZE * zoom;
+      const cellX = Math.floor((x - panOffset.x) / cellSize);
+      const cellY = Math.floor((y - panOffset.y) / cellSize);
+
+      // Check if within canvas bounds
+      if (cellX >= 0 && cellX < pattern.canvas.width && cellY >= 0 && cellY < pattern.canvas.height) {
+        // Calculate the 5x5 block boundaries
+        const blockStartX = Math.floor(cellX / gridDivisions) * gridDivisions;
+        const blockStartY = Math.floor(cellY / gridDivisions) * gridDivisions;
+
+        // Toggle: check if the clicked cell is complete, then apply opposite to entire block
+        const currentState = getStitchCompleted(cellX, cellY);
+        const targetState = !currentState;
+
+        // Start drag tracking for block fill
+        blockFillDragRef.current = { targetState, lastBlockX: blockStartX, lastBlockY: blockStartY };
+        setAreaCompleted(blockStartX, blockStartY, gridDivisions, gridDivisions, targetState);
+        setIsDrawing(true);
+      }
+      return;
+    }
+
     if (activeTool === 'select') {
       // Check if clicking on overlay resize handle (for selected overlay)
       const overlayHandle = getOverlayResizeHandle(x, y);
@@ -2012,6 +2096,16 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
         const cell = canvasToCellUnbounded(x, y);
         if (cell) {
           startDrag(cell);
+          setIsDrawing(true);
+        }
+        return;
+      }
+
+      // Check if clicking inside multi-layer selection bounds (for multi-layer drag)
+      if (selectedLayerIds.length > 0 && isPointInMultiLayerBounds(x, y)) {
+        const cell = canvasToCellUnbounded(x, y);
+        if (cell) {
+          startMultiLayerDrag(cell);
           setIsDrawing(true);
         }
         return;
@@ -2187,6 +2281,28 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       return;
     }
 
+    // Handle blockfill dragging - mark entire 5x5 blocks as we drag across them
+    if (isProgressMode && isDrawing && blockFillDragRef.current) {
+      const cellSize = CELL_SIZE * zoom;
+      const cellX = Math.floor((x - panOffset.x) / cellSize);
+      const cellY = Math.floor((y - panOffset.y) / cellSize);
+
+      // Calculate current block
+      const blockStartX = Math.floor(cellX / gridDivisions) * gridDivisions;
+      const blockStartY = Math.floor(cellY / gridDivisions) * gridDivisions;
+
+      // Only update if we've moved to a new block
+      if (blockStartX !== blockFillDragRef.current.lastBlockX || blockStartY !== blockFillDragRef.current.lastBlockY) {
+        // Check if within canvas bounds
+        if (cellX >= 0 && cellX < pattern.canvas.width && cellY >= 0 && cellY < pattern.canvas.height) {
+          setAreaCompleted(blockStartX, blockStartY, gridDivisions, gridDivisions, blockFillDragRef.current.targetState);
+        }
+        blockFillDragRef.current.lastBlockX = blockStartX;
+        blockFillDragRef.current.lastBlockY = blockStartY;
+      }
+      return;
+    }
+
     // Handle overlay dragging/resizing
     if (activeTool === 'select' && isDrawing && overlayDragState && selectedOverlayId && selectedOverlay) {
       const cellSize = CELL_SIZE * zoom;
@@ -2282,6 +2398,15 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       return;
     }
 
+    // Handle multi-layer drag
+    if (activeTool === 'select' && isDrawing && multiLayerDragState?.isDragging) {
+      const cell = canvasToCellUnbounded(x, y);
+      if (cell) {
+        updateMultiLayerDrag(cell);
+      }
+      return;
+    }
+
     // Handle areaselect tool dragging/area selection
     if (activeTool === 'areaselect' && isDrawing && selection) {
       const cell = canvasToCellUnbounded(x, y);
@@ -2340,6 +2465,11 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       progressDragRef.current = null;
     }
 
+    // Clear block fill drag state
+    if (blockFillDragRef.current) {
+      blockFillDragRef.current = null;
+    }
+
     // Clear overlay drag state
     if (overlayDragState) {
       setOverlayDragState(null);
@@ -2357,6 +2487,11 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       } else if (selection.isDragging) {
         endDrag();
       }
+    }
+
+    // Handle multi-layer drag end
+    if (activeTool === 'select' && multiLayerDragState?.isDragging) {
+      endMultiLayerDrag();
     }
 
     // Handle areaselect tool area selection end
@@ -2615,6 +2750,30 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
         return;
       }
 
+      // Progress mode with blockfill tool: mark entire 5x5 block as complete
+      if (isProgressMode && activeTool === 'blockfill') {
+        e.preventDefault();
+        const cellSize = CELL_SIZE * zoom;
+        const cellX = Math.floor((x - panOffset.x) / cellSize);
+        const cellY = Math.floor((y - panOffset.y) / cellSize);
+
+        if (cellX >= 0 && cellX < pattern.canvas.width && cellY >= 0 && cellY < pattern.canvas.height) {
+          // Calculate the 5x5 block boundaries
+          const blockStartX = Math.floor(cellX / gridDivisions) * gridDivisions;
+          const blockStartY = Math.floor(cellY / gridDivisions) * gridDivisions;
+
+          // Toggle: check if the clicked cell is complete, then apply opposite to entire block
+          const currentState = getStitchCompleted(cellX, cellY);
+          const targetState = !currentState;
+
+          // Start drag tracking for block fill
+          blockFillDragRef.current = { targetState, lastBlockX: blockStartX, lastBlockY: blockStartY };
+          setAreaCompleted(blockStartX, blockStartY, gridDivisions, gridDivisions, targetState);
+          setIsDrawing(true);
+        }
+        return;
+      }
+
       // Select tool: handle resize handles, dragging, and selection
       if (activeTool === 'select') {
         // Check if touching overlay resize handle
@@ -2684,6 +2843,17 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
           const cell = canvasToCellUnbounded(x, y);
           if (cell) {
             startDrag(cell);
+            setIsDrawing(true);
+          }
+          return;
+        }
+
+        // Check if touching inside multi-layer selection bounds (for multi-layer drag)
+        if (selectedLayerIds.length > 0 && isPointInMultiLayerBounds(x, y)) {
+          e.preventDefault();
+          const cell = canvasToCellUnbounded(x, y);
+          if (cell) {
+            startMultiLayerDrag(cell);
             setIsDrawing(true);
           }
           return;
@@ -2917,6 +3087,29 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
         return;
       }
 
+      // Handle blockfill dragging - mark entire 5x5 blocks as we drag across them
+      if (isProgressMode && isDrawing && blockFillDragRef.current) {
+        e.preventDefault();
+        const cellSize = CELL_SIZE * zoom;
+        const cellX = Math.floor((x - panOffset.x) / cellSize);
+        const cellY = Math.floor((y - panOffset.y) / cellSize);
+
+        // Calculate current block
+        const blockStartX = Math.floor(cellX / gridDivisions) * gridDivisions;
+        const blockStartY = Math.floor(cellY / gridDivisions) * gridDivisions;
+
+        // Only update if we've moved to a new block
+        if (blockStartX !== blockFillDragRef.current.lastBlockX || blockStartY !== blockFillDragRef.current.lastBlockY) {
+          // Check if within canvas bounds
+          if (cellX >= 0 && cellX < pattern.canvas.width && cellY >= 0 && cellY < pattern.canvas.height) {
+            setAreaCompleted(blockStartX, blockStartY, gridDivisions, gridDivisions, blockFillDragRef.current.targetState);
+          }
+          blockFillDragRef.current.lastBlockX = blockStartX;
+          blockFillDragRef.current.lastBlockY = blockStartY;
+        }
+        return;
+      }
+
       // Handle overlay dragging/resizing
       if (activeTool === 'select' && isDrawing && overlayDragState && selectedOverlayId && selectedOverlay) {
         e.preventDefault();
@@ -3004,6 +3197,16 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
         return;
       }
 
+      // Handle multi-layer drag
+      if (activeTool === 'select' && isDrawing && multiLayerDragState?.isDragging) {
+        e.preventDefault();
+        const cell = canvasToCellUnbounded(x, y);
+        if (cell) {
+          updateMultiLayerDrag(cell);
+        }
+        return;
+      }
+
       // Handle areaselect tool dragging/area selection
       if (activeTool === 'areaselect' && isDrawing && selection) {
         e.preventDefault();
@@ -3077,6 +3280,11 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       progressDragRef.current = null;
     }
 
+    // Clear block fill drag state
+    if (blockFillDragRef.current) {
+      blockFillDragRef.current = null;
+    }
+
     // End overlay drag state
     if (overlayDragState) {
       setOverlayDragState(null);
@@ -3094,6 +3302,11 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       } else if (selection.isDragging) {
         endDrag();
       }
+    }
+
+    // End multi-layer drag
+    if (activeTool === 'select' && multiLayerDragState?.isDragging) {
+      endMultiLayerDrag();
     }
 
     // End areaselect tool area selection or drag

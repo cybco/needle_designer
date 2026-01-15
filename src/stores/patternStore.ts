@@ -154,7 +154,7 @@ export interface Pattern {
   layers: Layer[];
 }
 
-export type Tool = 'pencil' | 'eraser' | 'fill' | 'pan' | 'select' | 'areaselect' | 'text' | 'line' | 'rectangle' | 'ellipse' | 'colorswap';
+export type Tool = 'pencil' | 'eraser' | 'fill' | 'pan' | 'select' | 'areaselect' | 'text' | 'line' | 'rectangle' | 'ellipse' | 'colorswap' | 'blockfill';
 
 export type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
@@ -228,6 +228,12 @@ interface PatternState {
   // Layer state
   activeLayerId: string | null;
   selection: SelectionState | null;
+  selectedLayerIds: string[]; // For multi-layer selection
+  multiLayerDragState: {
+    isDragging: boolean;
+    dragStart: { x: number; y: number } | null;
+    originalPositions: Map<string, { x: number; y: number }[]> | null; // layerId -> stitch positions
+  } | null;
 
   // Overlay images for tracing
   overlayImages: OverlayImage[];
@@ -338,6 +344,17 @@ interface PatternState {
   flipLayerVertical: () => void;
   rotateLayerLeft: () => void;
   rotateLayerRight: () => void;
+
+  // Multi-layer selection actions
+  toggleLayerInSelection: (layerId: string) => void;
+  addLayersToSelection: (layerIds: string[]) => void;
+  clearLayerSelection: () => void;
+  selectAllLayers: () => void;
+  moveSelectedLayers: (deltaX: number, deltaY: number) => void;
+  startMultiLayerDrag: (point: { x: number; y: number }) => void;
+  updateMultiLayerDrag: (point: { x: number; y: number }) => void;
+  endMultiLayerDrag: () => void;
+  getMultiLayerBounds: () => { x: number; y: number; width: number; height: number } | null;
 
   // Overlay image actions
   addOverlayImage: (dataUrl: string, naturalWidth: number, naturalHeight: number, name?: string) => void;
@@ -572,6 +589,8 @@ export const usePatternStore = create<PatternState>((set, get) => {
   rulerUnit: 'inches' as RulerUnit,
   activeLayerId: null,
   selection: null,
+  selectedLayerIds: [],
+  multiLayerDragState: null,
   overlayImages: [],
   selectedOverlayId: null,
   isProgressMode: false,
@@ -593,6 +612,8 @@ export const usePatternStore = create<PatternState>((set, get) => {
       future: newFuture,
       hasUnsavedChanges: true,
       selection: null, // Clear selection on undo
+      selectedLayerIds: [], // Clear multi-selection on undo
+      multiLayerDragState: null,
     });
   },
 
@@ -610,6 +631,8 @@ export const usePatternStore = create<PatternState>((set, get) => {
       future: newFuture,
       hasUnsavedChanges: true,
       selection: null, // Clear selection on redo
+      selectedLayerIds: [], // Clear multi-selection on redo
+      multiLayerDragState: null,
     });
   },
 
@@ -659,6 +682,8 @@ export const usePatternStore = create<PatternState>((set, get) => {
       activeLayerId: null,
       activeTool: 'pan',
       selection: null,
+      selectedLayerIds: [],
+      multiLayerDragState: null,
       overlayImages: [],
       selectedOverlayId: null,
       zoom: 1,
@@ -686,6 +711,8 @@ export const usePatternStore = create<PatternState>((set, get) => {
       selectedColorId: 'color-black', // Default to black
       activeLayerId: layerId,
       selection: null,
+      selectedLayerIds: [],
+      multiLayerDragState: null,
       zoom: 1,
       panOffset: { x: 0, y: 0 },
       currentFilePath: null,
@@ -3184,6 +3211,166 @@ export const usePatternStore = create<PatternState>((set, get) => {
       },
       hasUnsavedChanges: true,
     });
+  },
+
+  // Multi-layer selection actions
+  toggleLayerInSelection: (layerId) => {
+    const { selectedLayerIds, pattern } = get();
+    if (!pattern) return;
+
+    const layer = pattern.layers.find(l => l.id === layerId);
+    if (!layer) return;
+
+    if (selectedLayerIds.includes(layerId)) {
+      // Remove from selection
+      set({ selectedLayerIds: selectedLayerIds.filter(id => id !== layerId) });
+    } else {
+      // Add to selection
+      set({ selectedLayerIds: [...selectedLayerIds, layerId] });
+    }
+  },
+
+  addLayersToSelection: (layerIds) => {
+    const { selectedLayerIds, pattern } = get();
+    if (!pattern) return;
+
+    // Filter to only valid layer IDs and avoid duplicates
+    const validIds = layerIds.filter(id =>
+      pattern.layers.some(l => l.id === id) && !selectedLayerIds.includes(id)
+    );
+
+    set({ selectedLayerIds: [...selectedLayerIds, ...validIds] });
+  },
+
+  clearLayerSelection: () => {
+    set({ selectedLayerIds: [], multiLayerDragState: null });
+  },
+
+  selectAllLayers: () => {
+    const { pattern } = get();
+    if (!pattern) return;
+
+    set({ selectedLayerIds: pattern.layers.map(l => l.id) });
+  },
+
+  moveSelectedLayers: (deltaX, deltaY) => {
+    const { pattern, selectedLayerIds } = get();
+    if (!pattern || selectedLayerIds.length === 0) return;
+    if (deltaX === 0 && deltaY === 0) return;
+
+    pushToHistory();
+
+    const updatedLayers = pattern.layers.map(layer => {
+      if (!selectedLayerIds.includes(layer.id)) return layer;
+      if (layer.locked) return layer; // Don't move locked layers
+
+      return {
+        ...layer,
+        stitches: layer.stitches.map(s => ({
+          ...s,
+          x: s.x + deltaX,
+          y: s.y + deltaY,
+        })),
+      };
+    });
+
+    set({
+      pattern: { ...pattern, layers: updatedLayers },
+      hasUnsavedChanges: true,
+    });
+  },
+
+  startMultiLayerDrag: (point) => {
+    const { pattern, selectedLayerIds } = get();
+    if (!pattern || selectedLayerIds.length === 0) return;
+
+    // Push to history before starting drag
+    pushToHistory();
+
+    // Store original stitch positions for all selected layers
+    const originalPositions = new Map<string, { x: number; y: number }[]>();
+    for (const layerId of selectedLayerIds) {
+      const layer = pattern.layers.find(l => l.id === layerId);
+      if (layer && !layer.locked) {
+        originalPositions.set(layerId, layer.stitches.map(s => ({ x: s.x, y: s.y })));
+      }
+    }
+
+    set({
+      multiLayerDragState: {
+        isDragging: true,
+        dragStart: point,
+        originalPositions,
+      },
+    });
+  },
+
+  updateMultiLayerDrag: (point) => {
+    const { pattern, multiLayerDragState, selectedLayerIds } = get();
+    if (!pattern || !multiLayerDragState?.isDragging || !multiLayerDragState.dragStart || !multiLayerDragState.originalPositions) return;
+
+    const deltaX = Math.round(point.x - multiLayerDragState.dragStart.x);
+    const deltaY = Math.round(point.y - multiLayerDragState.dragStart.y);
+
+    const updatedLayers = pattern.layers.map(layer => {
+      if (!selectedLayerIds.includes(layer.id)) return layer;
+
+      const originalPos = multiLayerDragState.originalPositions?.get(layer.id);
+      if (!originalPos || layer.locked) return layer;
+
+      return {
+        ...layer,
+        stitches: layer.stitches.map((s, i) => ({
+          ...s,
+          x: originalPos[i].x + deltaX,
+          y: originalPos[i].y + deltaY,
+        })),
+      };
+    });
+
+    set({
+      pattern: { ...pattern, layers: updatedLayers },
+    });
+  },
+
+  endMultiLayerDrag: () => {
+    const { multiLayerDragState } = get();
+    if (!multiLayerDragState?.isDragging) return;
+
+    set({
+      multiLayerDragState: null,
+      hasUnsavedChanges: true,
+    });
+  },
+
+  getMultiLayerBounds: () => {
+    const { pattern, selectedLayerIds } = get();
+    if (!pattern || selectedLayerIds.length === 0) return null;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let hasStitches = false;
+
+    for (const layerId of selectedLayerIds) {
+      const layer = pattern.layers.find(l => l.id === layerId);
+      if (!layer || layer.stitches.length === 0) continue;
+
+      for (const stitch of layer.stitches) {
+        hasStitches = true;
+        minX = Math.min(minX, stitch.x);
+        minY = Math.min(minY, stitch.y);
+        maxX = Math.max(maxX, stitch.x);
+        maxY = Math.max(maxY, stitch.y);
+      }
+    }
+
+    if (!hasStitches) return null;
+
+    return {
+      x: minX,
+      y: minY,
+      width: maxX - minX + 1,
+      height: maxY - minY + 1,
+    };
   },
 
   // Overlay image actions

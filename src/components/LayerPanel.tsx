@@ -10,6 +10,7 @@ export function LayerPanel({ onEditTextLayer }: LayerPanelProps) {
     pattern,
     activeLayerId,
     selection,
+    selectedLayerIds,
     overlayImages,
     selectedOverlayId,
     setActiveLayer,
@@ -23,6 +24,8 @@ export function LayerPanel({ onEditTextLayer }: LayerPanelProps) {
     mergeAllLayers,
     duplicateLayer,
     selectLayerForTransform,
+    toggleLayerInSelection,
+    clearLayerSelection,
     selectOverlay,
     deselectOverlay,
     toggleOverlayVisibility,
@@ -59,14 +62,29 @@ export function LayerPanel({ onEditTextLayer }: LayerPanelProps) {
     }
   };
 
-  const handleLayerClick = (layerId: string) => {
-    setActiveLayer(layerId);
-    // Also select for transform (shows selection box if layer has stitches)
-    selectLayerForTransform(layerId);
+  const handleLayerClick = (layerId: string, e: React.MouseEvent) => {
     // Deselect overlay when clicking on a layer
     if (selectedOverlayId) {
       deselectOverlay();
     }
+
+    // Ctrl/Cmd+Click for multi-select
+    if (e.ctrlKey || e.metaKey) {
+      toggleLayerInSelection(layerId);
+      // Keep the active layer but don't change selection transform
+      if (!activeLayerId) {
+        setActiveLayer(layerId);
+      }
+      return;
+    }
+
+    // Regular click - clear multi-selection and select single layer
+    if (selectedLayerIds.length > 0) {
+      clearLayerSelection();
+    }
+    setActiveLayer(layerId);
+    // Also select for transform (shows selection box if layer has stitches)
+    selectLayerForTransform(layerId);
   };
 
   const handleOverlayClick = (overlayId: string) => {
@@ -88,14 +106,32 @@ export function LayerPanel({ onEditTextLayer }: LayerPanelProps) {
     <div className="w-full bg-white border-b border-gray-300 flex flex-col max-h-64 shrink-0">
       {/* Header */}
       <div className="p-2 border-b border-gray-200 flex items-center justify-between">
-        <span className="font-medium text-sm text-gray-700">Layers</span>
-        <button
-          onClick={() => addLayer()}
-          className="w-6 h-6 flex items-center justify-center bg-blue-500 text-white rounded hover:bg-blue-600 text-sm"
-          title="Add Layer"
-        >
-          +
-        </button>
+        <div className="flex items-center gap-2">
+          <span className="font-medium text-sm text-gray-700">Layers</span>
+          {selectedLayerIds.length > 0 && (
+            <span className="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">
+              {selectedLayerIds.length} selected
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          {selectedLayerIds.length > 0 && (
+            <button
+              onClick={() => clearLayerSelection()}
+              className="px-1.5 py-0.5 text-[10px] bg-gray-100 hover:bg-gray-200 rounded text-gray-600"
+              title="Clear Selection (Esc)"
+            >
+              Clear
+            </button>
+          )}
+          <button
+            onClick={() => addLayer()}
+            className="w-6 h-6 flex items-center justify-center bg-blue-500 text-white rounded hover:bg-blue-600 text-sm"
+            title="Add Layer"
+          >
+            +
+          </button>
+        </div>
       </div>
 
       {/* Overlay Images Section */}
@@ -224,6 +260,7 @@ export function LayerPanel({ onEditTextLayer }: LayerPanelProps) {
         {reversedLayers.map((layer, reversedIndex) => {
           const isActive = layer.id === activeLayerId;
           const isSelected = selection?.layerId === layer.id;
+          const isMultiSelected = selectedLayerIds.includes(layer.id);
           const realIndex = pattern.layers.length - 1 - reversedIndex;
           const canMoveUp = realIndex < pattern.layers.length - 1;
           const canMoveDown = realIndex > 0;
@@ -231,10 +268,10 @@ export function LayerPanel({ onEditTextLayer }: LayerPanelProps) {
           return (
             <div
               key={layer.id}
-              onClick={() => handleLayerClick(layer.id)}
+              onClick={(e) => handleLayerClick(layer.id, e)}
               className={`flex items-center gap-1 p-1.5 border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${
                 isActive ? 'bg-blue-50 border-l-2 border-l-blue-500' : ''
-              } ${isSelected ? 'ring-1 ring-blue-400' : ''}`}
+              } ${isSelected ? 'ring-1 ring-blue-400' : ''} ${isMultiSelected ? 'bg-purple-50 ring-1 ring-purple-400' : ''}`}
             >
               {/* Visibility Toggle */}
               <button
