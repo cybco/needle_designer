@@ -313,6 +313,8 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     updateOverlaySize,
     isProgressMode,
     setStitchCompleted,
+    setAreaCompleted,
+    fillContiguousCompleted,
     getStitchCompleted,
     progressShadingColor: storeShadingColor,
     progressShadingOpacity: storeShadingOpacity,
@@ -1895,15 +1897,15 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // Pan mode works in both normal and progress mode
+    // Pan mode - works in both normal and progress mode
     if (activeTool === 'pan') {
       setIsDrawing(true);
       setLastCell({ x: e.clientX, y: e.clientY });
       return;
     }
 
-    // Progress mode: clicking/dragging toggles stitch completion (when not panning)
-    if (isProgressMode) {
+    // Progress mode with pencil tool: clicking/dragging toggles stitch completion
+    if (isProgressMode && activeTool === 'pencil') {
       const cellSize = CELL_SIZE * zoom;
       const cellX = Math.floor((x - panOffset.x) / cellSize);
       const cellY = Math.floor((y - panOffset.y) / cellSize);
@@ -1927,6 +1929,21 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
         progressDragRef.current = { targetState, lastCellX: cellX, lastCellY: cellY };
         setStitchCompleted(cellX, cellY, targetState);
         setIsDrawing(true);
+      }
+      return;
+    }
+
+    // Progress mode with fill tool: flood fill contiguous same-color stitches as complete
+    if (isProgressMode && activeTool === 'fill') {
+      const cellSize = CELL_SIZE * zoom;
+      const cellX = Math.floor((x - panOffset.x) / cellSize);
+      const cellY = Math.floor((y - panOffset.y) / cellSize);
+
+      // Check if within canvas bounds
+      if (cellX >= 0 && cellX < pattern.canvas.width && cellY >= 0 && cellY < pattern.canvas.height) {
+        // Toggle: if already complete, mark as incomplete; otherwise mark as complete
+        const currentState = getStitchCompleted(cellX, cellY);
+        fillContiguousCompleted(cellX, cellY, !currentState);
       }
       return;
     }
@@ -2345,7 +2362,14 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     // Handle areaselect tool area selection end
     if (activeTool === 'areaselect' && selection) {
       if (selection.isSelectingArea) {
-        endAreaSelection();
+        // In progress mode, mark the entire selected area as complete instead of keeping selection
+        if (isProgressMode && selection.bounds) {
+          const { x, y, width, height } = selection.bounds;
+          setAreaCompleted(x, y, width, height, true);
+          clearSelection();
+        } else {
+          endAreaSelection();
+        }
       } else if (selection.isDragging) {
         endDrag();
       }
@@ -2536,7 +2560,7 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       const x = touch.clientX - rect.left;
       const y = touch.clientY - rect.top;
 
-      // In pan mode, start panning
+      // Pan mode - works in both normal and progress mode
       if (activeTool === 'pan') {
         setTouchState({
           isPanning: true,
@@ -2548,8 +2572,8 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
         return;
       }
 
-      // In progress mode, toggle stitch completion and enable drag
-      if (isProgressMode) {
+      // In progress mode with pencil tool, toggle stitch completion and enable drag
+      if (isProgressMode && activeTool === 'pencil') {
         e.preventDefault(); // Prevent synthetic mouse event from firing
         const cellSize = CELL_SIZE * zoom;
         const cellX = Math.floor((x - panOffset.x) / cellSize);
@@ -2573,6 +2597,20 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
           progressDragRef.current = { targetState, lastCellX: cellX, lastCellY: cellY };
           setStitchCompleted(cellX, cellY, targetState);
           setIsDrawing(true);
+        }
+        return;
+      }
+
+      // Progress mode with fill tool: flood fill contiguous same-color stitches as complete
+      if (isProgressMode && activeTool === 'fill') {
+        e.preventDefault();
+        const cellSize = CELL_SIZE * zoom;
+        const cellX = Math.floor((x - panOffset.x) / cellSize);
+        const cellY = Math.floor((y - panOffset.y) / cellSize);
+
+        if (cellX >= 0 && cellX < pattern.canvas.width && cellY >= 0 && cellY < pattern.canvas.height) {
+          const currentState = getStitchCompleted(cellX, cellY);
+          fillContiguousCompleted(cellX, cellY, !currentState);
         }
         return;
       }
@@ -3061,7 +3099,14 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     // End areaselect tool area selection or drag
     if (activeTool === 'areaselect' && selection) {
       if (selection.isSelectingArea) {
-        endAreaSelection();
+        // In progress mode, mark the entire selected area as complete instead of keeping selection
+        if (isProgressMode && selection.bounds) {
+          const { x, y, width, height } = selection.bounds;
+          setAreaCompleted(x, y, width, height, true);
+          clearSelection();
+        } else {
+          endAreaSelection();
+        }
       } else if (selection.isDragging) {
         endDrag();
       }

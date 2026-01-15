@@ -357,6 +357,8 @@ interface PatternState {
   setProgressMode: (enabled: boolean) => void;
   toggleStitchCompleted: (x: number, y: number) => void;
   setStitchCompleted: (x: number, y: number, completed: boolean) => void;
+  setAreaCompleted: (x: number, y: number, width: number, height: number, completed: boolean) => void;
+  fillContiguousCompleted: (x: number, y: number, completed: boolean) => void;
   getStitchCompleted: (x: number, y: number) => boolean;
   setProgressShadingColor: (color: [number, number, number]) => void;
   setProgressShadingOpacity: (opacity: number) => void;
@@ -3324,10 +3326,13 @@ export const usePatternStore = create<PatternState>((set, get) => {
   // Progress tracking actions
   toggleProgressMode: () => {
     const { isProgressMode } = get();
+    const enteringProgressMode = !isProgressMode;
     set({
-      isProgressMode: !isProgressMode,
+      isProgressMode: enteringProgressMode,
       selection: null, // Clear selection when toggling mode
       selectedOverlayId: null, // Deselect overlay
+      // Set pencil tool when entering progress mode so clicks mark stitches
+      ...(enteringProgressMode ? { activeTool: 'pencil' as Tool } : {}),
     });
   },
 
@@ -3336,6 +3341,8 @@ export const usePatternStore = create<PatternState>((set, get) => {
       isProgressMode: enabled,
       selection: null,
       selectedOverlayId: null,
+      // Set pencil tool when entering progress mode so clicks mark stitches
+      ...(enabled ? { activeTool: 'pencil' as Tool } : {}),
     });
   },
 
@@ -3412,6 +3419,131 @@ export const usePatternStore = create<PatternState>((set, get) => {
         return;
       }
     }
+  },
+
+  setAreaCompleted: (x, y, width, height, completed) => {
+    const { pattern } = get();
+    if (!pattern) return;
+
+    // Update all stitches within the area bounds across all visible layers
+    let hasChanges = false;
+    const updatedLayers = pattern.layers.map(layer => {
+      if (!layer.visible) return layer;
+
+      const updatedStitches = layer.stitches.map(stitch => {
+        if (
+          stitch.x >= x &&
+          stitch.x < x + width &&
+          stitch.y >= y &&
+          stitch.y < y + height &&
+          stitch.completed !== completed
+        ) {
+          hasChanges = true;
+          return { ...stitch, completed };
+        }
+        return stitch;
+      });
+
+      if (updatedStitches !== layer.stitches) {
+        return { ...layer, stitches: updatedStitches };
+      }
+      return layer;
+    });
+
+    if (hasChanges) {
+      set({
+        pattern: {
+          ...pattern,
+          layers: updatedLayers,
+        },
+        hasUnsavedChanges: true,
+      });
+    }
+  },
+
+  fillContiguousCompleted: (startX, startY, completed) => {
+    const { pattern } = get();
+    if (!pattern) return;
+
+    // Build a map of all stitches across visible layers (topmost wins)
+    const stitchMap = new Map<string, { stitch: Stitch; layerIndex: number }>();
+    for (let i = 0; i < pattern.layers.length; i++) {
+      const layer = pattern.layers[i];
+      if (!layer.visible) continue;
+      for (const stitch of layer.stitches) {
+        const key = `${stitch.x},${stitch.y}`;
+        stitchMap.set(key, { stitch, layerIndex: i });
+      }
+    }
+
+    // Find the starting stitch
+    const startKey = `${startX},${startY}`;
+    const startEntry = stitchMap.get(startKey);
+    if (!startEntry) return;
+
+    const targetColorId = startEntry.stitch.colorId;
+
+    // Flood fill using BFS to find all contiguous stitches of the same color
+    const visited = new Set<string>();
+    const toUpdate: Array<{ x: number; y: number; layerIndex: number }> = [];
+    const queue: Array<{ x: number; y: number }> = [{ x: startX, y: startY }];
+
+    while (queue.length > 0) {
+      const { x, y } = queue.shift()!;
+      const key = `${x},${y}`;
+
+      if (visited.has(key)) continue;
+      visited.add(key);
+
+      const entry = stitchMap.get(key);
+      if (!entry || entry.stitch.colorId !== targetColorId) continue;
+
+      // Only update if the completion state differs
+      if (entry.stitch.completed !== completed) {
+        toUpdate.push({ x, y, layerIndex: entry.layerIndex });
+      }
+
+      // Add 4-connected neighbors
+      queue.push({ x: x + 1, y });
+      queue.push({ x: x - 1, y });
+      queue.push({ x, y: y + 1 });
+      queue.push({ x, y: y - 1 });
+    }
+
+    if (toUpdate.length === 0) return;
+
+    // Group updates by layer for efficient batch update
+    const updatesByLayer = new Map<number, Array<{ x: number; y: number }>>();
+    for (const { x, y, layerIndex } of toUpdate) {
+      if (!updatesByLayer.has(layerIndex)) {
+        updatesByLayer.set(layerIndex, []);
+      }
+      updatesByLayer.get(layerIndex)!.push({ x, y });
+    }
+
+    // Apply updates to layers
+    const updatedLayers = pattern.layers.map((layer, layerIndex) => {
+      const updates = updatesByLayer.get(layerIndex);
+      if (!updates) return layer;
+
+      const updateSet = new Set(updates.map(u => `${u.x},${u.y}`));
+      const updatedStitches = layer.stitches.map(stitch => {
+        if (updateSet.has(`${stitch.x},${stitch.y}`)) {
+          return { ...stitch, completed };
+        }
+        return stitch;
+      });
+
+      return { ...layer, stitches: updatedStitches };
+    });
+
+    set({
+      pattern: {
+        ...pattern,
+        layers: updatedLayers,
+      },
+      hasUnsavedChanges: true,
+    });
   },
 
   getStitchCompleted: (x, y) => {

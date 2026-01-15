@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { TextCursor, BookCopy, Trash2 } from 'lucide-react';
 import { PatternCanvas } from './components/PatternCanvas';
 import { ColorPalette } from './components/ColorPalette';
-import { Toolbar, ToolVisibility, EraserIcon, FillIcon, PanIcon, CursorIcon, TextIcon, ColorSwapIcon, AreaSelectIcon, PreviewCanvasIcon, SelectionDuplicateIcon, SelectionNewLayerIcon, SelectionDuplicateToNewLayerIcon, FlipHorizontalIcon, FlipVerticalIcon, RotateLeftIcon, RotateRightIcon } from './components/Toolbar';
+import { Toolbar, ToolVisibility, EraserIcon, FillIcon, PanIcon, CursorIcon, TextIcon, ColorSwapIcon, AreaSelectIcon, PreviewCanvasIcon, SelectionDuplicateIcon, SelectionNewLayerIcon, SelectionDuplicateToNewLayerIcon, FlipHorizontalIcon, FlipVerticalIcon, RotateLeftIcon, RotateRightIcon, FullscreenIcon } from './components/Toolbar';
 import { LayerPanel } from './components/LayerPanel';
 import { ProgressTrackingPanel } from './components/ProgressTrackingPanel';
 import { NewProjectDialog } from './components/NewProjectDialog';
@@ -376,6 +376,7 @@ function App() {
     currentFilePath,
     hasUnsavedChanges,
     history,
+    future,
     selectedColorId,
     selection,
     overlayImages,
@@ -404,6 +405,8 @@ function App() {
     isProgressMode,
     toggleProgressMode,
     setProgressMode,
+    showGrid,
+    toggleGrid,
     progressShadingColor,
     progressShadingOpacity,
     setProgressShadingColor,
@@ -1913,12 +1916,25 @@ function App() {
         </div>
         <div className="flex items-center gap-4">
           {pattern && (
-            <span className="text-sm text-gray-300">
-              {currentFilePath
-                ? decodeURIComponent(currentFilePath.split(/[/\\]/).pop() || '')
-                : pattern.name}
-              {hasUnsavedChanges ? ' *' : ''} - {pattern.canvas.width} x {pattern.canvas.height}
-            </span>
+            <>
+              <span className="text-sm text-gray-300">
+                {currentFilePath
+                  ? decodeURIComponent(currentFilePath.split(/[/\\]/).pop() || '')
+                  : pattern.name}
+                {hasUnsavedChanges ? ' *' : ''} - {pattern.canvas.width} x {pattern.canvas.height}
+              </span>
+              <button
+                onClick={toggleProgressMode}
+                className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                  isProgressMode
+                    ? 'bg-green-600 hover:bg-green-700 text-white'
+                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                }`}
+                title={isProgressMode ? 'Exit Progress Tracking' : 'Enter Progress Tracking'}
+              >
+                Progress Tracking
+              </button>
+            </>
           )}
           {appVersion && <span className="text-sm text-gray-400">v{appVersion}</span>}
           {/* Window Controls - hidden on iOS/iPad */}
@@ -1994,6 +2010,118 @@ function App() {
 
             {/* Canvas Area */}
             <PatternCanvas showSymbols={preferences.showSymbols} showCenterMarker={preferences.showCenterMarker} />
+
+            {/* Progress Mode Toolbar - small vertical toolbar on right side of canvas */}
+            {isProgressMode && (
+              <div className="flex flex-col bg-gray-100 border-l border-gray-300 p-1 gap-1">
+                <button
+                  onClick={() => setTool('pencil')}
+                  className={`w-10 h-10 flex items-center justify-center rounded transition-colors ${
+                    activeTool === 'pencil'
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-white text-gray-700 hover:bg-gray-200'
+                  }`}
+                  title="Mark Stitches (Pencil)"
+                >
+                  <span className="text-lg">✏️</span>
+                </button>
+                <button
+                  onClick={() => setTool('areaselect')}
+                  className={`w-10 h-10 flex items-center justify-center rounded transition-colors ${
+                    activeTool === 'areaselect'
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-white text-gray-700 hover:bg-gray-200'
+                  }`}
+                  title="Select Area to Mark Complete"
+                >
+                  <AreaSelectIcon className="w-5 h-5" />
+                </button>
+                <button
+                  onClick={() => setTool('fill')}
+                  className={`w-10 h-10 flex items-center justify-center rounded transition-colors ${
+                    activeTool === 'fill'
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-white text-gray-700 hover:bg-gray-200'
+                  }`}
+                  title="Fill Contiguous Color as Complete"
+                >
+                  <FillIcon className="w-5 h-5" variant="grey" />
+                </button>
+                <button
+                  onClick={() => setTool('pan')}
+                  className={`w-10 h-10 flex items-center justify-center rounded transition-colors ${
+                    activeTool === 'pan'
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-white text-gray-700 hover:bg-gray-200'
+                  }`}
+                  title="Pan Canvas (Space)"
+                >
+                  <PanIcon className="w-6 h-6" />
+                </button>
+                {/* Separator */}
+                <div className="border-t border-gray-300 my-1" />
+                {/* Undo/Redo */}
+                <button
+                  onClick={undo}
+                  disabled={history.length === 0}
+                  className={`w-10 h-10 flex items-center justify-center rounded transition-colors ${
+                    history.length === 0
+                      ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
+                      : 'bg-white text-gray-700 hover:bg-gray-200'
+                  }`}
+                  title="Undo (Ctrl+Z)"
+                >
+                  <span className="text-lg">↩️</span>
+                </button>
+                <button
+                  onClick={redo}
+                  disabled={future.length === 0}
+                  className={`w-10 h-10 flex items-center justify-center rounded transition-colors ${
+                    future.length === 0
+                      ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
+                      : 'bg-white text-gray-700 hover:bg-gray-200'
+                  }`}
+                  title="Redo (Ctrl+Y)"
+                >
+                  <span className="text-lg">↪️</span>
+                </button>
+                {/* Separator */}
+                <div className="border-t border-gray-300 my-1" />
+                {/* Zoom controls */}
+                <button
+                  onClick={() => setZoom(Math.min(10, zoom + 0.1))}
+                  className="w-10 h-10 flex items-center justify-center rounded transition-colors bg-white text-gray-700 hover:bg-gray-200"
+                  title="Zoom In (+)"
+                >
+                  <span className="text-lg">🔍+</span>
+                </button>
+                <button
+                  onClick={() => setZoom(Math.max(0.1, zoom - 0.1))}
+                  className="w-10 h-10 flex items-center justify-center rounded transition-colors bg-white text-gray-700 hover:bg-gray-200"
+                  title="Zoom Out (-)"
+                >
+                  <span className="text-lg">🔍−</span>
+                </button>
+                <button
+                  onClick={handleFitToCanvas}
+                  className="w-10 h-10 flex items-center justify-center rounded transition-colors bg-white text-gray-700 hover:bg-gray-200"
+                  title="Fit to Window (0)"
+                >
+                  <FullscreenIcon className="w-5 h-5" />
+                </button>
+                <button
+                  onClick={toggleGrid}
+                  className={`w-10 h-10 flex items-center justify-center rounded transition-colors ${
+                    showGrid
+                      ? 'bg-white text-gray-700 hover:bg-gray-200'
+                      : 'bg-blue-500 text-white'
+                  }`}
+                  title={showGrid ? 'Hide Grid' : 'Show Grid'}
+                >
+                  <span className="text-lg font-bold">#</span>
+                </button>
+              </div>
+            )}
 
             {/* Right Panel - either Progress Tracking or Layers/Colors */}
             <div className={`flex flex-col border-l border-gray-300 min-h-0 transition-all duration-200 ${isRightPanelCollapsed ? 'w-8' : 'w-64'}`}>

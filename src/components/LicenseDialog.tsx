@@ -60,19 +60,6 @@ export function LicenseDialog({ isOpen, onClose }: LicenseDialogProps) {
     }
   };
 
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return 'N/A';
-    try {
-      return new Date(dateStr).toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-      });
-    } catch {
-      return 'N/A';
-    }
-  };
-
   const isLicensed = licenseInfo?.status === 'licensed' || licenseInfo?.status === 'licensed_upgrade_required';
   const isTrial = licenseInfo?.status === 'trial';
   const statusColor = licenseInfo ? getLicenseStatusColor(licenseInfo.status) : 'text-gray-600';

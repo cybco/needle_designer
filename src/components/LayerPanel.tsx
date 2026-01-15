@@ -383,7 +383,7 @@ export function LayerPanel({ onEditTextLayer }: LayerPanelProps) {
           className="px-2 py-1 text-[10px] bg-gray-100 hover:bg-gray-200 rounded disabled:opacity-50"
           title="Flatten all layers into one"
         >
-          Flatten
+          Flatten All
         </button>
         <button
           onClick={() => activeLayerId && removeLayer(activeLayerId)}

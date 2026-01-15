@@ -286,7 +286,9 @@ export function CursorIcon({ className }: { className?: string }) {
 }
 
 // Paint bucket/fill icon SVG (custom with red paint)
-export function FillIcon({ className }: { className?: string }) {
+export function FillIcon({ className, variant = 'red' }: { className?: string; variant?: 'red' | 'grey' }) {
+  const fillColor = variant === 'grey' ? '#888888' : '#C75B5B';
+  const dropColor = variant === 'grey' ? '#666666' : '#B84C4C';
   return (
     <svg
       viewBox="0 0 22 22"
@@ -299,9 +301,9 @@ export function FillIcon({ className }: { className?: string }) {
       {/* Fill line */}
       <path d="M17.988,11L1.037,11" fill="none" stroke="black" strokeWidth="1.5" />
       {/* Paint fill inside bucket */}
-      <path d="M1.193,13.443C2.023,14.418 8.537,19.127 8.537,19.127L17.001,12.696L18.868,9.875L1.359,9.875C1.359,9.875 0.363,12.468 1.193,13.443Z" fill="#C75B5B" />
+      <path d="M1.193,13.443C2.023,14.418 8.537,19.127 8.537,19.127L17.001,12.696L18.868,9.875L1.359,9.875C1.359,9.875 0.363,12.468 1.193,13.443Z" fill={fillColor} />
       {/* Paint drop */}
-      <path d="M20.141,17.38C19.558,16.901 19.154,16.238 18.996,15.5C18.841,16.239 18.436,16.903 17.851,17.38C17.276,17.84 16.996,18.4 16.996,18.975C16.996,18.983 16.996,18.992 16.996,19C16.996,20.097 17.899,21 18.996,21C20.093,21 20.996,20.097 20.996,19C20.996,18.992 20.996,18.983 20.996,18.975C20.996,18.395 20.711,17.845 20.141,17.38" fill="#B84C4C" stroke="#B84C4C" strokeWidth="1.5" />
+      <path d="M20.141,17.38C19.558,16.901 19.154,16.238 18.996,15.5C18.841,16.239 18.436,16.903 17.851,17.38C17.276,17.84 16.996,18.4 16.996,18.975C16.996,18.983 16.996,18.992 16.996,19C16.996,20.097 17.899,21 18.996,21C20.093,21 20.996,20.097 20.996,19C20.996,18.992 20.996,18.983 20.996,18.975C20.996,18.395 20.711,17.845 20.141,17.38" fill={dropColor} stroke={dropColor} strokeWidth="1.5" />
       {/* Bucket outline */}
       <path d="M7.496,3.5L9.644,1.352C10.111,0.885 10.881,0.885 11.348,1.352L18.644,8.648C19.111,9.115 19.111,9.885 18.644,10.352L11.052,17.944C9.65,19.346 7.342,19.346 5.94,17.944L2.052,14.056C0.65,12.654 0.65,10.346 2.052,8.944L4.666,6.33" fill="none" stroke="black" strokeWidth="1.5" />
     </svg>

@@ -1,6 +1,6 @@
 [package]
 name = "stitch-a-lot-studio"
-version = "1.2.4"
+version = "1.2.5"
 description = "Cross-platform needlepoint pattern design application"
 authors = ["you"]
 edition = "2021"

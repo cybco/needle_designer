@@ -15,13 +15,10 @@ export function ProgressTrackingPanel() {
   const {
     pattern,
     currentFilePath,
-    toggleProgressMode,
     progressShadingColor: storeShadingColor,
     progressShadingOpacity: storeShadingOpacity,
     setProgressShadingColor,
     setProgressShadingOpacity,
-    activeTool,
-    setTool,
   } = usePatternStore();
 
   const {
@@ -41,12 +38,6 @@ export function ProgressTrackingPanel() {
   // Ensure shading values have defaults
   const progressShadingColor = storeShadingColor ?? [128, 128, 128] as [number, number, number];
   const progressShadingOpacity = storeShadingOpacity ?? 70;
-
-  const isPanning = activeTool === 'pan';
-
-  const togglePan = () => {
-    setTool(isPanning ? 'pencil' : 'pan');
-  };
 
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showSessionStats, setShowSessionStats] = useState(true);
@@ -304,61 +295,11 @@ export function ProgressTrackingPanel() {
 
   return (
     <div className="w-64 bg-white border-l border-gray-300 flex flex-col h-full overflow-hidden">
-      {/* Header - fixed at top */}
-      <div className="p-3 border-b border-gray-200 bg-green-50 shrink-0">
-        <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-green-800">Progress Tracking</h2>
-          <button
-            onClick={toggleProgressMode}
-            className="text-xs px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700"
-          >
-            Exit
-          </button>
-        </div>
-        <p className="text-xs text-green-600 mt-1">Click on stitches to mark complete</p>
-      </div>
-
       {/* Main scrollable area - everything else scrolls */}
       <div
         className="flex-1 overflow-y-auto min-h-0"
         style={{ WebkitOverflowScrolling: 'touch' }}
       >
-      {/* Canvas Navigation */}
-      <div className="p-3 border-b border-gray-200">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={togglePan}
-            className={`flex-1 h-8 flex items-center justify-center gap-2 rounded text-sm ${
-              isPanning
-                ? 'bg-blue-500 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-            title={isPanning ? 'Exit Pan Mode' : 'Pan Canvas'}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M5 9l-3 3 3 3" />
-              <path d="M9 5l3-3 3 3" />
-              <path d="M15 19l-3 3-3-3" />
-              <path d="M19 9l3 3-3 3" />
-              <line x1="2" y1="12" x2="22" y2="12" />
-              <line x1="12" y1="2" x2="12" y2="22" />
-            </svg>
-            {isPanning ? 'Exit Pan Mode' : 'Move Canvas'}
-          </button>
-        </div>
-        <p className="text-xs text-gray-500 mt-1 text-center">Hold Space to pan temporarily</p>
-      </div>
-
       {/* Overall Progress - Collapsible */}
       <div className="border-b border-gray-200">
         <button
