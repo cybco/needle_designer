@@ -3,9 +3,11 @@ import { usePatternStore } from '../stores/patternStore';
 
 interface LayerPanelProps {
   onEditTextLayer?: (layerId: string) => void;
+  defaultCollapsed?: boolean;
 }
 
-export function LayerPanel({ onEditTextLayer }: LayerPanelProps) {
+export function LayerPanel({ onEditTextLayer, defaultCollapsed = false }: LayerPanelProps) {
+  const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed);
   const {
     pattern,
     activeLayerId,
@@ -103,11 +105,15 @@ export function LayerPanel({ onEditTextLayer }: LayerPanelProps) {
   const reversedLayers = [...pattern.layers].reverse();
 
   return (
-    <div className="w-full bg-white border-b border-gray-300 flex flex-col max-h-64 shrink-0">
-      {/* Header */}
-      <div className="p-2 border-b border-gray-200 flex items-center justify-between">
+    <div className="w-full bg-white border-b border-gray-200 flex flex-col shrink-0">
+      {/* Collapsible Header */}
+      <button
+        onClick={() => setIsCollapsed(!isCollapsed)}
+        className="w-full p-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
+      >
         <div className="flex items-center gap-2">
-          <span className="font-medium text-sm text-gray-700">Layers</span>
+          <span className="font-semibold text-gray-700">Layers</span>
+          <span className="text-xs text-gray-500">({pattern.layers.length})</span>
           {selectedLayerIds.length > 0 && (
             <span className="text-[10px] px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">
               {selectedLayerIds.length} selected
@@ -115,24 +121,43 @@ export function LayerPanel({ onEditTextLayer }: LayerPanelProps) {
           )}
         </div>
         <div className="flex items-center gap-1">
-          {selectedLayerIds.length > 0 && (
-            <button
-              onClick={() => clearLayerSelection()}
-              className="px-1.5 py-0.5 text-[10px] bg-gray-100 hover:bg-gray-200 rounded text-gray-600"
+          {!isCollapsed && selectedLayerIds.length > 0 && (
+            <span
+              onClick={(e) => { e.stopPropagation(); clearLayerSelection(); }}
+              className="px-1.5 py-0.5 text-[10px] bg-gray-100 hover:bg-gray-200 rounded text-gray-600 cursor-pointer"
               title="Clear Selection (Esc)"
             >
               Clear
-            </button>
+            </span>
           )}
-          <button
-            onClick={() => addLayer()}
-            className="w-6 h-6 flex items-center justify-center bg-blue-500 text-white rounded hover:bg-blue-600 text-sm"
-            title="Add Layer"
+          {!isCollapsed && (
+            <span
+              onClick={(e) => { e.stopPropagation(); addLayer(); }}
+              className="w-6 h-6 flex items-center justify-center bg-blue-500 text-white rounded hover:bg-blue-600 text-sm cursor-pointer"
+              title="Add Layer"
+            >
+              +
+            </span>
+          )}
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={`text-gray-500 transition-transform ${!isCollapsed ? 'rotate-180' : ''}`}
           >
-            +
-          </button>
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
         </div>
-      </div>
+      </button>
+
+      {!isCollapsed && (
+        <>
 
       {/* Overlay Images Section */}
       {overlayImages.length > 0 && (
@@ -256,7 +281,7 @@ export function LayerPanel({ onEditTextLayer }: LayerPanelProps) {
       )}
 
       {/* Layer List */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1">
         {reversedLayers.map((layer, reversedIndex) => {
           const isActive = layer.id === activeLayerId;
           const isSelected = selection?.layerId === layer.id;
@@ -316,13 +341,6 @@ export function LayerPanel({ onEditTextLayer }: LayerPanelProps) {
                 ) : (
                   <>
                     <span
-                      onDoubleClick={() => {
-                        if (layer.metadata?.type === 'text' && onEditTextLayer) {
-                          onEditTextLayer(layer.id);
-                        } else {
-                          handleStartRename(layer.id, layer.name);
-                        }
-                      }}
                       className={`block truncate text-xs ${
                         isActive ? 'font-medium text-blue-700' : 'text-gray-700'
                       }`}
@@ -348,9 +366,21 @@ export function LayerPanel({ onEditTextLayer }: LayerPanelProps) {
                   className="w-5 h-5 flex items-center justify-center text-xs text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded"
                   title="Edit Text"
                 >
-                  ✎
+                  ✏️
                 </button>
               )}
+
+              {/* Rename Button */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleStartRename(layer.id, layer.name);
+                }}
+                className="w-5 h-5 flex items-center justify-center text-[10px] text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
+                title="Rename Layer"
+              >
+                ✎
+              </button>
 
               {/* Layer Actions */}
               <div className="flex items-center gap-0.5">
@@ -431,6 +461,8 @@ export function LayerPanel({ onEditTextLayer }: LayerPanelProps) {
           Delete
         </button>
       </div>
+        </>
+      )}
     </div>
   );
 }

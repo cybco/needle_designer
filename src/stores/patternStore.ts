@@ -275,6 +275,7 @@ interface PatternState {
   setActiveCirclePosition: (position: CirclePosition) => void;
   setZoom: (zoom: number) => void;
   setPanOffset: (offset: { x: number; y: number }) => void;
+  fitToScreen: () => void;
   toggleGrid: () => void;
   setGridDivisions: (divisions: number) => void;
   setRulerUnit: (unit: RulerUnit) => void;
@@ -387,9 +388,9 @@ interface PatternState {
   resizeCanvas: (newWidth: number, newHeight: number, newMeshCount: number, anchor: AnchorPosition) => void;
 }
 
-// Default colors for new patterns
+// Default colors for new patterns (DMC 310 Black)
 const defaultColors: Color[] = [
-  { id: 'color-black', name: 'Black', rgb: [0, 0, 0] },
+  { id: 'color-black', name: 'Black', rgb: [0, 0, 0], threadBrand: 'DMC', threadCode: '310', symbol: 'U' },
 ];
 
 // Helper function to calculate layer bounding box
@@ -702,7 +703,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
         colorPalette: [...defaultColors],
         layers: [{
           id: layerId,
-          name: 'Layer 1',
+          name: 'Base Layer',
           visible: true,
           locked: false,
           stitches: [],
@@ -736,7 +737,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
         colorPalette: colorsWithSymbols,
         layers: [{
           id: layerId,
-          name: 'Layer 1',
+          name: name, // Use image/pattern name for the layer
           visible: true,
           locked: false,
           stitches,
@@ -1434,6 +1435,45 @@ export const usePatternStore = create<PatternState>((set, get) => {
 
   setPanOffset: (offset) => {
     set({ panOffset: offset });
+  },
+
+  fitToScreen: () => {
+    const state = get();
+    if (!state.pattern) return;
+
+    const CELL_SIZE = 20;
+    const RULER_SIZE = 24;
+
+    // Try to find the canvas viewport element
+    const canvasViewport = document.querySelector('[data-canvas-viewport]') as HTMLElement;
+
+    let viewportWidth: number;
+    let viewportHeight: number;
+
+    if (canvasViewport) {
+      const rect = canvasViewport.getBoundingClientRect();
+      viewportWidth = rect.width - RULER_SIZE * 2;
+      viewportHeight = rect.height;
+    } else {
+      // Fallback: estimate viewport size
+      viewportWidth = window.innerWidth - 300 - RULER_SIZE * 2;
+      viewportHeight = window.innerHeight - 100 - RULER_SIZE;
+    }
+
+    // Pattern size in pixels at zoom 1.0
+    const patternWidth = state.pattern.canvas.width * CELL_SIZE;
+    const patternHeight = state.pattern.canvas.height * CELL_SIZE;
+
+    // Calculate fit zoom
+    const zoomX = viewportWidth / patternWidth;
+    const zoomY = viewportHeight / patternHeight;
+    const fitZoom = Math.min(zoomX, zoomY);
+
+    // Apply zoom (clamped) and reset pan
+    set({
+      zoom: Math.max(0.05, Math.min(5, fitZoom)),
+      panOffset: { x: 0, y: 0 }
+    });
   },
 
   toggleGrid: () => {

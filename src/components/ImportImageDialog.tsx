@@ -55,7 +55,7 @@ type DitherMode = 'none' | 'floyd-steinberg' | 'ordered' | 'atkinson';
 type DimensionUnit = 'stitches' | 'inches' | 'mm';
 
 export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
-  const { pattern, importPattern, importAsLayer, mergeIntoActiveLayer } = usePatternStore();
+  const { pattern, importPattern, importAsLayer, mergeIntoActiveLayer, fitToScreen, setTool, selectLayerForTransform } = usePatternStore();
   const { autoGeneratePreview, setAutoGeneratePreview } = useConfigStore();
 
   // Detect mobile/touch devices for layout - check multiple signals
@@ -297,6 +297,7 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
       setPreviewZoom(1);
       setIsGeneratingPreview(false);
       setIsProcessing(false);
+      setPatternName('Imported Pattern');
       abortPreviewRef.current = false;
       livePreviewSettingsRef.current = null;
     }
@@ -667,6 +668,17 @@ export function ImportImageDialog({ isOpen, onClose }: ImportImageDialogProps) {
 
     setIsProcessing(false);
     onClose();
+
+    // Fit canvas to screen, select layer, and set move tool after import
+    setTimeout(() => {
+      fitToScreen();
+      // Select the active layer for transform and set move tool
+      const state = usePatternStore.getState();
+      if (state.activeLayerId) {
+        selectLayerForTransform(state.activeLayerId);
+      }
+      setTool('select');
+    }, 50);
   };
 
   if (!isOpen) return null;

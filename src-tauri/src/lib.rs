@@ -191,7 +191,7 @@ fn create_new_project(
         color_palette: vec![],
         layers: vec![Layer {
             id: "layer-1".to_string(),
-            name: "Layer 1".to_string(),
+            name: "Base Layer".to_string(),
             visible: true,
             locked: false,
             stitches: vec![],
@@ -745,6 +745,56 @@ fn list_ndp_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
             }
         }
     }
+
+    Ok(files)
+}
+
+/// File info returned by scan_directory
+#[derive(Debug, Serialize, Clone)]
+struct DirectoryFile {
+    path: String,
+    modified: u64, // Unix timestamp in seconds
+}
+
+/// Scan a directory for .stitchalot files and return them sorted by modified date
+#[tauri::command]
+fn scan_directory(directory: String) -> Result<Vec<DirectoryFile>, String> {
+    let dir_path = Path::new(&directory);
+
+    if !dir_path.exists() {
+        return Err(format!("Directory does not exist: {}", directory));
+    }
+
+    if !dir_path.is_dir() {
+        return Err(format!("Path is not a directory: {}", directory));
+    }
+
+    let mut files = Vec::new();
+
+    if let Ok(entries) = fs::read_dir(dir_path) {
+        for entry in entries.flatten() {
+            if let Some(name) = entry.file_name().to_str() {
+                if name.to_lowercase().ends_with(".stitchalot") {
+                    let path = entry.path();
+                    let modified = entry
+                        .metadata()
+                        .ok()
+                        .and_then(|m| m.modified().ok())
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+
+                    files.push(DirectoryFile {
+                        path: path.to_string_lossy().to_string(),
+                        modified,
+                    });
+                }
+            }
+        }
+    }
+
+    // Sort by modified date, newest first
+    files.sort_by(|a, b| b.modified.cmp(&a.modified));
 
     Ok(files)
 }
@@ -1619,6 +1669,7 @@ pub fn run() {
             process_image,
             process_image_with_threads,
             list_ndp_files,
+            scan_directory,
             save_project,
             open_project,
             delete_file,
