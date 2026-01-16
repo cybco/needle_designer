@@ -1,79 +1,49 @@
 import { useEffect, useRef, useState } from 'react';
 import { usePatternStore } from '../stores/patternStore';
+import { jsPDF } from 'jspdf';
+import { save } from '@tauri-apps/plugin-dialog';
+import { invoke } from '@tauri-apps/api/core';
 
 interface PreviewCanvasDialogProps {
   onClose: () => void;
 }
 
-// Helper to draw a realistic cross-stitch on a cell
-function drawCrossStitch(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  size: number,
-  rgb: [number, number, number]
-) {
-  const [r, g, b] = rgb;
+// Create a pre-rendered overlay for realistic tent stitch 3D "pillow" effect
+// This overlay is generated once and reused for all cells (matches PDF export)
+function createStitchOverlay(size: number): HTMLCanvasElement {
+  const overlay = document.createElement('canvas');
+  overlay.width = size;
+  overlay.height = size;
+  const ctx = overlay.getContext('2d')!;
 
-  // Calculate lighter and darker shades for 3D effect
-  const lighterR = Math.min(255, r + 40);
-  const lighterG = Math.min(255, g + 40);
-  const lighterB = Math.min(255, b + 40);
+  // Create radial gradient for 3D pillow effect
+  // Light source from top-left, so highlight is offset toward top-left
+  const gradient = ctx.createRadialGradient(
+    size * 0.35, size * 0.35, 0,          // Inner circle (highlight, offset toward light)
+    size * 0.5, size * 0.5, size * 0.7    // Outer circle (shadow at edges)
+  );
+  gradient.addColorStop(0, 'rgba(255, 255, 255, 0.4)');    // Strong highlight center
+  gradient.addColorStop(0.25, 'rgba(255, 255, 255, 0.15)'); // Fade highlight
+  gradient.addColorStop(0.5, 'rgba(0, 0, 0, 0)');          // Transparent middle
+  gradient.addColorStop(0.75, 'rgba(0, 0, 0, 0.25)');      // Start shadow
+  gradient.addColorStop(1, 'rgba(0, 0, 0, 0.5)');          // Strong shadow at edges
 
-  const darkerR = Math.max(0, r - 50);
-  const darkerG = Math.max(0, g - 50);
-  const darkerB = Math.max(0, b - 50);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
 
-  const padding = size * 0.08; // Small padding from cell edges
-  const threadWidth = size * 0.28; // Width of each thread
+  // Add extra corner shadows for more depth
+  const cornerGradient = ctx.createRadialGradient(
+    size, size, 0,           // Bottom-right corner
+    size, size, size * 1.2
+  );
+  cornerGradient.addColorStop(0, 'rgba(0, 0, 0, 0.3)');
+  cornerGradient.addColorStop(0.5, 'rgba(0, 0, 0, 0.1)');
+  cornerGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
 
-  const left = x + padding;
-  const right = x + size - padding;
-  const top = y + padding;
-  const bottom = y + size - padding;
+  ctx.fillStyle = cornerGradient;
+  ctx.fillRect(0, 0, size, size);
 
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-
-  // Draw the bottom-left to top-right stroke first (underneath)
-  // This creates the "under" part of the X
-  ctx.strokeStyle = `rgb(${darkerR}, ${darkerG}, ${darkerB})`;
-  ctx.lineWidth = threadWidth;
-  ctx.beginPath();
-  ctx.moveTo(left, bottom);
-  ctx.lineTo(right, top);
-  ctx.stroke();
-
-  // Add highlight to the first stroke
-  ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
-  ctx.lineWidth = threadWidth * 0.6;
-  ctx.beginPath();
-  ctx.moveTo(left + threadWidth * 0.15, bottom - threadWidth * 0.15);
-  ctx.lineTo(right - threadWidth * 0.15, top + threadWidth * 0.15);
-  ctx.stroke();
-
-  // Draw the top-left to bottom-right stroke (on top)
-  // This creates the "over" part of the X
-  ctx.strokeStyle = `rgb(${darkerR}, ${darkerG}, ${darkerB})`;
-  ctx.lineWidth = threadWidth;
-  ctx.beginPath();
-  ctx.moveTo(left, top);
-  ctx.lineTo(right, bottom);
-  ctx.stroke();
-
-  // Add highlight to the second stroke (brighter since it's on top)
-  ctx.strokeStyle = `rgb(${lighterR}, ${lighterG}, ${lighterB})`;
-  ctx.lineWidth = threadWidth * 0.5;
-  ctx.beginPath();
-  ctx.moveTo(left + threadWidth * 0.2, top + threadWidth * 0.2);
-  ctx.lineTo(right - threadWidth * 0.2, bottom - threadWidth * 0.2);
-  ctx.stroke();
-
-  // Add a subtle center highlight where threads cross
-  ctx.fillStyle = `rgba(${lighterR}, ${lighterG}, ${lighterB}, 0.3)`;
-  ctx.beginPath();
-  ctx.arc(x + size / 2, y + size / 2, threadWidth * 0.3, 0, Math.PI * 2);
-  ctx.fill();
+  return overlay;
 }
 
 export function PreviewCanvasDialog({ onClose }: PreviewCanvasDialogProps) {
@@ -100,7 +70,7 @@ export function PreviewCanvasDialog({ onClose }: PreviewCanvasDialogProps) {
     setBaseCellSize(optimalCellSize);
   }, [pattern]);
 
-  // Render the preview canvas
+  // Render the preview canvas with realistic tent stitch 3D effect
   useEffect(() => {
     if (!pattern || !canvasRef.current) return;
 
@@ -108,38 +78,26 @@ export function PreviewCanvasDialog({ onClose }: PreviewCanvasDialogProps) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const scaledCellSize = baseCellSize * zoom;
+    // Use integer cell size to avoid sub-pixel gaps that create grid artifacts
+    const scaledCellSize = Math.max(1, Math.floor(baseCellSize * zoom));
     const width = pattern.canvas.width * scaledCellSize;
     const height = pattern.canvas.height * scaledCellSize;
 
     canvas.width = width;
     canvas.height = height;
 
-    // Fill with canvas/fabric background color (white like blank canvas)
+    // Fill with white background
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, width, height);
-
-    // Add subtle fabric texture grid
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.05)';
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= pattern.canvas.width; i++) {
-      ctx.beginPath();
-      ctx.moveTo(i * scaledCellSize, 0);
-      ctx.lineTo(i * scaledCellSize, height);
-      ctx.stroke();
-    }
-    for (let j = 0; j <= pattern.canvas.height; j++) {
-      ctx.beginPath();
-      ctx.moveTo(0, j * scaledCellSize);
-      ctx.lineTo(width, j * scaledCellSize);
-      ctx.stroke();
-    }
 
     // Create a color lookup map for faster rendering
     const colorMap = new Map<string, [number, number, number]>();
     for (const color of pattern.colorPalette) {
       colorMap.set(color.id, color.rgb);
     }
+
+    // Create the 3D overlay once for this cell size
+    const overlay = createStitchOverlay(scaledCellSize);
 
     // Render all visible layers (bottom to top)
     for (const layer of pattern.layers) {
@@ -152,7 +110,12 @@ export function PreviewCanvasDialog({ onClose }: PreviewCanvasDialogProps) {
         const x = stitch.x * scaledCellSize;
         const y = stitch.y * scaledCellSize;
 
-        drawCrossStitch(ctx, x, y, scaledCellSize, rgb);
+        // Draw base color
+        ctx.fillStyle = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+        ctx.fillRect(x, y, scaledCellSize, scaledCellSize);
+
+        // Apply 3D overlay
+        ctx.drawImage(overlay, x, y, scaledCellSize, scaledCellSize);
       }
     }
   }, [pattern, baseCellSize, zoom]);
@@ -164,6 +127,89 @@ export function PreviewCanvasDialog({ onClose }: PreviewCanvasDialogProps) {
   const handleZoomIn = () => setZoom(Math.min(zoom + 0.25, 4));
   const handleZoomOut = () => setZoom(Math.max(zoom - 0.25, 0.25));
   const handleZoomReset = () => setZoom(1);
+
+  const handleExport = async () => {
+    if (!canvasRef.current || !pattern) return;
+
+    // Detect iOS/iPadOS
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.userAgent.includes('Mac') && 'ontouchend' in document && navigator.maxTouchPoints > 1);
+
+    const fileName = pattern.metadata?.name || pattern.name || 'pattern';
+    const safeName = fileName.replace(/[^a-zA-Z0-9-_]/g, '_');
+    const defaultName = `${safeName}_preview.pdf`;
+
+    let filePath: string;
+
+    if (isIOS) {
+      filePath = defaultName;
+    } else {
+      const result = await save({
+        filters: [{ name: 'PDF Document', extensions: ['pdf'] }],
+        defaultPath: defaultName,
+      });
+
+      if (!result) {
+        return; // User cancelled
+      }
+      filePath = result;
+    }
+
+    try {
+      const canvas = canvasRef.current;
+      const imgData = canvas.toDataURL('image/png');
+
+      // Determine page orientation based on canvas aspect ratio
+      const aspectRatio = canvas.width / canvas.height;
+      const orientation = aspectRatio >= 1 ? 'landscape' : 'portrait';
+
+      const pdf = new jsPDF({
+        orientation,
+        unit: 'in',
+        format: 'letter'
+      });
+
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 0.5;
+      const availableWidth = pageWidth - margin * 2;
+      const availableHeight = pageHeight - margin * 2;
+
+      // Scale image to fit within available space while maintaining aspect ratio
+      let imgWidth = availableWidth;
+      let imgHeight = imgWidth / aspectRatio;
+
+      if (imgHeight > availableHeight) {
+        imgHeight = availableHeight;
+        imgWidth = imgHeight * aspectRatio;
+      }
+
+      // Center the image on the page
+      const x = (pageWidth - imgWidth) / 2;
+      const y = (pageHeight - imgHeight) / 2;
+
+      pdf.addImage(imgData, 'PNG', x, y, imgWidth, imgHeight);
+
+      // Get PDF as ArrayBuffer
+      const pdfData = pdf.output('arraybuffer');
+
+      // Convert ArrayBuffer to base64 for sending to Rust
+      const bytes = new Uint8Array(pdfData);
+      let binary = '';
+      const chunkSize = 8192;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+        binary += String.fromCharCode(...chunk);
+      }
+      const base64 = btoa(binary);
+
+      // Save via Tauri
+      await invoke<string>('save_pdf', { path: filePath, data: base64 });
+    } catch (error) {
+      console.error('Failed to export PDF:', error);
+      alert(`Failed to export PDF: ${error}`);
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -226,7 +272,13 @@ export function PreviewCanvasDialog({ onClose }: PreviewCanvasDialogProps) {
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end px-6 py-4 border-t border-gray-200">
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200">
+          <button
+            onClick={handleExport}
+            className="px-4 py-2 text-white bg-green-600 rounded hover:bg-green-700 transition-colors"
+          >
+            Export PDF
+          </button>
           <button
             onClick={onClose}
             className="px-4 py-2 text-white bg-blue-600 rounded hover:bg-blue-700 transition-colors"
