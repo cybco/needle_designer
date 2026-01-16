@@ -3,8 +3,6 @@ import { PATTERN_SYMBOLS } from './symbolAssignment';
 
 // PDF export settings
 const PAGE_MARGIN = 20; // mm
-const CELL_SIZE_MM = 3; // Size of each stitch cell in mm
-const HEADER_HEIGHT = 25; // mm for title and info
 const LEGEND_CELL_SIZE = 8; // mm for color legend squares
 const FONT_SIZE_TITLE = 16;
 const FONT_SIZE_INFO = 10;
@@ -1083,14 +1081,11 @@ export async function exportPatternToPdf(
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
   const contentWidth = pageWidth - 2 * PAGE_MARGIN;
-  const contentHeight = pageHeight - 2 * PAGE_MARGIN;
 
   // Calculate how many cells can fit per page (with bottom margin for printing)
   // Available height for grid: pageHeight - topMargin - bottomMargin - space for column numbers
   const HEADER_SPACE = 8; // Space for column numbers above grid
   const BOTTOM_MARGIN_SPACE = 20; // Bottom margin for printing
-  const availableGridHeight = pageHeight - PAGE_MARGIN - HEADER_SPACE - BOTTOM_MARGIN_SPACE;
-  const availableGridWidth = pageWidth - PAGE_MARGIN - PAGE_MARGIN - 8; // Left margin + right margin + row number space
 
   // Fixed cells per page for larger, more readable grid
   const cellsPerPageX = 40;
