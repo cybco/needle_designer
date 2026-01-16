@@ -34,6 +34,7 @@ import { save, open } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { exit } from '@tauri-apps/plugin-process';
 import { getVersion } from '@tauri-apps/api/app';
+import { listen } from '@tauri-apps/api/event';
 
 // NDP file format for Tauri
 interface NdpOverlayImage {
@@ -238,6 +239,9 @@ const DEFAULT_PREFERENCES: Preferences = {
 // Detect iOS/iPadOS - used to hide keyboard shortcuts that don't apply
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
   (navigator.userAgent.includes('Mac') && 'ontouchend' in document && navigator.maxTouchPoints > 1);
+
+// Detect macOS (but not iOS) for platform-specific UI like window controls
+const isMacOS = navigator.userAgent.includes('Mac') && !isIOS;
 
 function App() {
   const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
@@ -588,6 +592,72 @@ function App() {
     };
 
     setupCloseHandler();
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, []);
+
+  // Listen for native macOS menu bar events
+  useEffect(() => {
+    // Only on macOS (detected via userAgent)
+    if (!isMacOS) return;
+
+    let unlisten: (() => void) | undefined;
+
+    const setupMenuListener = async () => {
+      try {
+        unlisten = await listen<string>('menu-action', (event) => {
+          const action = event.payload;
+          switch (action) {
+            case 'home':
+              // Close current pattern (go home)
+              const state = usePatternStore.getState();
+              if (state.pattern && state.hasUnsavedChanges) {
+                setUnsavedChangesAction('home');
+                setShowUnsavedChangesDialog(true);
+              } else {
+                closePattern();
+              }
+              break;
+            case 'new':
+              setShowNewProjectDialog(true);
+              break;
+            case 'open':
+              // Trigger file open dialog
+              handleOpen();
+              break;
+            case 'save':
+              handleSave();
+              break;
+            case 'save_as':
+              setShowSaveAsDialog(true);
+              break;
+            case 'export_pdf':
+              setShowExportPdfDialog(true);
+              break;
+            case 'import_image':
+              setShowUploadImageDialog(true);
+              break;
+            case 'add_text':
+              setShowTextEditor(true);
+              break;
+            case 'fullscreen':
+              getCurrentWindow().toggleMaximize();
+              break;
+            case 'preferences':
+              setShowPreferencesMenu(true);
+              break;
+          }
+        });
+      } catch (error) {
+        console.error('Failed to setup menu listener:', error);
+      }
+    };
+
+    setupMenuListener();
 
     return () => {
       if (unlisten) {
@@ -1687,22 +1757,27 @@ function App() {
       {/* Trial Banner (shown only during trial) */}
       <TrialBanner />
 
-      {/* Title Bar / Menu */}
+      {/* Title Bar / Menu - simplified on macOS (native menu bar handles menus) */}
       <header
-        className="bg-gray-800 text-white px-4 py-2 flex items-center justify-between shrink-0"
+        className={`bg-gray-800 text-white px-4 ${isMacOS ? 'py-1' : 'py-2'} flex items-center justify-between shrink-0`}
         onMouseDown={(e) => {
           // Start window drag on blank areas (but not on interactive elements or window controls)
+          // On macOS with native decorations, the native title bar handles dragging
+          if (isMacOS) return;
           if ((e.target as HTMLElement).closest('nav, button, a, input, select, [data-window-controls]')) return;
           e.preventDefault();
           getCurrentWindow().startDragging();
         }}
       >
         <div className="flex items-center gap-6">
+          {/* App icon and title - always shown */}
           <div className="flex items-center gap-2">
             <img src="/app-icon.svg" alt="Logo" className="w-6 h-6" />
-            <h1 className="text-lg font-semibold">StitchALot Studio</h1>
+            {/* Hide title on macOS since it's in the native title bar */}
+            {!isMacOS && <h1 className="text-lg font-semibold">StitchALot Studio</h1>}
           </div>
-          <nav className="flex gap-4 text-sm relative z-50">
+          {/* In-window menus - hidden on macOS (native menu bar is used instead) */}
+          {!isMacOS && <nav className="flex gap-4 text-sm relative z-50">
             {/* Global backdrop to close menus when clicking outside */}
             {(showFileMenu || showToolsMenu || showPreferencesMenu) && (
               <div
@@ -2050,7 +2125,7 @@ function App() {
                 </div>
               )}
             </div>
-          </nav>
+          </nav>}
         </div>
         <div className="flex items-center gap-4">
           {pattern && (
@@ -2075,14 +2150,13 @@ function App() {
             </>
           )}
           {appVersion && <span className="text-sm text-gray-400">v{appVersion}</span>}
-          {/* Window Controls - hidden on iOS/iPad */}
-          {!isIOS && (
+          {/* Windows Controls - on the right (macOS controls are on the left) */}
+          {!isIOS && !isMacOS && (
             <div className="flex items-center gap-1 ml-4" data-window-controls style={{ WebkitAppRegion: 'no-drag', appRegion: 'no-drag' } as React.CSSProperties}>
               <button
                 onMouseDown={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  console.log('Minimize clicked');
                   getCurrentWindow().minimize();
                 }}
                 className="w-8 h-8 flex items-center justify-center hover:bg-gray-700 rounded transition-colors"
@@ -2097,7 +2171,6 @@ function App() {
                 onMouseDown={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  console.log('Maximize clicked');
                   getCurrentWindow().toggleMaximize();
                 }}
                 className="w-8 h-8 flex items-center justify-center hover:bg-gray-700 rounded transition-colors"
@@ -2112,7 +2185,6 @@ function App() {
                 onMouseDown={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  console.log('Close clicked');
                   getCurrentWindow().close();
                 }}
                 className="w-8 h-8 flex items-center justify-center hover:bg-red-600 rounded transition-colors"

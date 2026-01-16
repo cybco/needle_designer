@@ -23,7 +23,7 @@ export function ExportPdfDialog({ isOpen, onClose, pattern, currentFilePath }: E
   };
   const displayName = getDisplayName();
   const [includePreviewPage, setIncludePreviewPage] = useState(true);
-  const [includeFullChartPage, setIncludeFullChartPage] = useState(false);
+  const [includeFullChartPage, setIncludeFullChartPage] = useState(true);
   const [includeColorLegend, setIncludeColorLegend] = useState(true);
   const [includeStitchCounts, setIncludeStitchCounts] = useState(true);
   const [includeGridNumbers, setIncludeGridNumbers] = useState(true);

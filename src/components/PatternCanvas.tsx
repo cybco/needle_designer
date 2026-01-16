@@ -1,5 +1,5 @@
 import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
-import { usePatternStore, ResizeHandle, Color, CirclePosition, getCirclePositionFromClick, StitchType, isHalfSquareType, isBorderType, isCrossType } from '../stores/patternStore';
+import { usePatternStore, ResizeHandle, Color, CirclePosition, getCirclePositionFromClick, StitchType, Stitch, isHalfSquareType, isBorderType, isCrossType } from '../stores/patternStore';
 
 const CELL_SIZE = 20; // Base cell size in pixels
 const RULER_SIZE = 24; // Width/height of rulers in pixels
@@ -308,6 +308,9 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     startResize,
     updateResize,
     endResize,
+    startRotation,
+    updateRotation,
+    endRotation,
     commitFloatingSelection,
     selectOverlay,
     deselectOverlay,
@@ -441,6 +444,32 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     }
 
     return null;
+  }, [selection, zoom, panOffset]);
+
+  // Check if point is on the rotation handle
+  const isOnRotationHandle = useCallback((canvasX: number, canvasY: number): boolean => {
+    if (!selection || selection.selectionType === 'area') return false;
+
+    const cellSize = CELL_SIZE * zoom;
+    const bounds = selection.bounds;
+
+    // Convert bounds to canvas coordinates
+    const left = bounds.x * cellSize + panOffset.x;
+    const top = bounds.y * cellSize + panOffset.y;
+    const selWidth = bounds.width * cellSize;
+
+    // Rotation handle position (same as in rendering)
+    const rotationHandleDistance = 35;
+    const rotationHandleRadius = 8; // Slightly larger hit area than visual radius
+    const rotationHandleX = left + selWidth / 2;
+    const rotationHandleY = top - rotationHandleDistance;
+
+    // Check if point is within the rotation handle circle
+    const dx = canvasX - rotationHandleX;
+    const dy = canvasY - rotationHandleY;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    return distance <= rotationHandleRadius;
   }, [selection, zoom, panOffset]);
 
   // Check if point is inside selection bounds
@@ -634,6 +663,8 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     // Skip circles and borders - they'll be drawn in later passes
     for (const layer of pattern.layers) {
       if (!layer.visible) continue;
+      // Skip this layer if it's being rotated (we'll draw the preview instead)
+      if (selection?.isRotating && selection.layerId === layer.id && selection.selectionType !== 'area') continue;
 
       for (const stitch of layer.stitches) {
         // Skip circle, border, and cross stitches - they'll be drawn in later passes
@@ -721,6 +752,8 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     const circleRadius = cellSize * CIRCLE_RADIUS_FACTOR;
     for (const layer of pattern.layers) {
       if (!layer.visible) continue;
+      // Skip this layer if it's being rotated (we'll draw the preview instead)
+      if (selection?.isRotating && selection.layerId === layer.id && selection.selectionType !== 'area') continue;
 
       for (const stitch of layer.stitches) {
         // Only draw circle stitches in this pass
@@ -764,6 +797,8 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     // Draw all visible layers - Border and cross stitches on top (they extend beyond cells)
     for (const layer of pattern.layers) {
       if (!layer.visible) continue;
+      // Skip this layer if it's being rotated (we'll draw the preview instead)
+      if (selection?.isRotating && selection.layerId === layer.id && selection.selectionType !== 'area') continue;
 
       for (const stitch of layer.stitches) {
         // Only draw border and cross stitches in this pass
@@ -946,6 +981,99 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
         }
       }
 
+      // Draw rotation preview when rotating (using inverse mapping to prevent gaps)
+      if (selection.isRotating && selection.originalStitches && selection.rotationAngle !== undefined) {
+        const centerX = bounds.x + bounds.width / 2;
+        const centerY = bounds.y + bounds.height / 2;
+        const angleRad = (selection.rotationAngle * Math.PI) / 180;
+        const cos = Math.cos(angleRad);
+        const sin = Math.sin(angleRad);
+        const invCos = Math.cos(-angleRad);
+        const invSin = Math.sin(-angleRad);
+
+        // Build lookup map of original stitches and find bounds
+        const originalMap = new Map<string, Stitch>();
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const stitch of selection.originalStitches) {
+          originalMap.set(`${stitch.x},${stitch.y}`, stitch);
+          minX = Math.min(minX, stitch.x);
+          minY = Math.min(minY, stitch.y);
+          maxX = Math.max(maxX, stitch.x);
+          maxY = Math.max(maxY, stitch.y);
+        }
+
+        // Calculate rotated bounding box
+        const corners = [
+          { x: minX, y: minY }, { x: maxX, y: minY },
+          { x: minX, y: maxY }, { x: maxX, y: maxY },
+        ];
+        let rotMinX = Infinity, rotMinY = Infinity, rotMaxX = -Infinity, rotMaxY = -Infinity;
+        for (const corner of corners) {
+          const dx = corner.x - centerX;
+          const dy = corner.y - centerY;
+          const rotX = dx * cos - dy * sin + centerX;
+          const rotY = dx * sin + dy * cos + centerY;
+          rotMinX = Math.min(rotMinX, rotX);
+          rotMinY = Math.min(rotMinY, rotY);
+          rotMaxX = Math.max(rotMaxX, rotX);
+          rotMaxY = Math.max(rotMaxY, rotY);
+        }
+        rotMinX = Math.floor(rotMinX) - 1;
+        rotMinY = Math.floor(rotMinY) - 1;
+        rotMaxX = Math.ceil(rotMaxX) + 1;
+        rotMaxY = Math.ceil(rotMaxY) + 1;
+
+        // Draw rotated stitches preview using inverse mapping
+        ctx.globalAlpha = 0.8;
+        for (let y = rotMinY; y <= rotMaxY; y++) {
+          for (let x = rotMinX; x <= rotMaxX; x++) {
+            // Inverse rotate to find source position
+            const dx = x - centerX;
+            const dy = y - centerY;
+            const srcX = Math.round(dx * invCos - dy * invSin + centerX);
+            const srcY = Math.round(dx * invSin + dy * invCos + centerY);
+
+            const srcStitch = originalMap.get(`${srcX},${srcY}`);
+            if (srcStitch && srcStitch.type !== 'circle') {
+              const colorObj = getColorObject(srcStitch.colorId);
+              if (colorObj) {
+                const rgb = colorObj.rgb;
+                ctx.fillStyle = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+                ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+              }
+            }
+          }
+        }
+
+        // Draw rotated circle stitches (forward mapping is fine for circles)
+        for (const stitch of selection.originalStitches) {
+          if (stitch.type !== 'circle') continue;
+
+          const colorObj = getColorObject(stitch.colorId);
+          if (colorObj) {
+            const dx = stitch.x - centerX;
+            const dy = stitch.y - centerY;
+            const rotatedX = Math.round(dx * cos - dy * sin + centerX);
+            const rotatedY = Math.round(dx * sin + dy * cos + centerY);
+
+            const rgb = colorObj.rgb;
+            const position = stitch.position || 'center';
+            const offset = getCircleCenterOffset(position);
+            const cx = rotatedX * cellSize + offset.dx * cellSize;
+            const cy = rotatedY * cellSize + offset.dy * cellSize;
+
+            ctx.beginPath();
+            ctx.arc(cx, cy, circleRadius, 0, Math.PI * 2);
+            ctx.fillStyle = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+            ctx.fill();
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = Math.max(1, cellSize * 0.05);
+            ctx.stroke();
+          }
+        }
+        ctx.globalAlpha = 1.0;
+      }
+
       // Draw semi-transparent fill for area selection
       if (selection.selectionType === 'area') {
         ctx.fillStyle = 'rgba(59, 130, 246, 0.1)';
@@ -989,6 +1117,33 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
             HANDLE_SIZE
           );
         }
+
+        // Draw rotation handle (dotted line + circle above top center)
+        const rotationHandleDistance = 35; // pixels above selection
+        const rotationHandleRadius = 6;
+        const rotationLineStartX = left + selWidth / 2;
+        const rotationLineStartY = top;
+        const rotationHandleX = rotationLineStartX;
+        const rotationHandleY = top - rotationHandleDistance;
+
+        // Draw dotted line from top center to rotation handle
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(rotationLineStartX, rotationLineStartY);
+        ctx.lineTo(rotationHandleX, rotationHandleY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Draw rotation handle circle
+        ctx.beginPath();
+        ctx.arc(rotationHandleX, rotationHandleY, rotationHandleRadius, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 2;
+        ctx.stroke();
       }
 
       // Draw hint text for floating selection
@@ -1757,6 +1912,16 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     };
 
     resizeCanvas();
+
+    // Use ResizeObserver to respond to container size changes (e.g., panel collapse)
+    const container = containerRef.current;
+    if (container) {
+      const resizeObserver = new ResizeObserver(resizeCanvas);
+      resizeObserver.observe(container);
+      return () => resizeObserver.disconnect();
+    }
+
+    // Fallback to window resize for older browsers
     window.addEventListener('resize', resizeCanvas);
     return () => window.removeEventListener('resize', resizeCanvas);
   }, [draw, drawTopRuler, drawLeftRuler, drawRightRuler]);
@@ -2080,6 +2245,16 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
         deselectOverlay();
       }
 
+      // Check if clicking on the rotation handle
+      if (selection && isOnRotationHandle(x, y)) {
+        const cell = canvasToCellUnbounded(x, y);
+        if (cell) {
+          startRotation(cell);
+          setIsDrawing(true);
+        }
+        return;
+      }
+
       // Check if clicking on a resize handle
       const handle = getResizeHandleAt(x, y);
       if (handle && selection) {
@@ -2385,11 +2560,13 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       return;
     }
 
-    // Handle select tool dragging/resizing
+    // Handle select tool dragging/resizing/rotating
     if (activeTool === 'select' && isDrawing && selection) {
       const cell = canvasToCellUnbounded(x, y);
       if (cell) {
-        if (selection.isResizing) {
+        if (selection.isRotating) {
+          updateRotation(cell);
+        } else if (selection.isResizing) {
           updateResize(cell, e.shiftKey);
         } else if (selection.isDragging) {
           updateDrag(cell);
@@ -2480,9 +2657,11 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       endStroke();
     }
 
-    // Handle select tool drag/resize end
+    // Handle select tool drag/resize/rotate end
     if (activeTool === 'select' && selection) {
-      if (selection.isResizing) {
+      if (selection.isRotating) {
+        endRotation();
+      } else if (selection.isResizing) {
         endResize();
       } else if (selection.isDragging) {
         endDrag();
@@ -2539,9 +2718,11 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       endStroke();
     }
 
-    // Cancel any ongoing drag/resize
+    // Cancel any ongoing drag/resize/rotate
     if (activeTool === 'select' && selection) {
-      if (selection.isResizing) {
+      if (selection.isRotating) {
+        endRotation();
+      } else if (selection.isResizing) {
         endResize();
       } else if (selection.isDragging) {
         endDrag();
@@ -2566,6 +2747,9 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
 
   // Custom move/select cursor (black and white pointer arrow)
   const moveCursor = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M4 4l7 18 2.5-7.5L21 12 4 4z' fill='white' stroke='black' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E") 4 4, default`;
+
+  // Custom rotation cursor (refresh-cw icon)
+  const rotateCursor = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8'/%3E%3Cpath d='M21 3v5h-5'/%3E%3Cpath d='M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16'/%3E%3Cpath d='M8 16H3v5'/%3E%3C/svg%3E") 12 12, pointer`;
 
   // Get cursor based on current state
   const getCursor = useCallback((): string => {
@@ -2599,6 +2783,10 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
 
       // Check selection handles
       if (mousePos && selection) {
+        // Check rotation handle first
+        if (isOnRotationHandle(mousePos.x, mousePos.y)) {
+          return rotateCursor;
+        }
         const handle = getResizeHandleAt(mousePos.x, mousePos.y);
         if (handle) {
           return cursors[handle];
@@ -2623,7 +2811,7 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       return 'crosshair';
     }
     return 'crosshair';
-  }, [activeTool, mousePos, selection, selectedOverlay, getResizeHandleAt, isPointInSelectionBounds, getOverlayResizeHandle, isPointInSelectedOverlay, getOverlayAtPoint, isProgressMode]);
+  }, [activeTool, mousePos, selection, selectedOverlay, getResizeHandleAt, isPointInSelectionBounds, isOnRotationHandle, getOverlayResizeHandle, isPointInSelectedOverlay, getOverlayAtPoint, isProgressMode]);
 
   // Handle wheel for zoom - zoom towards center of viewable area
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
@@ -2823,6 +3011,17 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
         // If overlay is selected and we touch elsewhere, deselect it
         if (selectedOverlayId) {
           deselectOverlay();
+        }
+
+        // Check if touching the rotation handle
+        if (selection && isOnRotationHandle(x, y)) {
+          e.preventDefault();
+          const cell = canvasToCellUnbounded(x, y);
+          if (cell) {
+            startRotation(cell);
+            setIsDrawing(true);
+          }
+          return;
         }
 
         // Check if touching a layer resize handle
@@ -3183,12 +3382,14 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
         return;
       }
 
-      // Handle layer selection dragging/resizing
+      // Handle layer selection dragging/resizing/rotating
       if (activeTool === 'select' && isDrawing && selection) {
         e.preventDefault();
         const cell = canvasToCellUnbounded(x, y);
         if (cell) {
-          if (selection.isResizing) {
+          if (selection.isRotating) {
+            updateRotation(cell);
+          } else if (selection.isResizing) {
             updateResize(cell, false); // No shift key on touch
           } else if (selection.isDragging) {
             updateDrag(cell);
@@ -3295,9 +3496,11 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       endStroke();
     }
 
-    // End layer selection drag/resize
+    // End layer selection drag/resize/rotate
     if (activeTool === 'select' && selection) {
-      if (selection.isResizing) {
+      if (selection.isRotating) {
+        endRotation();
+      } else if (selection.isResizing) {
         endResize();
       } else if (selection.isDragging) {
         endDrag();

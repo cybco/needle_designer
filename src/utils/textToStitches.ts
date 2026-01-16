@@ -449,15 +449,16 @@ function renderHighResolution(options: TextRenderOptions): HighResResult {
     }
   }
 
-  // Add padding
+  // Add padding - extra bottom padding for descenders (g, y, p, q, j, etc.)
   const italicExtra = italic ? Math.ceil(renderHeight * 0.4) : 0;
   const padding = Math.max(4, Math.ceil(renderHeight * 0.3));
+  const descenderPadding = Math.ceil(renderHeight * 0.35); // Extra space for descenders
   const leftPadding = padding + italicExtra + maxLeft;
   const totalHeight = lineHeight * lines.length;
 
   // Size canvas
   canvas.width = Math.ceil(maxWidth) + leftPadding + padding + italicExtra;
-  canvas.height = totalHeight + padding * 2;
+  canvas.height = totalHeight + padding + descenderPadding;
 
   // Clear canvas (white background)
   ctx.fillStyle = 'white';

@@ -183,6 +183,11 @@ export interface SelectionState {
   selectionStart?: { x: number; y: number };  // Start point of rectangle drag
   // When true, floating stitches will be committed to a new layer instead of active layer
   commitToNewLayer?: boolean;
+  // Rotation fields
+  isRotating?: boolean;
+  rotationAngle?: number;  // Current rotation angle in degrees
+  rotationStartAngle?: number;  // Mouse angle when rotation drag started
+  originalRotationAngle?: number;  // Rotation angle before current drag
 }
 
 export interface OverlayImage {
@@ -318,6 +323,9 @@ interface PatternState {
   startResize: (handle: ResizeHandle, point: { x: number; y: number }) => void;
   updateResize: (point: { x: number; y: number }, shiftKey?: boolean) => void;
   endResize: () => void;
+  startRotation: (point: { x: number; y: number }) => void;
+  updateRotation: (point: { x: number; y: number }) => void;
+  endRotation: () => void;
   getLayerBounds: (layerId: string) => { x: number; y: number; width: number; height: number } | null;
 
   // Floating selection actions (for placing new content like text)
@@ -451,6 +459,94 @@ function resampleStitches(
           y: newBounds.y + newRelY,
           colorId: srcStitch.colorId,
           completed: srcStitch.completed,
+        });
+      }
+    }
+  }
+
+  return result;
+}
+
+// Helper function to rotate stitches around a center point
+// Uses inverse mapping to prevent gaps in contiguous colored areas
+function rotateStitches(
+  stitches: Stitch[],
+  center: { x: number; y: number },
+  angleDegrees: number
+): Stitch[] {
+  if (stitches.length === 0 || angleDegrees === 0) {
+    return stitches;
+  }
+
+  // Create a lookup map of original stitches by position
+  const originalMap = new Map<string, Stitch>();
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+  for (const stitch of stitches) {
+    originalMap.set(`${stitch.x},${stitch.y}`, stitch);
+    minX = Math.min(minX, stitch.x);
+    minY = Math.min(minY, stitch.y);
+    maxX = Math.max(maxX, stitch.x);
+    maxY = Math.max(maxY, stitch.y);
+  }
+
+  const angleRad = (angleDegrees * Math.PI) / 180;
+  const cos = Math.cos(angleRad);
+  const sin = Math.sin(angleRad);
+
+  // For inverse mapping, we need the inverse rotation (negative angle)
+  const invCos = Math.cos(-angleRad);
+  const invSin = Math.sin(-angleRad);
+
+  // Calculate the bounding box of the rotated result
+  // by rotating all four corners of the original bounding box
+  const corners = [
+    { x: minX, y: minY },
+    { x: maxX, y: minY },
+    { x: minX, y: maxY },
+    { x: maxX, y: maxY },
+  ];
+
+  let rotMinX = Infinity, rotMinY = Infinity, rotMaxX = -Infinity, rotMaxY = -Infinity;
+  for (const corner of corners) {
+    const dx = corner.x - center.x;
+    const dy = corner.y - center.y;
+    const rotX = dx * cos - dy * sin + center.x;
+    const rotY = dx * sin + dy * cos + center.y;
+    rotMinX = Math.min(rotMinX, rotX);
+    rotMinY = Math.min(rotMinY, rotY);
+    rotMaxX = Math.max(rotMaxX, rotX);
+    rotMaxY = Math.max(rotMaxY, rotY);
+  }
+
+  // Expand bounds slightly to ensure we don't miss edge pixels
+  rotMinX = Math.floor(rotMinX) - 1;
+  rotMinY = Math.floor(rotMinY) - 1;
+  rotMaxX = Math.ceil(rotMaxX) + 1;
+  rotMaxY = Math.ceil(rotMaxY) + 1;
+
+  // Use inverse mapping: for each cell in the output, find the source cell
+  const result: Stitch[] = [];
+
+  for (let y = rotMinY; y <= rotMaxY; y++) {
+    for (let x = rotMinX; x <= rotMaxX; x++) {
+      // Inverse rotate this output position back to find source position
+      const dx = x - center.x;
+      const dy = y - center.y;
+      const srcX = dx * invCos - dy * invSin + center.x;
+      const srcY = dx * invSin + dy * invCos + center.y;
+
+      // Round to find the source cell
+      const srcCellX = Math.round(srcX);
+      const srcCellY = Math.round(srcY);
+
+      // Check if there's a stitch at that source position
+      const srcStitch = originalMap.get(`${srcCellX},${srcCellY}`);
+      if (srcStitch) {
+        result.push({
+          ...srcStitch,
+          x,
+          y,
         });
       }
     }
@@ -2435,6 +2531,185 @@ export const usePatternStore = create<PatternState>((set, get) => {
         isResizing: false,
         resizeHandle: null,
         dragStart: null,
+        originalBounds: null,
+        originalStitches: null,
+      } : null,
+      hasUnsavedChanges: true,
+    });
+  },
+
+  startRotation: (point) => {
+    const { pattern, selection } = get();
+    if (!pattern || !selection) return;
+
+    // Get the stitches to rotate
+    let stitchesToRotate: Stitch[];
+    if (selection.floatingStitches) {
+      stitchesToRotate = selection.floatingStitches;
+    } else if (selection.selectionType === 'area' && selection.selectedStitches) {
+      stitchesToRotate = selection.selectedStitches;
+    } else {
+      const layer = pattern.layers.find(l => l.id === selection.layerId);
+      if (!layer) return;
+      stitchesToRotate = layer.stitches;
+    }
+
+    // Calculate center of the selection bounds
+    const centerX = selection.bounds.x + selection.bounds.width / 2;
+    const centerY = selection.bounds.y + selection.bounds.height / 2;
+
+    // Calculate the starting angle from center to mouse position
+    const dx = point.x - centerX;
+    const dy = point.y - centerY;
+    const startAngle = Math.atan2(dy, dx) * (180 / Math.PI);
+
+    set({
+      selection: {
+        ...selection,
+        isRotating: true,
+        rotationAngle: selection.rotationAngle || 0,
+        rotationStartAngle: startAngle,
+        originalRotationAngle: selection.rotationAngle || 0,
+        originalBounds: { ...selection.bounds },
+        originalStitches: stitchesToRotate.map(s => ({ ...s })),
+      },
+    });
+  },
+
+  updateRotation: (point) => {
+    const { selection } = get();
+    if (!selection || !selection.isRotating || selection.rotationStartAngle === undefined) return;
+
+    // Calculate center of the selection bounds
+    const centerX = selection.bounds.x + selection.bounds.width / 2;
+    const centerY = selection.bounds.y + selection.bounds.height / 2;
+
+    // Calculate the current angle from center to mouse position
+    const dx = point.x - centerX;
+    const dy = point.y - centerY;
+    const currentAngle = Math.atan2(dy, dx) * (180 / Math.PI);
+
+    // Calculate the rotation delta
+    const deltaAngle = currentAngle - selection.rotationStartAngle;
+    const newAngle = (selection.originalRotationAngle || 0) + deltaAngle;
+
+    set({
+      selection: {
+        ...selection,
+        rotationAngle: newAngle,
+      },
+    });
+  },
+
+  endRotation: () => {
+    const { pattern, selection } = get();
+    if (!pattern || !selection || !selection.isRotating || !selection.originalStitches) return;
+
+    const rotationAngle = selection.rotationAngle || 0;
+
+    // Calculate center of the selection bounds
+    const centerX = selection.bounds.x + selection.bounds.width / 2;
+    const centerY = selection.bounds.y + selection.bounds.height / 2;
+
+    // Rotate the stitches
+    const rotatedStitches = rotateStitches(
+      selection.originalStitches,
+      { x: centerX, y: centerY },
+      rotationAngle
+    );
+
+    // Recalculate bounds after rotation
+    const newBounds = calculateLayerBounds(rotatedStitches);
+
+    // For floating selections, just update the floating stitches
+    if (selection.floatingStitches) {
+      set({
+        selection: newBounds ? {
+          ...selection,
+          bounds: newBounds,
+          isRotating: false,
+          rotationAngle: 0, // Reset angle since it's now applied
+          rotationStartAngle: undefined,
+          originalRotationAngle: undefined,
+          originalBounds: null,
+          originalStitches: null,
+          floatingStitches: rotatedStitches,
+        } : null,
+      });
+      return;
+    }
+
+    // For area selections, update the selected stitches (they become floating)
+    if (selection.selectionType === 'area' && selection.selectedStitches) {
+      // Remove original stitches from the layer
+      const layer = pattern.layers.find(l => l.id === selection.layerId);
+      if (!layer) return;
+
+      pushToHistory();
+
+      // Create a set of original stitch positions to remove
+      const originalPositions = new Set(
+        selection.originalStitches.map(s => `${s.x},${s.y}`)
+      );
+
+      const remainingStitches = layer.stitches.filter(
+        s => !originalPositions.has(`${s.x},${s.y}`)
+      );
+
+      const layerIndex = pattern.layers.findIndex(l => l.id === selection.layerId);
+      const updatedLayers = [...pattern.layers];
+      updatedLayers[layerIndex] = {
+        ...layer,
+        stitches: [...remainingStitches, ...rotatedStitches],
+      };
+
+      set({
+        pattern: {
+          ...pattern,
+          layers: updatedLayers,
+        },
+        selection: newBounds ? {
+          ...selection,
+          bounds: newBounds,
+          isRotating: false,
+          rotationAngle: 0,
+          rotationStartAngle: undefined,
+          originalRotationAngle: undefined,
+          originalBounds: null,
+          originalStitches: null,
+          selectedStitches: rotatedStitches,
+        } : null,
+        hasUnsavedChanges: true,
+      });
+      return;
+    }
+
+    // For layer selections, update the layer stitches
+    const layerIndex = pattern.layers.findIndex(l => l.id === selection.layerId);
+    if (layerIndex === -1) return;
+
+    pushToHistory();
+
+    const updatedLayers = [...pattern.layers];
+    updatedLayers[layerIndex] = {
+      ...pattern.layers[layerIndex],
+      stitches: rotatedStitches,
+      // Clear text metadata since rotation breaks re-rendering
+      metadata: undefined,
+    };
+
+    set({
+      pattern: {
+        ...pattern,
+        layers: updatedLayers,
+      },
+      selection: newBounds ? {
+        ...selection,
+        bounds: newBounds,
+        isRotating: false,
+        rotationAngle: 0,
+        rotationStartAngle: undefined,
+        originalRotationAngle: undefined,
         originalBounds: null,
         originalStitches: null,
       } : null,

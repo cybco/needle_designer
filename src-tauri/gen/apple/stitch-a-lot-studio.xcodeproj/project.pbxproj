@@ -22,7 +22,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		060008F54A2A6B4409FE2399 /* needlepoint-designer_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "needlepoint-designer_iOS.entitlements"; sourceTree = "<group>"; };
+		060008F54A2A6B4409FE2399 /* stitch-a-lot-studio_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "stitch-a-lot-studio_iOS.entitlements"; sourceTree = "<group>"; };
 		08D2C729FAD7ECE5848D4030 /* color_matching.rs */ = {isa = PBXFileReference; lastKnownFileType = text; path = color_matching.rs; sourceTree = "<group>"; };
 		270277EBBCB0E75F6EC6F81C /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
 		6122AAF2093D11BD2AB0CBB2 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
@@ -81,7 +81,7 @@
 				69284DE834AB706757F3D509 /* Assets.xcassets */,
 				EFBB2400F3BDBFEE51EAA626 /* LaunchScreen.storyboard */,
 				AE4F6F04235EC748DA19381D /* Externals */,
-				15D8C75853C04316025B7BED /* needlepoint-designer_iOS */,
+				15D8C75853C04316025B7BED /* stitch-a-lot-studio_iOS */,
 				72401CDFBDC652D4B7B12AEE /* Sources */,
 				8EC4EAB8F60D5CF2EE2E22F6 /* src */,
 				EC8B4B8101BA2E01097A4FB6 /* Frameworks */,
@@ -89,13 +89,13 @@
 			);
 			sourceTree = "<group>";
 		};
-		15D8C75853C04316025B7BED /* needlepoint-designer_iOS */ = {
+		15D8C75853C04316025B7BED /* stitch-a-lot-studio_iOS */ = {
 			isa = PBXGroup;
 			children = (
 				C10797CF075416B83D04B106 /* Info.plist */,
-				060008F54A2A6B4409FE2399 /* needlepoint-designer_iOS.entitlements */,
+				060008F54A2A6B4409FE2399 /* stitch-a-lot-studio_iOS.entitlements */,
 			);
-			path = "needlepoint-designer_iOS";
+			path = "stitch-a-lot-studio_iOS";
 			sourceTree = "<group>";
 		};
 		72401CDFBDC652D4B7B12AEE /* Sources */ = {
@@ -171,9 +171,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		B701C91632360205CE3D8850 /* needlepoint-designer_iOS */ = {
+		B701C91632360205CE3D8850 /* stitch-a-lot-studio_iOS */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 91E77D3B39BE14EA7EFCE1DF /* Build configuration list for PBXNativeTarget "needlepoint-designer_iOS" */;
+			buildConfigurationList = 91E77D3B39BE14EA7EFCE1DF /* Build configuration list for PBXNativeTarget "stitch-a-lot-studio_iOS" */;
 			buildPhases = (
 				414B48D152058FFC83B93D8D /* Build Rust Code */,
 				86BB9DCA9F8E4F173998B7A9 /* Sources */,
@@ -184,10 +184,10 @@
 			);
 			dependencies = (
 			);
-			name = "needlepoint-designer_iOS";
+			name = "stitch-a-lot-studio_iOS";
 			packageProductDependencies = (
 			);
-			productName = "needlepoint-designer_iOS";
+			productName = "stitch-a-lot-studio_iOS";
 			productReference = DCB077BF5C21B78D03C6EF26 /* NeedlePoint Designer.app */;
 			productType = "com.apple.product-type.application";
 		};
@@ -213,7 +213,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				B701C91632360205CE3D8850 /* needlepoint-designer_iOS */,
+				B701C91632360205CE3D8850 /* stitch-a-lot-studio_iOS */,
 			);
 		};
 /* End PBXProject section */
@@ -396,7 +396,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = "needlepoint-designer_iOS/needlepoint-designer_iOS.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "stitch-a-lot-studio_iOS/stitch-a-lot-studio_iOS.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_BITCODE = NO;
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
@@ -404,7 +404,7 @@
 					"$(inherited)",
 					"\".\"",
 				);
-				INFOPLIST_FILE = "needlepoint-designer_iOS/Info.plist";
+				INFOPLIST_FILE = "stitch-a-lot-studio_iOS/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -424,7 +424,7 @@
 					"$(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.needlepoint.designer;
-				PRODUCT_NAME = "Stitch A Lot Studio";
+				PRODUCT_NAME = "StitchALotStudio";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;
@@ -436,7 +436,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = "needlepoint-designer_iOS/needlepoint-designer_iOS.entitlements";
+				CODE_SIGN_ENTITLEMENTS = "stitch-a-lot-studio_iOS/stitch-a-lot-studio_iOS.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_BITCODE = NO;
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
@@ -444,7 +444,7 @@
 					"$(inherited)",
 					"\".\"",
 				);
-				INFOPLIST_FILE = "needlepoint-designer_iOS/Info.plist";
+				INFOPLIST_FILE = "stitch-a-lot-studio_iOS/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -464,7 +464,7 @@
 					"$(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.needlepoint.designer;
-				PRODUCT_NAME = "Stitch A Lot Studio";
+				PRODUCT_NAME = "StitchALotStudio";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = arm64;
@@ -484,7 +484,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = debug;
 		};
-		91E77D3B39BE14EA7EFCE1DF /* Build configuration list for PBXNativeTarget "needlepoint-designer_iOS" */ = {
+		91E77D3B39BE14EA7EFCE1DF /* Build configuration list for PBXNativeTarget "stitch-a-lot-studio_iOS" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				CE2DBB6F65B655A389834DD0 /* debug */,

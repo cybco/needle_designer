@@ -9,6 +9,10 @@ use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
+#[cfg(target_os = "macos")]
+use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder, PredefinedMenuItem};
+#[cfg(target_os = "macos")]
+use tauri::Emitter;
 
 mod threads;
 mod licensing;
@@ -1652,9 +1656,120 @@ pub fn run() {
 
     builder
         .setup(|app| {
-            // Ensure decorations are disabled (custom titlebar) - desktop only
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            // Platform-specific window setup
+            #[cfg(target_os = "macos")]
             {
+                // On macOS, enable native decorations and menu bar
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_decorations(true);
+                }
+
+                // Create native macOS menu bar
+                // File menu items
+                let home_item = MenuItemBuilder::with_id("home", "Home")
+                    .accelerator("CmdOrCtrl+W")
+                    .build(app)?;
+                let new_item = MenuItemBuilder::with_id("new", "New")
+                    .accelerator("CmdOrCtrl+N")
+                    .build(app)?;
+                let open_item = MenuItemBuilder::with_id("open", "Open...")
+                    .accelerator("CmdOrCtrl+O")
+                    .build(app)?;
+                let save_item = MenuItemBuilder::with_id("save", "Save")
+                    .accelerator("CmdOrCtrl+S")
+                    .build(app)?;
+                let save_as_item = MenuItemBuilder::with_id("save_as", "Save As...")
+                    .accelerator("CmdOrCtrl+Shift+S")
+                    .build(app)?;
+                let export_pdf_item = MenuItemBuilder::with_id("export_pdf", "Export PDF...")
+                    .accelerator("CmdOrCtrl+E")
+                    .build(app)?;
+
+                let file_menu = SubmenuBuilder::new(app, "File")
+                    .item(&home_item)
+                    .separator()
+                    .item(&new_item)
+                    .item(&open_item)
+                    .separator()
+                    .item(&save_item)
+                    .item(&save_as_item)
+                    .separator()
+                    .item(&export_pdf_item)
+                    .build()?;
+
+                // Tools menu items
+                let import_image_item = MenuItemBuilder::with_id("import_image", "Import Image...")
+                    .accelerator("CmdOrCtrl+I")
+                    .build(app)?;
+                let add_text_item = MenuItemBuilder::with_id("add_text", "Add Text Layer...")
+                    .accelerator("CmdOrCtrl+T")
+                    .build(app)?;
+                let fullscreen_item = MenuItemBuilder::with_id("fullscreen", "Toggle Fullscreen")
+                    .accelerator("CmdOrCtrl+Shift+F")
+                    .build(app)?;
+
+                let tools_menu = SubmenuBuilder::new(app, "Tools")
+                    .item(&import_image_item)
+                    .item(&add_text_item)
+                    .separator()
+                    .item(&fullscreen_item)
+                    .build()?;
+
+                // Preferences menu items
+                let preferences_item = MenuItemBuilder::with_id("preferences", "Preferences...")
+                    .accelerator("CmdOrCtrl+,")
+                    .build(app)?;
+
+                let preferences_menu = SubmenuBuilder::new(app, "Preferences")
+                    .item(&preferences_item)
+                    .build()?;
+
+                // Build menu with app submenu (for macOS standard items)
+                let menu = MenuBuilder::new(app)
+                    .item(&SubmenuBuilder::new(app, "StitchALot Studio")
+                        .item(&PredefinedMenuItem::about(app, Some("About StitchALot Studio"), None)?)
+                        .separator()
+                        .item(&PredefinedMenuItem::services(app, None)?)
+                        .separator()
+                        .item(&PredefinedMenuItem::hide(app, None)?)
+                        .item(&PredefinedMenuItem::hide_others(app, None)?)
+                        .item(&PredefinedMenuItem::show_all(app, None)?)
+                        .separator()
+                        .item(&PredefinedMenuItem::quit(app, None)?)
+                        .build()?)
+                    .item(&file_menu)
+                    .item(&SubmenuBuilder::new(app, "Edit")
+                        .item(&PredefinedMenuItem::undo(app, None)?)
+                        .item(&PredefinedMenuItem::redo(app, None)?)
+                        .separator()
+                        .item(&PredefinedMenuItem::cut(app, None)?)
+                        .item(&PredefinedMenuItem::copy(app, None)?)
+                        .item(&PredefinedMenuItem::paste(app, None)?)
+                        .item(&PredefinedMenuItem::select_all(app, None)?)
+                        .build()?)
+                    .item(&tools_menu)
+                    .item(&preferences_menu)
+                    .item(&SubmenuBuilder::new(app, "Window")
+                        .item(&PredefinedMenuItem::minimize(app, None)?)
+                        .item(&PredefinedMenuItem::maximize(app, None)?)
+                        .separator()
+                        .item(&PredefinedMenuItem::close_window(app, None)?)
+                        .build()?)
+                    .build()?;
+
+                app.set_menu(menu)?;
+
+                // Handle menu events
+                app.on_menu_event(move |app, event| {
+                    let id = event.id().as_ref();
+                    // Emit event to frontend
+                    let _ = app.emit("menu-action", id);
+                });
+            }
+
+            #[cfg(all(not(target_os = "macos"), not(any(target_os = "ios", target_os = "android"))))]
+            {
+                // On Windows/Linux, use custom titlebar (no decorations)
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.set_decorations(false);
                 }
