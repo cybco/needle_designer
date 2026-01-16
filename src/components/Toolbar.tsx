@@ -192,6 +192,8 @@ export interface ToolVisibility {
   selectionFlipVertical: boolean;
   selectionRotateLeft: boolean;
   selectionRotateRight: boolean;
+  selectionCenterHorizontal: boolean;
+  selectionCenterVertical: boolean;
 }
 
 interface ToolButtonProps {
@@ -478,6 +480,54 @@ export function CenterViewIcon({ className }: { className?: string }) {
       <path d="M17 12h4" />
       {/* Center dot */}
       <circle cx="12" cy="12" r="2" fill="currentColor" />
+    </svg>
+  );
+}
+
+// Center Horizontal icon (horizontal line with arrows pointing inward)
+export function CenterHorizontalIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {/* Center vertical line */}
+      <path d="M12 4v16" />
+      {/* Left arrow pointing right */}
+      <path d="M4 12h5" />
+      <path d="M7 9l3 3-3 3" />
+      {/* Right arrow pointing left */}
+      <path d="M15 12h5" />
+      <path d="M17 9l-3 3 3 3" />
+    </svg>
+  );
+}
+
+// Center Vertical icon (vertical line with arrows pointing inward)
+export function CenterVerticalIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className || "w-5 h-5"}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {/* Center horizontal line */}
+      <path d="M4 12h16" />
+      {/* Top arrow pointing down */}
+      <path d="M12 4v5" />
+      <path d="M9 7l3 3 3-3" />
+      {/* Bottom arrow pointing up */}
+      <path d="M12 15v5" />
+      <path d="M9 17l3-3 3 3" />
     </svg>
   );
 }
@@ -845,6 +895,8 @@ const DEFAULT_VISIBILITY: ToolVisibility = {
   selectionFlipVertical: true,
   selectionRotateLeft: true,
   selectionRotateRight: true,
+  selectionCenterHorizontal: true,
+  selectionCenterVertical: true,
 };
 
 // Helper to get stitch type display name
@@ -940,6 +992,10 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPrev
     flipLayerVertical,
     rotateLayerLeft,
     rotateLayerRight,
+    centerSelectionHorizontal,
+    centerSelectionVertical,
+    centerLayerHorizontal,
+    centerLayerVertical,
     duplicateLayerToNewLayer,
     duplicateLayer,
     activeStitchType,
@@ -1188,6 +1244,16 @@ export function Toolbar({ onTextToolClick, onFitToCanvas, onMoveToCenter, onPrev
   if (toolVisibility.selectionRotateRight) {
     toolButtons.push(
       <ActionButton key="selrotr" icon={<RotateRightIcon />} label="Rotate Right (90° CW)" onClick={() => hasLayerSelection ? rotateLayerRight() : rotateSelectionRight()} disabled={!hasTransformableSelection} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.selectionCenterHorizontal) {
+    toolButtons.push(
+      <ActionButton key="selcenterh" icon={<CenterHorizontalIcon />} label="Center Horizontal" onClick={() => hasLayerSelection ? centerLayerHorizontal() : centerSelectionHorizontal()} disabled={!hasTransformableSelection} showLabel={showLabels} />
+    );
+  }
+  if (toolVisibility.selectionCenterVertical) {
+    toolButtons.push(
+      <ActionButton key="selcenterv" icon={<CenterVerticalIcon />} label="Center Vertical" onClick={() => hasLayerSelection ? centerLayerVertical() : centerSelectionVertical()} disabled={!hasTransformableSelection} showLabel={showLabels} />
     );
   }
 

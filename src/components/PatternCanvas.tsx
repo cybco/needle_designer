@@ -1213,31 +1213,41 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       // Get bounds of selected item (in pixels)
       let itemLeft: number, itemTop: number, itemWidth: number, itemHeight: number;
 
+      // Work in cell coordinates for precise centering detection
+      let itemX = 0, itemY = 0, itemW = 0, itemH = 0;
       if (selectedOverlay) {
-        itemLeft = selectedOverlay.x * cellSize;
-        itemTop = selectedOverlay.y * cellSize;
-        itemWidth = selectedOverlay.width * cellSize;
-        itemHeight = selectedOverlay.height * cellSize;
+        itemX = selectedOverlay.x;
+        itemY = selectedOverlay.y;
+        itemW = selectedOverlay.width;
+        itemH = selectedOverlay.height;
       } else if (selection) {
-        itemLeft = selection.bounds.x * cellSize;
-        itemTop = selection.bounds.y * cellSize;
-        itemWidth = selection.bounds.width * cellSize;
-        itemHeight = selection.bounds.height * cellSize;
-      } else {
-        itemLeft = 0; itemTop = 0; itemWidth = 0; itemHeight = 0;
+        itemX = selection.bounds.x;
+        itemY = selection.bounds.y;
+        itemW = selection.bounds.width;
+        itemH = selection.bounds.height;
       }
+
+      // Convert to pixels for drawing
+      itemLeft = itemX * cellSize;
+      itemTop = itemY * cellSize;
+      itemWidth = itemW * cellSize;
+      itemHeight = itemH * cellSize;
 
       const itemRight = itemLeft + itemWidth;
       const itemBottom = itemTop + itemHeight;
       const itemCenterX = itemLeft + itemWidth / 2;
       const itemCenterY = itemTop + itemHeight / 2;
-      const canvasCenterX = canvasWidthPx / 2;
-      const canvasCenterY = canvasHeightPx / 2;
 
-      // Check if centered (within 0.5 cells tolerance)
-      const centerTolerancePx = cellSize * 0.5;
-      const isCenteredH = Math.abs(itemCenterX - canvasCenterX) < centerTolerancePx;
-      const isCenteredV = Math.abs(itemCenterY - canvasCenterY) < centerTolerancePx;
+      // Check if centered using integer cell counts (no floating point issues)
+      // Left margin = itemX cells, Right margin = (width - itemX - itemW) cells
+      // For centered: |leftMargin - rightMargin| <= 1
+      const leftMarginCells = itemX;
+      const rightMarginCells = width - itemX - itemW;
+      const topMarginCells = itemY;
+      const bottomMarginCells = height - itemY - itemH;
+
+      const isCenteredH = Math.abs(leftMarginCells - rightMarginCells) <= 1;
+      const isCenteredV = Math.abs(topMarginCells - bottomMarginCells) <= 1;
 
       // Format distance based on ruler unit
       const formatDistance = (pixels: number): string => {

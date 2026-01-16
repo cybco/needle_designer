@@ -353,6 +353,10 @@ interface PatternState {
   flipLayerVertical: () => void;
   rotateLayerLeft: () => void;
   rotateLayerRight: () => void;
+  centerSelectionHorizontal: () => void;
+  centerSelectionVertical: () => void;
+  centerLayerHorizontal: () => void;
+  centerLayerVertical: () => void;
 
   // Multi-layer selection actions
   toggleLayerInSelection: (layerId: string) => void;
@@ -2239,6 +2243,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
           originalBounds: { ...selection.bounds },
           originalStitches: selection.selectedStitches.map(s => ({ ...s })),
           floatingStitches: selection.selectedStitches.map(s => ({ ...s })),
+          selectedStitches: undefined, // Clear selectedStitches since we're now floating
         },
         hasUnsavedChanges: true,
       });
@@ -2330,6 +2335,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
         dragStart: null,
         originalBounds: null,
         originalStitches: null,
+        selectedStitches: movedStitches, // Update selectedStitches to reflect new positions
       },
       hasUnsavedChanges: true,
     });
@@ -2533,6 +2539,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
         dragStart: null,
         originalBounds: null,
         originalStitches: null,
+        selectedStitches: finalStitches, // Update selectedStitches to reflect new positions
       } : null,
       hasUnsavedChanges: true,
     });
@@ -3224,10 +3231,6 @@ export const usePatternStore = create<PatternState>((set, get) => {
     const { bounds } = selection;
 
     // Rotate 90° counter-clockwise: (x, y) -> (y, width - 1 - x)
-    // New bounds will have swapped width/height
-    const newWidth = bounds.height;
-    const newHeight = bounds.width;
-
     const rotatedStitches = stitchesToRotate.map(s => {
       const relX = s.x - bounds.x;
       const relY = s.y - bounds.y;
@@ -3239,12 +3242,22 @@ export const usePatternStore = create<PatternState>((set, get) => {
       };
     });
 
+    // Recalculate bounds from the actual rotated stitch positions
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const s of rotatedStitches) {
+      minX = Math.min(minX, s.x);
+      minY = Math.min(minY, s.y);
+      maxX = Math.max(maxX, s.x);
+      maxY = Math.max(maxY, s.y);
+    }
+    const newBounds = { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+
     if (isFloating) {
       // Just update the floating stitches and bounds, no layer changes needed
       set({
         selection: {
           ...selection,
-          bounds: { x: bounds.x, y: bounds.y, width: newWidth, height: newHeight },
+          bounds: newBounds,
           floatingStitches: rotatedStitches,
         },
       });
@@ -3279,7 +3292,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
         pattern: { ...pattern, layers: updatedLayers },
         selection: {
           ...selection,
-          bounds: { x: bounds.x, y: bounds.y, width: newWidth, height: newHeight },
+          bounds: newBounds,
           selectedStitches: rotatedStitches,
         },
         hasUnsavedChanges: true,
@@ -3302,10 +3315,6 @@ export const usePatternStore = create<PatternState>((set, get) => {
     const { bounds } = selection;
 
     // Rotate 90° clockwise: (x, y) -> (height - 1 - y, x)
-    // New bounds will have swapped width/height
-    const newWidth = bounds.height;
-    const newHeight = bounds.width;
-
     const rotatedStitches = stitchesToRotate.map(s => {
       const relX = s.x - bounds.x;
       const relY = s.y - bounds.y;
@@ -3317,12 +3326,22 @@ export const usePatternStore = create<PatternState>((set, get) => {
       };
     });
 
+    // Recalculate bounds from the actual rotated stitch positions
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const s of rotatedStitches) {
+      minX = Math.min(minX, s.x);
+      minY = Math.min(minY, s.y);
+      maxX = Math.max(maxX, s.x);
+      maxY = Math.max(maxY, s.y);
+    }
+    const newBounds = { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+
     if (isFloating) {
       // Just update the floating stitches and bounds, no layer changes needed
       set({
         selection: {
           ...selection,
-          bounds: { x: bounds.x, y: bounds.y, width: newWidth, height: newHeight },
+          bounds: newBounds,
           floatingStitches: rotatedStitches,
         },
       });
@@ -3357,7 +3376,7 @@ export const usePatternStore = create<PatternState>((set, get) => {
         pattern: { ...pattern, layers: updatedLayers },
         selection: {
           ...selection,
-          bounds: { x: bounds.x, y: bounds.y, width: newWidth, height: newHeight },
+          bounds: newBounds,
           selectedStitches: rotatedStitches,
         },
         hasUnsavedChanges: true,
@@ -3523,6 +3542,236 @@ export const usePatternStore = create<PatternState>((set, get) => {
       selection: {
         ...selection,
         bounds: { x: bounds.x, y: bounds.y, width: newWidth, height: newHeight },
+      },
+      hasUnsavedChanges: true,
+    });
+  },
+
+  centerSelectionHorizontal: () => {
+    const { pattern, selection } = get();
+    if (!pattern || selection?.selectionType !== 'area') return;
+
+    const stitchesToCenter = selection.selectedStitches || selection.floatingStitches;
+    if (!stitchesToCenter?.length) return;
+
+    const isFloating = !!selection.floatingStitches;
+
+    // Calculate actual bounds from stitch positions (not selection.bounds which may be stale)
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const s of stitchesToCenter) {
+      minX = Math.min(minX, s.x);
+      minY = Math.min(minY, s.y);
+      maxX = Math.max(maxX, s.x);
+      maxY = Math.max(maxY, s.y);
+    }
+    const actualWidth = maxX - minX + 1;
+    const actualHeight = maxY - minY + 1;
+
+    // Calculate horizontal centering delta based on actual positions
+    // Use Math.round() to get the nearest integer position to true center
+    const targetX = Math.round((pattern.canvas.width - actualWidth) / 2);
+    const deltaX = targetX - minX;
+
+    if (deltaX === 0) return; // Already centered
+
+    pushToHistory();
+
+    const centeredStitches = stitchesToCenter.map(s => ({
+      ...s,
+      x: s.x + deltaX,
+    }));
+
+    const newBounds = { x: targetX, y: minY, width: actualWidth, height: actualHeight };
+
+    if (isFloating) {
+      set({
+        selection: {
+          ...selection,
+          bounds: newBounds,
+          floatingStitches: centeredStitches,
+        },
+      });
+    } else {
+      // Build a map of original positions to their new centered positions
+      const positionMap = new Map<string, { deltaX: number }>();
+      for (const stitch of stitchesToCenter) {
+        positionMap.set(`${stitch.x},${stitch.y}`, { deltaX });
+      }
+
+      const updatedLayers = pattern.layers.map(layer => {
+        const newStitches = layer.stitches.map(stitch => {
+          const key = `${stitch.x},${stitch.y}`;
+          if (positionMap.has(key)) {
+            return { ...stitch, x: stitch.x + deltaX };
+          }
+          return stitch;
+        });
+
+        return {
+          ...layer,
+          stitches: newStitches,
+        };
+      });
+
+      set({
+        pattern: { ...pattern, layers: updatedLayers },
+        selection: {
+          ...selection,
+          bounds: newBounds,
+          selectedStitches: centeredStitches,
+        },
+        hasUnsavedChanges: true,
+      });
+    }
+  },
+
+  centerSelectionVertical: () => {
+    const { pattern, selection } = get();
+    if (!pattern || selection?.selectionType !== 'area') return;
+
+    const stitchesToCenter = selection.selectedStitches || selection.floatingStitches;
+    if (!stitchesToCenter?.length) return;
+
+    const isFloating = !!selection.floatingStitches;
+
+    // Calculate actual bounds from stitch positions (not selection.bounds which may be stale)
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const s of stitchesToCenter) {
+      minX = Math.min(minX, s.x);
+      minY = Math.min(minY, s.y);
+      maxX = Math.max(maxX, s.x);
+      maxY = Math.max(maxY, s.y);
+    }
+    const actualWidth = maxX - minX + 1;
+    const actualHeight = maxY - minY + 1;
+
+    // Calculate vertical centering delta based on actual positions
+    // Use Math.round() to get the nearest integer position to true center
+    const targetY = Math.round((pattern.canvas.height - actualHeight) / 2);
+    const deltaY = targetY - minY;
+
+    if (deltaY === 0) return; // Already centered
+
+    pushToHistory();
+
+    const centeredStitches = stitchesToCenter.map(s => ({
+      ...s,
+      y: s.y + deltaY,
+    }));
+
+    const newBounds = { x: minX, y: targetY, width: actualWidth, height: actualHeight };
+
+    if (isFloating) {
+      set({
+        selection: {
+          ...selection,
+          bounds: newBounds,
+          floatingStitches: centeredStitches,
+        },
+      });
+    } else {
+      // Build a map of original positions to identify which stitches to move
+      const positionMap = new Map<string, { deltaY: number }>();
+      for (const stitch of stitchesToCenter) {
+        positionMap.set(`${stitch.x},${stitch.y}`, { deltaY });
+      }
+
+      const updatedLayers = pattern.layers.map(layer => {
+        const newStitches = layer.stitches.map(stitch => {
+          const key = `${stitch.x},${stitch.y}`;
+          if (positionMap.has(key)) {
+            return { ...stitch, y: stitch.y + deltaY };
+          }
+          return stitch;
+        });
+
+        return {
+          ...layer,
+          stitches: newStitches,
+        };
+      });
+
+      set({
+        pattern: { ...pattern, layers: updatedLayers },
+        selection: {
+          ...selection,
+          bounds: newBounds,
+          selectedStitches: centeredStitches,
+        },
+        hasUnsavedChanges: true,
+      });
+    }
+  },
+
+  centerLayerHorizontal: () => {
+    const { pattern, selection } = get();
+    if (!pattern || !selection || selection.selectionType !== 'layer') return;
+
+    const layer = pattern.layers.find(l => l.id === selection.layerId);
+    if (!layer || layer.stitches.length === 0) return;
+
+    const { bounds } = selection;
+
+    // Calculate horizontal centering delta
+    // Use Math.round() to get the nearest integer position to true center
+    const targetX = Math.round((pattern.canvas.width - bounds.width) / 2);
+    const deltaX = targetX - bounds.x;
+
+    if (deltaX === 0) return; // Already centered
+
+    pushToHistory();
+
+    const centeredStitches = layer.stitches.map(s => ({
+      ...s,
+      x: s.x + deltaX,
+    }));
+
+    const updatedLayers = pattern.layers.map(l =>
+      l.id === layer.id ? { ...l, stitches: centeredStitches } : l
+    );
+
+    set({
+      pattern: { ...pattern, layers: updatedLayers },
+      selection: {
+        ...selection,
+        bounds: { ...bounds, x: targetX },
+      },
+      hasUnsavedChanges: true,
+    });
+  },
+
+  centerLayerVertical: () => {
+    const { pattern, selection } = get();
+    if (!pattern || !selection || selection.selectionType !== 'layer') return;
+
+    const layer = pattern.layers.find(l => l.id === selection.layerId);
+    if (!layer || layer.stitches.length === 0) return;
+
+    const { bounds } = selection;
+
+    // Calculate vertical centering delta
+    // Use Math.round() to get the nearest integer position to true center
+    const targetY = Math.round((pattern.canvas.height - bounds.height) / 2);
+    const deltaY = targetY - bounds.y;
+
+    if (deltaY === 0) return; // Already centered
+
+    pushToHistory();
+
+    const centeredStitches = layer.stitches.map(s => ({
+      ...s,
+      y: s.y + deltaY,
+    }));
+
+    const updatedLayers = pattern.layers.map(l =>
+      l.id === layer.id ? { ...l, stitches: centeredStitches } : l
+    );
+
+    set({
+      pattern: { ...pattern, layers: updatedLayers },
+      selection: {
+        ...selection,
+        bounds: { ...bounds, y: targetY },
       },
       hasUnsavedChanges: true,
     });

@@ -222,6 +222,8 @@ const DEFAULT_TOOL_VISIBILITY: ToolVisibility = {
   selectionFlipVertical: true,
   selectionRotateLeft: true,
   selectionRotateRight: true,
+  selectionCenterHorizontal: true,
+  selectionCenterVertical: true,
 };
 
 const DEFAULT_PREFERENCES: Preferences = {
