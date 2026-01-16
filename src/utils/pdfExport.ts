@@ -705,17 +705,16 @@ function drawSymbolOnCanvas(
   }
 }
 
-// Render full chart as high-resolution image
+// Render full chart as optimized image
 function renderFullChartImage(
   pattern: Pattern,
   grid: (Stitch | null)[][],
   colorSymbols: Map<string, string>,
   includeGridNumbers: boolean
 ): string {
-  // Use a readable cell size in pixels (30px gives good detail for symbols)
-  const cellSize = 30;
-  console.log('renderFullChartImage called - generating high-res chart at', cellSize, 'px per cell');
-  const numberMargin = includeGridNumbers ? 25 : 0;
+  // Use smaller cell size for reduced file size (12px is readable when printed)
+  const cellSize = 12;
+  const numberMargin = includeGridNumbers ? 20 : 0;
 
   const canvasWidth = pattern.canvas.width * cellSize + numberMargin;
   const canvasHeight = pattern.canvas.height * cellSize + numberMargin;
@@ -757,14 +756,11 @@ function renderFullChartImage(
   }
 
   // Draw grid lines (5x5 pattern like canvas)
-  ctx.strokeStyle = '#CCCCCC';
-  ctx.lineWidth = 0.5;
-
   for (let x = 0; x <= pattern.canvas.width; x++) {
     const lineX = offsetX + x * cellSize;
     const isThick = x % 5 === 0;
     ctx.strokeStyle = isThick ? '#666666' : '#CCCCCC';
-    ctx.lineWidth = isThick ? 1.5 : 0.5;
+    ctx.lineWidth = isThick ? 1 : 0.5;
     ctx.beginPath();
     ctx.moveTo(lineX, offsetY);
     ctx.lineTo(lineX, offsetY + pattern.canvas.height * cellSize);
@@ -775,7 +771,7 @@ function renderFullChartImage(
     const lineY = offsetY + y * cellSize;
     const isThick = y % 5 === 0;
     ctx.strokeStyle = isThick ? '#666666' : '#CCCCCC';
-    ctx.lineWidth = isThick ? 1.5 : 0.5;
+    ctx.lineWidth = isThick ? 1 : 0.5;
     ctx.beginPath();
     ctx.moveTo(offsetX, lineY);
     ctx.lineTo(offsetX + pattern.canvas.width * cellSize, lineY);
@@ -784,13 +780,13 @@ function renderFullChartImage(
 
   // Draw outer border
   ctx.strokeStyle = '#333333';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 1;
   ctx.strokeRect(offsetX, offsetY, pattern.canvas.width * cellSize, pattern.canvas.height * cellSize);
 
   // Draw row/column numbers (every 5 to match grid)
   if (includeGridNumbers) {
     ctx.fillStyle = '#666666';
-    ctx.font = 'bold 10px Arial, sans-serif';
+    ctx.font = 'bold 8px Arial, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
@@ -807,15 +803,16 @@ function renderFullChartImage(
     for (let y = 0; y < pattern.canvas.height; y++) {
       if (y === 0 || (y + 1) % 5 === 0 || y === pattern.canvas.height - 1) {
         const labelY = offsetY + y * cellSize + cellSize / 2;
-        ctx.fillText(String(y + 1), numberMargin - 5, labelY);
+        ctx.fillText(String(y + 1), numberMargin - 3, labelY);
       }
     }
   }
 
-  return canvas.toDataURL('image/png');
+  // Use JPEG for smaller file size
+  return canvas.toDataURL('image/jpeg', 0.85);
 }
 
-// Render a grid section as high-resolution image (for detail pages)
+// Render a grid section as optimized image (for detail pages)
 function renderGridSectionImage(
   pattern: Pattern,
   grid: (Stitch | null)[][],
@@ -825,7 +822,7 @@ function renderGridSectionImage(
   endX: number,
   endY: number
 ): string {
-  const cellSize = 30; // Same as overview page
+  const cellSize = 24; // Larger cells for readable symbols
   const width = endX - startX;
   const height = endY - startY;
 
@@ -867,7 +864,7 @@ function renderGridSectionImage(
     const lineX = x * cellSize;
     const isThick = (startX + x) % 5 === 0;
     ctx.strokeStyle = isThick ? '#666666' : '#CCCCCC';
-    ctx.lineWidth = isThick ? 1.5 : 0.5;
+    ctx.lineWidth = isThick ? 1 : 0.5;
     ctx.beginPath();
     ctx.moveTo(lineX, 0);
     ctx.lineTo(lineX, height * cellSize);
@@ -878,7 +875,7 @@ function renderGridSectionImage(
     const lineY = y * cellSize;
     const isThick = (startY + y) % 5 === 0;
     ctx.strokeStyle = isThick ? '#666666' : '#CCCCCC';
-    ctx.lineWidth = isThick ? 1.5 : 0.5;
+    ctx.lineWidth = isThick ? 1 : 0.5;
     ctx.beginPath();
     ctx.moveTo(0, lineY);
     ctx.lineTo(width * cellSize, lineY);
@@ -887,10 +884,116 @@ function renderGridSectionImage(
 
   // Draw outer border
   ctx.strokeStyle = '#333333';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 1;
   ctx.strokeRect(0, 0, width * cellSize, height * cellSize);
 
-  return canvas.toDataURL('image/png');
+  // Use JPEG for smaller file size (white background means no transparency needed)
+  return canvas.toDataURL('image/jpeg', 0.85);
+}
+
+// Render section map page showing how detail pages fit together
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function renderSectionMapPage(
+  pdf: any,
+  pattern: Pattern,
+  pagesX: number,
+  pagesY: number,
+  _cellsPerPageX: number,
+  _cellsPerPageY: number
+): void {
+  // Determine orientation based on pattern aspect ratio
+  const isWide = pattern.canvas.width > pattern.canvas.height;
+  const orientation = isWide ? 'landscape' : 'portrait';
+
+  // Add page with appropriate orientation
+  pdf.addPage('a4', orientation);
+
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+
+  // Title at top
+  pdf.setFontSize(14);
+  pdf.setTextColor(0, 0, 0);
+  pdf.text('Section Map', pageWidth / 2, 15, { align: 'center' });
+
+  // Margins and available space
+  const margin = 20;
+  const titleSpace = 25;
+  const availableWidth = pageWidth - 2 * margin;
+  const availableHeight = pageHeight - margin - titleSpace;
+
+  // Calculate scale to fit pattern in available space
+  const scaleX = availableWidth / pattern.canvas.width;
+  const scaleY = availableHeight / pattern.canvas.height;
+  const scale = Math.min(scaleX, scaleY);
+
+  // Calculate actual dimensions
+  const mapWidth = pattern.canvas.width * scale;
+  const mapHeight = pattern.canvas.height * scale;
+
+  // Center the map
+  const mapX = margin + (availableWidth - mapWidth) / 2;
+  const mapY = titleSpace + (availableHeight - mapHeight) / 2;
+
+  // Render pattern preview image as background
+  const previewDataUrl = renderPatternPreviewSmooth(pattern);
+  pdf.addImage(previewDataUrl, 'PNG', mapX, mapY, mapWidth, mapHeight);
+
+  // Draw section grid lines with even column/row widths
+  const sectionWidth = mapWidth / pagesX;
+  const sectionHeight = mapHeight / pagesY;
+
+  pdf.setDrawColor(50, 50, 50);
+  pdf.setLineWidth(0.5);
+
+  // Vertical section lines
+  for (let x = 0; x <= pagesX; x++) {
+    const lineX = mapX + x * sectionWidth;
+    pdf.line(lineX, mapY, lineX, mapY + mapHeight);
+  }
+
+  // Horizontal section lines
+  for (let y = 0; y <= pagesY; y++) {
+    const lineY = mapY + y * sectionHeight;
+    pdf.line(mapX, lineY, mapX + mapWidth, lineY);
+  }
+
+  // Draw outer border (thicker)
+  pdf.setLineWidth(1);
+  pdf.rect(mapX, mapY, mapWidth, mapHeight, 'S');
+
+  // Draw numbered circles in each section (centered in even-sized sections)
+  // Match the detail page circle style
+  let pageNum = 1;
+  const radius = 5; // Same as detail pages
+
+  for (let py = 0; py < pagesY; py++) {
+    for (let px = 0; px < pagesX; px++) {
+      // Calculate center of this section (using even grid)
+      const sectionCenterX = mapX + (px + 0.5) * sectionWidth;
+      const sectionCenterY = mapY + (py + 0.5) * sectionHeight;
+
+      // Draw white circle with black border (same style as detail pages)
+      pdf.setFillColor(255, 255, 255);
+      pdf.setDrawColor(0, 0, 0);
+      pdf.setLineWidth(0.5);
+      pdf.circle(sectionCenterX, sectionCenterY, radius, 'FD');
+
+      // Draw page number (same style as detail pages - bold, centered)
+      pdf.setTextColor(0, 0, 0);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(10);
+      pdf.text(String(pageNum), sectionCenterX, sectionCenterY + 1.5, { align: 'center' });
+      pdf.setFont('helvetica', 'normal');
+
+      pageNum++;
+    }
+  }
+
+  // Add dimension labels
+  pdf.setFontSize(8);
+  pdf.setTextColor(100, 100, 100);
+  pdf.text(`${pattern.canvas.width} x ${pattern.canvas.height} stitches`, pageWidth / 2, pageHeight - 10, { align: 'center' });
 }
 
 // Render a full chart page with high-resolution image
@@ -982,9 +1085,17 @@ export async function exportPatternToPdf(
   const contentWidth = pageWidth - 2 * PAGE_MARGIN;
   const contentHeight = pageHeight - 2 * PAGE_MARGIN;
 
-  // Calculate how many cells can fit per page
-  const cellsPerPageX = Math.floor(contentWidth / CELL_SIZE_MM);
-  const cellsPerPageY = Math.floor((contentHeight - HEADER_HEIGHT) / CELL_SIZE_MM);
+  // Calculate how many cells can fit per page (with bottom margin for printing)
+  // Available height for grid: pageHeight - topMargin - bottomMargin - space for column numbers
+  const HEADER_SPACE = 8; // Space for column numbers above grid
+  const BOTTOM_MARGIN_SPACE = 20; // Bottom margin for printing
+  const availableGridHeight = pageHeight - PAGE_MARGIN - HEADER_SPACE - BOTTOM_MARGIN_SPACE;
+  const availableGridWidth = pageWidth - PAGE_MARGIN - PAGE_MARGIN - 8; // Left margin + right margin + row number space
+
+  // Fixed cells per page for larger, more readable grid
+  const cellsPerPageX = 40;
+  const cellsPerPageY = 65;
+
 
   // Calculate number of pages needed
   const pagesX = Math.ceil(pattern.canvas.width / cellsPerPageX);
@@ -1098,11 +1209,10 @@ export async function exportPatternToPdf(
       pdf.setTextColor(0, 0, 0);
       pdf.text(`${totalGridPages}`, rightCol + 28, lineY);
 
-      // Footer with generation date
+      // Footer
       pdf.setFontSize(8);
       pdf.setTextColor(150, 150, 150);
-      const date = new Date().toLocaleDateString();
-      pdf.text(`Generated on ${date} with StitchALot Studio`, pageWidth / 2, pageHeight - PAGE_MARGIN, {
+      pdf.text('Created with StitchALot Studio', pageWidth / 2, pageHeight - PAGE_MARGIN, {
         align: 'center',
       });
     } catch (error) {
@@ -1121,11 +1231,21 @@ export async function exportPatternToPdf(
     pageNum++;
   }
 
+  // Generate section map page (shows how detail pages fit together)
+  // Only add if there are multiple grid pages
+  if (totalGridPages > 1) {
+    renderSectionMapPage(pdf, pattern, pagesX, pagesY, cellsPerPageX, cellsPerPageY);
+    pageNum++;
+  }
+
+  // Track detail page number for the circle indicator
+  let detailPageNum = 1;
+
   // Generate grid pages
   for (let pageY = 0; pageY < pagesY; pageY++) {
     for (let pageX = 0; pageX < pagesX; pageX++) {
       if (pageNum > 0) {
-        pdf.addPage();
+        pdf.addPage('a4', 'portrait');
       }
       pageNum++;
 
@@ -1134,51 +1254,39 @@ export async function exportPatternToPdf(
       const endX = Math.min(startX + cellsPerPageX, pattern.canvas.width);
       const endY = Math.min(startY + cellsPerPageY, pattern.canvas.height);
 
-      // Draw header
-      pdf.setFontSize(FONT_SIZE_TITLE);
-      pdf.setTextColor(0, 0, 0);
-      const title = opts.title || pattern.name;
-      pdf.text(title, PAGE_MARGIN, PAGE_MARGIN + 5);
-
-      pdf.setFontSize(FONT_SIZE_INFO);
-      pdf.text(
-        `Page ${pageNum} of ${pagesX * pagesY} | Columns ${startX + 1}-${endX} | Rows ${startY + 1}-${endY}`,
-        PAGE_MARGIN,
-        PAGE_MARGIN + 12
-      );
-      pdf.text(
-        `${pattern.canvas.width} x ${pattern.canvas.height} stitches | ${pattern.canvas.meshCount} count`,
-        PAGE_MARGIN,
-        PAGE_MARGIN + 18
-      );
-
-      const gridStartY = PAGE_MARGIN + HEADER_HEIGHT;
+      const gridStartY = PAGE_MARGIN + (opts.includeGridNumbers ? HEADER_SPACE : 0);
       const gridStartX = PAGE_MARGIN + (opts.includeGridNumbers ? 8 : 0);
 
       // Render grid section as canvas image (same as overview page)
       const sectionImage = renderGridSectionImage(pattern, grid, colorSymbols, startX, startY, endX, endY);
 
-      // Calculate image size to fit available space
+      // Calculate image size - scale to fill available space
       const sectionWidth = endX - startX;
       const sectionHeight = endY - startY;
-      const availableWidth = contentWidth - (opts.includeGridNumbers ? 8 : 0);
-      const availableHeight = contentHeight - HEADER_HEIGHT;
 
-      // Scale to fit while maintaining aspect ratio
-      const imageAspect = sectionWidth / sectionHeight;
+      // Available space for grid (accounting for margins, row numbers, and header)
+      const availableWidth = pageWidth - gridStartX - PAGE_MARGIN;
+      const availableHeight = pageHeight - gridStartY - BOTTOM_MARGIN_SPACE;
+
+      // Scale to fill available space while maintaining aspect ratio
+      const cellAspect = sectionWidth / sectionHeight;
+      const availAspect = availableWidth / availableHeight;
+
       let imgWidth: number;
       let imgHeight: number;
 
-      if (imageAspect > availableWidth / availableHeight) {
+      if (cellAspect > availAspect) {
+        // Width constrained
         imgWidth = availableWidth;
-        imgHeight = availableWidth / imageAspect;
+        imgHeight = availableWidth / cellAspect;
       } else {
+        // Height constrained
         imgHeight = availableHeight;
-        imgWidth = availableHeight * imageAspect;
+        imgWidth = availableHeight * cellAspect;
       }
 
-      // Add the image
-      pdf.addImage(sectionImage, 'PNG', gridStartX, gridStartY, imgWidth, imgHeight);
+      // Add the image - scaled to fill available space
+      pdf.addImage(sectionImage, 'JPEG', gridStartX, gridStartY, imgWidth, imgHeight, undefined, 'FAST');
 
       // Draw column numbers on top of image
       if (opts.includeGridNumbers) {
@@ -1206,6 +1314,26 @@ export async function exportPatternToPdf(
           }
         }
       }
+
+      // Draw page number circle in top-right corner (outside grid)
+      const circleRadius = 5;
+      const circleCenterX = pageWidth - PAGE_MARGIN - circleRadius;
+      const circleCenterY = PAGE_MARGIN / 2 + circleRadius;
+
+      // White circle with black border
+      pdf.setFillColor(255, 255, 255);
+      pdf.setDrawColor(0, 0, 0);
+      pdf.setLineWidth(0.5);
+      pdf.circle(circleCenterX, circleCenterY, circleRadius, 'FD');
+
+      // Page number text (centered in circle, bold)
+      pdf.setTextColor(0, 0, 0);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(10);
+      pdf.text(String(detailPageNum), circleCenterX, circleCenterY + 1.5, { align: 'center' });
+      pdf.setFont('helvetica', 'normal');
+
+      detailPageNum++;
     }
   }
 
@@ -1283,9 +1411,17 @@ export async function exportPatternToPdf(
     }
   }
 
+  // Add footer to the last page
+  const totalPages = pdf.getNumberOfPages();
+  pdf.setPage(totalPages);
+  pdf.setFontSize(8);
+  pdf.setTextColor(150, 150, 150);
+  pdf.text('Created with StitchALot Studio', pageWidth / 2, pageHeight - PAGE_MARGIN, {
+    align: 'center',
+  });
+
   // Add watermark to all pages if in trial mode
   if (opts.shouldWatermark) {
-    const totalPages = pdf.getNumberOfPages();
     for (let i = 1; i <= totalPages; i++) {
       pdf.setPage(i);
       addTrialWatermark(pdf, pageWidth, pageHeight);

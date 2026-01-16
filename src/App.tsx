@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { TextCursor, BookCopy, Trash2 } from 'lucide-react';
 import { PatternCanvas } from './components/PatternCanvas';
 import { ColorPalette } from './components/ColorPalette';
 import { Toolbar, ToolVisibility, EraserIcon, FillIcon, PanIcon, CursorIcon, TextIcon, ColorSwapIcon, AreaSelectIcon, PreviewCanvasIcon, SelectionDuplicateIcon, SelectionNewLayerIcon, SelectionDuplicateToNewLayerIcon, FlipHorizontalIcon, FlipVerticalIcon, RotateLeftIcon, RotateRightIcon, FullscreenIcon } from './components/Toolbar';
 import { LayerPanel } from './components/LayerPanel';
+import { ThreadLibrarySection } from './components/ThreadLibrarySection';
 import { ProgressTrackingPanel } from './components/ProgressTrackingPanel';
 import { NewProjectDialog } from './components/NewProjectDialog';
 import { ImportImageDialog } from './components/ImportImageDialog';
@@ -107,6 +108,12 @@ interface NdpFile {
 const RECENT_FILES_KEY = 'needlepoint-recent-files';
 const MAX_RECENT_FILES = 50;
 const PREFERENCES_KEY = 'needlepoint-preferences';
+
+// Type for files returned from scan_directory command
+interface DirectoryFile {
+  path: string;
+  modified: number; // Unix timestamp in seconds
+}
 
 // Recent file preview component - uses pre-loaded thumbnail from cache
 function RecentFilePreview({ thumbnail, isLoading }: {
@@ -277,6 +284,9 @@ function App() {
       return [];
     }
   });
+
+  // Files from working directory (if set)
+  const [directoryFiles, setDirectoryFiles] = useState<DirectoryFile[]>([]);
 
   // Thumbnail cache for instant home page loading
   const [thumbnailCache, setThumbnailCache] = useState<Map<string, string | null>>(new Map());
@@ -453,6 +463,75 @@ function App() {
         setThumbnailsLoading(false);
       });
   }, [pattern, recentFiles]); // Re-run when navigating to home or files change
+
+  // Scan working directory for files
+  const scanWorkingDirectory = useCallback(async () => {
+    if (!preferences.workingDirectory) {
+      setDirectoryFiles([]);
+      return;
+    }
+
+    try {
+      const files = await invoke<DirectoryFile[]>('scan_directory', {
+        directory: preferences.workingDirectory,
+      });
+      setDirectoryFiles(files);
+
+      // Also load thumbnails for directory files
+      if (files.length > 0) {
+        const paths = files.map(f => f.path);
+        const uncachedPaths = paths.filter(p => !thumbnailCache.has(p));
+        if (uncachedPaths.length > 0) {
+          const results = await invoke<Record<string, string | null>>('get_thumbnails_batch', { paths });
+          setThumbnailCache(prev => {
+            const newCache = new Map(prev);
+            Object.entries(results).forEach(([path, thumb]) => {
+              newCache.set(path, thumb);
+            });
+            return newCache;
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to scan working directory:', err);
+      setDirectoryFiles([]);
+    }
+  }, [preferences.workingDirectory, thumbnailCache]);
+
+  // Re-scan when working directory changes
+  useEffect(() => {
+    scanWorkingDirectory();
+  }, [preferences.workingDirectory]); // Only re-scan when directory changes, not on every scanWorkingDirectory recreation
+
+  // Merge directory files with recent files, sorted by modified date (newest first)
+  const allHomeFiles = useMemo(() => {
+    // Create a unified list with path and modified time
+    const fileList: { path: string; modified: number }[] = [];
+
+    // Add directory files (they already have modified timestamps)
+    for (const df of directoryFiles) {
+      fileList.push({ path: df.path, modified: df.modified });
+    }
+
+    // Add recent files (use 0 for modified time since we don't have it - they'll sort to the end)
+    // But if a recent file is also in directory files, it's already added with proper timestamp
+    for (const recentPath of recentFiles) {
+      // Check if this file is already in the list (from directory files)
+      const normalizedRecent = recentPath.toLowerCase().replace(/\\/g, '/');
+      const alreadyExists = fileList.some(f =>
+        f.path.toLowerCase().replace(/\\/g, '/') === normalizedRecent
+      );
+      if (!alreadyExists) {
+        fileList.push({ path: recentPath, modified: 0 });
+      }
+    }
+
+    // Sort by modified date, newest first (files with 0 go to the end)
+    fileList.sort((a, b) => b.modified - a.modified);
+
+    // Return just the paths
+    return fileList.map(f => f.path);
+  }, [directoryFiles, recentFiles]);
 
   // Show window after React has mounted (prevents white flash on startup)
   // Only on desktop - mobile doesn't have this API
@@ -1003,11 +1082,14 @@ function App() {
           return next;
         });
       }
+
+      // Refresh working directory files
+      scanWorkingDirectory();
     } catch (error) {
       console.error('Failed to save:', error);
       alert(`Failed to save project: ${error}`);
     }
-  }, [pattern, currentFilePath, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles, setThumbnailCache, preferences.workingDirectory]);
+  }, [pattern, currentFilePath, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles, setThumbnailCache, preferences.workingDirectory, scanWorkingDirectory]);
 
   // Save As
   const handleSaveAs = useCallback(async () => {
@@ -1061,11 +1143,14 @@ function App() {
           return next;
         });
       }
+
+      // Refresh working directory files
+      scanWorkingDirectory();
     } catch (error) {
       console.error('Failed to save:', error);
       alert(`Failed to save project: ${error}`);
     }
-  }, [pattern, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles, regenerateFileId, currentSessionId, endSession, setThumbnailCache, preferences.workingDirectory]);
+  }, [pattern, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles, regenerateFileId, currentSessionId, endSession, setThumbnailCache, preferences.workingDirectory, scanWorkingDirectory]);
 
   // Handle Save As dialog confirm (iOS)
   const handleSaveAsConfirm = useCallback(async () => {
@@ -1105,11 +1190,14 @@ function App() {
           return next;
         });
       }
+
+      // Refresh working directory files
+      scanWorkingDirectory();
     } catch (error) {
       console.error('Failed to save:', error);
       alert(`Failed to save project: ${error}`);
     }
-  }, [pattern, saveAsInputValue, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles, regenerateFileId, currentSessionId, endSession, setThumbnailCache]);
+  }, [pattern, saveAsInputValue, patternToNdp, setCurrentFilePath, markSaved, addToRecentFiles, regenerateFileId, currentSessionId, endSession, setThumbnailCache, scanWorkingDirectory]);
 
   // Close project (go home)
   const handleClose = useCallback(async () => {
@@ -2217,10 +2305,11 @@ function App() {
                 isProgressMode ? (
                   <ProgressTrackingPanel />
                 ) : (
-                  <>
+                  <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0" style={{ WebkitOverflowScrolling: 'touch' }}>
                     <LayerPanel onEditTextLayer={handleEditTextLayer} />
+                    <ThreadLibrarySection showSymbols={preferences.showSymbols} defaultCollapsed={true} />
                     <ColorPalette showSymbols={preferences.showSymbols} />
-                  </>
+                  </div>
                 )
               )}
             </div>
@@ -2252,11 +2341,11 @@ function App() {
               </div>
             </div>
 
-            {/* Recent Files Grid */}
+            {/* Files Grid (merged directory + recent files) */}
             <div className="flex-1 overflow-auto p-6">
-              {recentFiles.length > 0 ? (
+              {allHomeFiles.length > 0 ? (
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 gap-4">
-                  {recentFiles.map((filePath) => (
+                  {allHomeFiles.map((filePath) => (
                     <div key={filePath} className="group flex flex-col items-center">
                       <button
                         onClick={() => openFilePath(filePath)}
@@ -2296,8 +2385,8 @@ function App() {
                                 baseName = originalName;
                                 nextNum = 2;
                               }
-                              // Find next available number (check both file system and recent files)
-                              const allKnownFiles = [...currentFiles, ...recentFiles];
+                              // Find next available number (check both file system and home files)
+                              const allKnownFiles = [...currentFiles, ...allHomeFiles];
                               let newName = `${baseName} ${nextNum}`;
                               // Check if file exists (normalize path separators for comparison)
                               const fileExists = (name: string) => {
@@ -2333,6 +2422,7 @@ function App() {
                               });
                               // Refresh file list
                               refreshExistingFiles();
+                              scanWorkingDirectory();
                             } catch (error) {
                               console.error('Failed to duplicate:', error);
                               alert(`Failed to duplicate file: ${error}`);
@@ -2372,7 +2462,7 @@ function App() {
                 </div>
               ) : (
                 <div className="flex-1 flex items-center justify-center text-gray-400">
-                  <p>No recent files. Create a new pattern to get started.</p>
+                  <p>{preferences.workingDirectory ? 'No files found in working directory.' : 'No recent files. Create a new pattern to get started.'}</p>
                 </div>
               )}
             </div>
@@ -2605,6 +2695,7 @@ function App() {
                       return updated;
                     });
                     refreshExistingFiles();
+                    scanWorkingDirectory();
                     setRenameDialog(null);
                   } catch (error) {
                     console.error('Failed to rename:', error);
@@ -2693,6 +2784,7 @@ function App() {
                       return updated;
                     });
                     refreshExistingFiles();
+                    scanWorkingDirectory();
                     setDeleteDialog(null);
                   } catch (error) {
                     console.error('Failed to delete:', error);

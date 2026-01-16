@@ -60,7 +60,10 @@ export function ExportPdfDialog({ isOpen, onClose, pattern, currentFilePath }: E
       filePath = result;
     }
 
+    // Show exporting state immediately and give UI time to update
     setIsExporting(true);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
     try {
       console.log('Starting PDF export...');
 
