@@ -135,7 +135,7 @@ export function PreviewCanvasDialog({ onClose }: PreviewCanvasDialogProps) {
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
       (navigator.userAgent.includes('Mac') && 'ontouchend' in document && navigator.maxTouchPoints > 1);
 
-    const fileName = pattern.metadata?.name || pattern.name || 'pattern';
+    const fileName = pattern.name || 'pattern';
     const safeName = fileName.replace(/[^a-zA-Z0-9-_]/g, '_');
     const defaultName = `${safeName}_preview.pdf`;
 

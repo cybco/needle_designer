@@ -2085,7 +2085,8 @@ function App() {
                       <span>Toolbar Visibility...</span>
                       <span className="text-gray-400">→</span>
                     </button>
-                    {/* Working Directory */}
+                    {/* Working Directory - not available on iOS */}
+                    {!isIOS && (
                     <div className="px-4 py-2 border-t border-gray-600">
                       <label className="block text-xs text-gray-400 mb-1">Working Directory</label>
                       <div className="flex gap-2">
@@ -2124,6 +2125,7 @@ function App() {
                         )}
                       </div>
                     </div>
+                    )}
                 </div>
               )}
             </div>
@@ -2851,19 +2853,24 @@ function App() {
                 onClick={async () => {
                   try {
                     await invoke('delete_file', { path: deleteDialog.filePath });
-                    // Remove from recent files
-                    setRecentFiles((prev) => {
-                      const updated = prev.filter((f) => f !== deleteDialog.filePath);
-                      localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(updated));
-                      return updated;
-                    });
-                    refreshExistingFiles();
-                    scanWorkingDirectory();
-                    setDeleteDialog(null);
                   } catch (error) {
-                    console.error('Failed to delete:', error);
-                    alert(`Failed to delete file: ${error}`);
+                    // If file doesn't exist, that's fine - just remove from UI
+                    const errorStr = String(error);
+                    if (!errorStr.includes('No such file') && !errorStr.includes('not found')) {
+                      console.error('Failed to delete:', error);
+                      alert(`Failed to delete file: ${error}`);
+                      return;
+                    }
                   }
+                  // Remove from recent files (whether delete succeeded or file was already gone)
+                  setRecentFiles((prev) => {
+                    const updated = prev.filter((f) => f !== deleteDialog.filePath);
+                    localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(updated));
+                    return updated;
+                  });
+                  refreshExistingFiles();
+                  scanWorkingDirectory();
+                  setDeleteDialog(null);
                 }}
                 className="px-4 py-2 text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors"
               >

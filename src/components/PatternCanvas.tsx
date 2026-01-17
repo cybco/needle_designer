@@ -544,11 +544,11 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
     return null;
   }, [selectedOverlay, zoom, panOffset]);
 
-  // Check if a point is inside any overlay (returns overlay id or null)
-  // Checks from top to bottom (reverse order) to get the topmost overlay
-  // Skips locked and hidden overlays
-  const getOverlayAtPoint = useCallback((canvasX: number, canvasY: number): string | null => {
+  // Check if a point is near the border of any overlay (for selection by clicking border)
+  // Returns overlay id only if click is within borderThreshold pixels of the edge
+  const getOverlayAtBorder = useCallback((canvasX: number, canvasY: number): string | null => {
     const cellSize = CELL_SIZE * zoom;
+    const borderThreshold = 20; // pixels from edge to count as "on border"
 
     // Check overlays from top to bottom (reverse order)
     for (let i = overlayImages.length - 1; i >= 0; i--) {
@@ -560,8 +560,17 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       const ow = overlay.width * cellSize;
       const oh = overlay.height * cellSize;
 
+      // Check if point is inside the overlay bounds
       if (canvasX >= ox && canvasX <= ox + ow && canvasY >= oy && canvasY <= oy + oh) {
-        return overlay.id;
+        // Check if point is near any edge
+        const nearLeft = canvasX - ox < borderThreshold;
+        const nearRight = (ox + ow) - canvasX < borderThreshold;
+        const nearTop = canvasY - oy < borderThreshold;
+        const nearBottom = (oy + oh) - canvasY < borderThreshold;
+
+        if (nearLeft || nearRight || nearTop || nearBottom) {
+          return overlay.id;
+        }
       }
     }
 
@@ -1148,7 +1157,8 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
 
       // Draw hint text for floating selection
       if (selection.floatingStitches) {
-        const hintText = 'Enter: Place | Esc: Cancel';
+        const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+        const hintText = isTouchDevice ? 'Tap outside to place' : 'Enter: Place | Esc: Cancel';
         ctx.font = '12px sans-serif';
         const textMetrics = ctx.measureText(hintText);
         const padding = 6;
@@ -2243,8 +2253,9 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
         return;
       }
 
-      // Check if clicking on any overlay (to select it)
-      const clickedOverlayId = getOverlayAtPoint(x, y);
+      // Check if clicking on any overlay's border (to select it)
+      // Only selects if clicking near the edge, not in the middle (allows clicking through to layers)
+      const clickedOverlayId = getOverlayAtBorder(x, y);
       if (clickedOverlayId) {
         selectOverlay(clickedOverlayId);
         return;
@@ -2806,8 +2817,8 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
         }
       }
 
-      // Check if hovering over any overlay (to show pointer for selection)
-      if (mousePos && getOverlayAtPoint(mousePos.x, mousePos.y)) {
+      // Check if hovering over any overlay's border (to show pointer for selection)
+      if (mousePos && getOverlayAtBorder(mousePos.x, mousePos.y)) {
         return moveCursor;
       }
 
@@ -2821,7 +2832,7 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
       return 'crosshair';
     }
     return 'crosshair';
-  }, [activeTool, mousePos, selection, selectedOverlay, getResizeHandleAt, isPointInSelectionBounds, isOnRotationHandle, getOverlayResizeHandle, isPointInSelectedOverlay, getOverlayAtPoint, isProgressMode]);
+  }, [activeTool, mousePos, selection, selectedOverlay, getResizeHandleAt, isPointInSelectionBounds, isOnRotationHandle, getOverlayResizeHandle, isPointInSelectedOverlay, getOverlayAtBorder, isProgressMode]);
 
   // Handle wheel for zoom - zoom towards center of viewable area
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
@@ -3011,8 +3022,9 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
           return;
         }
 
-        // Check if touching any overlay (to select it)
-        const clickedOverlayId = getOverlayAtPoint(x, y);
+        // Check if touching any overlay's border (to select it)
+        // Only selects if touching near the edge, not in the middle (allows touching through to layers)
+        const clickedOverlayId = getOverlayAtBorder(x, y);
         if (clickedOverlayId) {
           selectOverlay(clickedOverlayId);
           return;
