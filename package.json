@@ -1,6 +1,6 @@
 {
   "name": "needlepoint-designer",
-  "version": "1.2.10",
+  "version": "1.2.11",
   "description": "Cross-platform needlepoint pattern design application",
   "type": "module",
   "scripts": {

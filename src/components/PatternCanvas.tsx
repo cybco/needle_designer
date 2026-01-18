@@ -3147,6 +3147,23 @@ export function PatternCanvas({ showSymbols = true, showCenterMarker = true }: P
         return;
       }
 
+      // Color swap tool
+      if (activeTool === 'colorswap' && selectedColorId) {
+        const cell = canvasToCell(x, y);
+        if (cell) {
+          const activeLayer = pattern.layers.find(l => l.id === activeLayerId);
+          if (activeLayer) {
+            const clickedStitch = activeLayer.stitches.find(
+              s => s.x === cell.x && s.y === cell.y
+            );
+            if (clickedStitch && clickedStitch.colorId !== selectedColorId) {
+              swapColorOnLayer(clickedStitch.colorId, selectedColorId);
+            }
+          }
+        }
+        return;
+      }
+
       // Drawing tools - handle pencil, eraser, fill, and shape tools
       if (selectedColorId || activeTool === 'eraser') {
         const cell = canvasToCell(x, y);
