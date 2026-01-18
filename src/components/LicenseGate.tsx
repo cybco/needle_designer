@@ -1,6 +1,7 @@
 import { useEffect, useState, ReactNode } from 'react';
 import { useLicenseStore } from '../stores/licenseStore';
 import { getLicenseStatusMessage } from '../types/license';
+import { openUrl } from '../utils/openUrl';
 
 interface LicenseGateProps {
   children: ReactNode;
@@ -125,7 +126,7 @@ export function LicenseGate({ children }: LicenseGateProps) {
           <button
             onClick={() => {
               // Open purchase page in browser
-              window.open('https://stitchalot.studio/purchase', '_blank');
+              openUrl('https://stitchalot.studio/software');
             }}
             className="w-full py-3 px-4 border border-gray-300 hover:border-gray-400 text-gray-700 font-medium rounded-lg transition-colors"
           >

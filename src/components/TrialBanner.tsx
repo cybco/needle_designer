@@ -1,4 +1,5 @@
 import { useLicenseStore } from '../stores/licenseStore';
+import { openUrl } from '../utils/openUrl';
 
 export function TrialBanner() {
   const { licenseInfo } = useLicenseStore();
@@ -32,7 +33,7 @@ export function TrialBanner() {
       <span className="opacity-75">|</span>
       <span className="opacity-90">PDF exports include watermark</span>
       <button
-        onClick={() => window.open('https://stitchalot.studio/purchase', '_blank')}
+        onClick={() => openUrl('https://stitchalot.studio/software')}
         className="ml-2 px-3 py-1 bg-white/20 hover:bg-white/30 rounded text-xs font-medium transition-colors"
       >
         Purchase Now

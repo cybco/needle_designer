@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { X, Check, AlertCircle, Key, Shield, Calendar, Monitor } from 'lucide-react';
 import { useLicenseStore } from '../stores/licenseStore';
 import { getLicenseStatusMessage, getLicenseStatusColor } from '../types/license';
+import { openUrl } from '../utils/openUrl';
 
 interface LicenseDialogProps {
   isOpen: boolean;
@@ -230,7 +231,7 @@ export function LicenseDialog({ isOpen, onClose }: LicenseDialogProps) {
             <div className="text-center">
               <p className="text-sm text-gray-500 mb-2">Don't have a license?</p>
               <button
-                onClick={() => window.open('https://stitchalot.studio/purchase', '_blank')}
+                onClick={() => openUrl('https://stitchalot.studio/software')}
                 className="text-blue-600 hover:text-blue-800 text-sm font-medium"
               >
                 Purchase a license - $59.99
